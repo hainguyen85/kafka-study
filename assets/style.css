@@ -1,0 +1,115 @@
+/* Stylesheet dùng chung cho mọi lesson và reference. Phong cách Tufte: chữ serif, lề rộng, ít trang trí. */
+:root {
+  --bg: #fffdf8;
+  --fg: #1c1b19;
+  --muted: #6b665c;
+  --rule: #ddd6c6;
+  --accent: #1d5fa8;
+  --ok: #1b7a3d;
+  --ok-bg: #e6f4ea;
+  --bad: #b3261e;
+  --bad-bg: #fbe9e7;
+  --code-bg: #f3efe4;
+  --card: #fbf8ef;
+  --ctrl: #dfeaf7;
+  --node: #efe7d2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17161a;
+    --fg: #ebe8e1;
+    --muted: #a09b90;
+    --rule: #3a3841;
+    --accent: #7fb2ee;
+    --ok: #6fd18c;
+    --ok-bg: #1d3325;
+    --bad: #ff8f86;
+    --bad-bg: #3a1f1d;
+    --code-bg: #25232b;
+    --card: #1f1d24;
+    --ctrl: #1f2f45;
+    --node: #33301f;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 18px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Noto Serif", serif;
+  line-height: 1.6;
+}
+main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1rem 5rem; }
+nav.crumbs { font-size: .8rem; color: var(--muted); margin-bottom: 2rem; font-family: system-ui, sans-serif; }
+nav.crumbs a { color: var(--muted); }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .4rem; font-weight: 600; }
+h2 { font-size: 1.3rem; margin: 2.6rem 0 .6rem; font-weight: 600; border-top: 1px solid var(--rule); padding-top: 1.2rem; }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 .3rem; }
+p.lede { font-size: 1.15rem; color: var(--muted); margin: 0 0 1.5rem; font-style: italic; }
+a { color: var(--accent); }
+code, pre { font-family: "Cascadia Code", Consolas, "SF Mono", Menlo, monospace; font-size: .85em; }
+code { background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: .8rem 1rem; border-radius: 4px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+blockquote { margin: 1rem 0; padding: 0 0 0 1rem; border-left: 3px solid var(--rule); color: var(--muted); }
+blockquote cite { display: block; font-size: .8rem; font-style: normal; margin-top: .2rem; }
+.mission {
+  font-family: system-ui, sans-serif; font-size: .85rem; background: var(--card);
+  border: 1px solid var(--rule); border-left: 4px solid var(--accent);
+  padding: .7rem 1rem; border-radius: 4px; margin: 1.2rem 0 2rem;
+}
+.mission b { display: block; text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; color: var(--muted); }
+.win { background: var(--ok-bg); border-radius: 4px; padding: .7rem 1rem; font-family: system-ui, sans-serif; font-size: .9rem; }
+.ask { background: var(--card); border: 1px dashed var(--rule); border-radius: 4px; padding: .7rem 1rem; font-size: .9rem; margin-top: 2rem; }
+.source { background: var(--card); border: 1px solid var(--rule); padding: .7rem 1rem; border-radius: 4px; font-size: .9rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 1rem 0; }
+th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: system-ui, sans-serif; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+figure { margin: 1.5rem 0; }
+figcaption { font-size: .8rem; color: var(--muted); font-family: system-ui, sans-serif; margin-top: .3rem; }
+ol.steps li, ul.tight li { margin: .25rem 0; }
+
+/* Quiz widget (xem quiz.js) */
+.quiz-q { border: 1px solid var(--rule); border-radius: 6px; padding: 1rem 1.1rem; margin: 1.2rem 0; background: var(--card); }
+.quiz-q .prompt { font-weight: 600; margin: 0 0 .7rem; }
+.quiz-q button.opt {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: .92rem; color: inherit;
+  background: var(--bg); border: 1px solid var(--rule); border-radius: 4px; padding: .5rem .7rem; margin: .35rem 0; cursor: pointer;
+}
+.quiz-q button.opt:hover:not(:disabled) { border-color: var(--accent); }
+.quiz-q button.opt:disabled { cursor: default; }
+.quiz-q button.opt.correct { background: var(--ok-bg); border-color: var(--ok); }
+.quiz-q button.opt.wrong { background: var(--bad-bg); border-color: var(--bad); }
+.quiz-q .why { font-size: .85rem; margin-top: .6rem; font-family: system-ui, sans-serif; }
+.quiz-q .why.ok { color: var(--ok); }
+.quiz-q .why.no { color: var(--bad); }
+.quiz-score { font-family: system-ui, sans-serif; font-size: .95rem; margin: 1rem 0; }
+.quiz-score button { font: inherit; margin-left: .6rem; padding: .25rem .7rem; cursor: pointer; }
+
+/* Diagram helpers: SVG dùng các biến màu ở trên */
+svg.diagram { width: 100%; height: auto; font-family: system-ui, sans-serif; }
+svg.diagram text { fill: var(--fg); font-size: 13px; }
+svg.diagram .muted { fill: var(--muted); font-size: 11.5px; }
+svg.diagram .box { stroke: var(--rule); stroke-width: 1.2; }
+svg.diagram .ctrl { fill: var(--ctrl); }
+svg.diagram .node { fill: var(--node); }
+svg.diagram .part { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+svg.diagram .arrow { stroke: var(--accent); stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+svg.diagram .tag { fill: var(--accent); font-weight: 700; font-size: 12px; }
+
+@media print {
+  html { font-size: 11pt; }
+  body { background: #fff; color: #000; }
+  main { max-width: none; padding: 0; }
+  .quiz-q button.opt { border-color: #999; }
+  a { color: #000; }
+}
+
+/* Checklist cho bài thực hành (xem checklist.js) */
+.step { border-left: 3px solid var(--rule); padding: .1rem 0 .1rem 1rem; margin: 1.4rem 0; }
+.step.done { border-left-color: var(--ok); }
+.step h3 { margin-top: 0; }
+.step label.tick { display: inline-block; font-family: system-ui, sans-serif; font-size: .85rem; margin-top: .3rem; cursor: pointer; }
+.expect { font-family: system-ui, sans-serif; font-size: .85rem; background: var(--ok-bg); border-radius: 4px; padding: .5rem .8rem; margin: .5rem 0; }
+.warn { font-family: system-ui, sans-serif; font-size: .85rem; background: var(--bad-bg); border-radius: 4px; padding: .5rem .8rem; margin: .5rem 0; }
