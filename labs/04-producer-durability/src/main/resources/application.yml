@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: lab-producer-durability
+  main:
+    web-application-type: none
+  kafka:
+    # Cụm 3 broker ở labs/03-cluster. Danh sách nhiều broker: client chỉ cần 1 broker sống để lấy metadata.
+    bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
+    admin:
+      fail-fast: true        # cụm chưa lên thì dừng ngay, thay vì chạy tiếp mà không có topic
+logging:
+  level:
+    org.apache.kafka: WARN   # log client rất nhiều; chỉ giữ cảnh báo

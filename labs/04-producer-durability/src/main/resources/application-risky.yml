@@ -1,0 +1,10 @@
+# Cấu hình "dễ mất": leader ghi xong là báo thành công, không chờ bản sao.
+# Cố ý đặt tường minh vì mặc định của client 4.x đã là acks=all + idempotence=true (research/0001, 0002).
+lab:
+  topic: lab-orders-risky     # topic có min.insync.replicas=1
+spring:
+  kafka:
+    producer:
+      acks: "1"
+      properties:
+        "[enable.idempotence]": false

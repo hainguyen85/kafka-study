@@ -1,0 +1,63 @@
+# Cụm Kafka 3 node KRaft (mỗi node vừa là broker vừa là controller, "combined mode") để học.
+# Dựa trên ví dụ chính thức:
+#   https://github.com/apache/kafka/tree/trunk/docker/examples/docker-compose-files/cluster/combined/plaintext
+# Khác ví dụ gốc:
+#   - image ghim cố định apache/kafka:4.4.0 (không dùng biến ${IMAGE})
+#   - các topic nội bộ dùng RF=3 / min ISR=2 (ví dụ gốc đặt 1 để chạy nhẹ)
+#   - tắt tự tạo topic (KAFKA_AUTO_CREATE_TOPICS_ENABLE=false): bạn là người tạo topic
+# Combined mode phù hợp lab nhỏ; docs KRaft: "Combined mode is not recommended in critical deployment environments."
+#   https://kafka.apache.org/44/operations/kraft/
+# Cổng từ máy host: kafka-1 -> localhost:29092, kafka-2 -> localhost:39092, kafka-3 -> localhost:49092
+# CHƯA CHẠY THỬ (máy chưa có Docker lúc viết). Xem README.md để kiểm tra.
+x-kafka-common: &kafka-common
+  image: apache/kafka:4.4.0
+  environment: &kafka-env
+    KAFKA_PROCESS_ROLES: 'broker,controller'
+    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+    KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093'
+    KAFKA_LISTENERS: 'PLAINTEXT://:19092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092'
+    KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+    KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+    CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+    KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 2
+    KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+    KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+
+services:
+  kafka-1:
+    <<: *kafka-common
+    hostname: kafka-1
+    container_name: kafka-1
+    ports:
+      - 29092:9092
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:19092,PLAINTEXT_HOST://localhost:29092
+
+  kafka-2:
+    <<: *kafka-common
+    hostname: kafka-2
+    container_name: kafka-2
+    ports:
+      - 39092:9092
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:19092,PLAINTEXT_HOST://localhost:39092
+
+  kafka-3:
+    <<: *kafka-common
+    hostname: kafka-3
+    container_name: kafka-3
+    ports:
+      - 49092:9092
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:19092,PLAINTEXT_HOST://localhost:49092

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bảng tra: 8 câu hỏi cho ngày đầu</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · <a href="0001-core-concepts.html">Khái niệm</a></nav>
+<h1>8 câu hỏi cho ngày đầu ở nơi mới</h1>
+<p class="lede">Mỗi câu có một lý do kỹ thuật: câu trả lời đổi cách bạn cấu hình. Cập nhật 2026-11-10. Nguồn: <a href="../research/0001-curriculum-coverage.md">research/0001, mục 4</a> và mục 1-2 cho phần giải thích.</p>
+
+<table>
+<tr><th>#</th><th>Câu hỏi</th><th>Đã biết</th><th>Vì sao quan trọng</th></tr>
+<tr><td>1</td><td><b>Cụm là loại nào, phiên bản broker bao nhiêu?</b></td>
+<td>Apache Kafka tự vận hành. <b>Phiên bản: chưa biết, cần hỏi.</b></td>
+<td>Tính năng phụ thuộc phiên bản: giao thức rebalance mới KIP-848 (GA từ 4.0), ELR (bật mặc định cho cụm mới từ 4.1), Share Groups (production-ready từ 4.2). <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></td></tr>
+<tr><td>2</td><td><b>Client dùng thư viện nào?</b></td>
+<td>Spring Kafka.</td>
+<td>Demo trong workspace viết bằng Spring Kafka. Cần hỏi thêm: phiên bản Spring Boot / Spring Kafka, có dùng Kafka Streams hay Connect không (giao thức rebalance mới chưa hỗ trợ Connect, theo <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol">KIP-848</a>).</td></tr>
+<tr><td>3</td><td><b>Ai tạo và cấu hình topic (partition, RF, min.insync.replicas, retention)?</b></td>
+<td>Bạn tự tạo. Cần hỏi: có tắt <code>auto.create.topics.enable</code> không, và quy ước đặt tên.</td>
+<td>Mặc định broker nguy hiểm: <code>num.partitions=1</code>, <code>default.replication.factor=1</code>, <code>min.insync.replicas=1</code>, tự tạo topic bật sẵn. Gõ sai tên topic sẽ tạo "topic ma" với RF=1. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></td></tr>
+<tr><td>4</td><td><b>Bảo mật: SASL hay SSL/mTLS? ACL theo topic hay prefix?</b></td>
+<td>Bỏ qua ở giai đoạn study. Có thể SSL/mTLS theo topic (chưa chắc).</td>
+<td>Consumer cần quyền Read trên cả Topic <em>và</em> Group; thiếu một trong hai là lỗi quyền khó hiểu. <a href="https://kafka.apache.org/44/security/authorization-and-acls/">[ACL]</a> Hỏi lại khi cần kết nối cụm thật.</td></tr>
+<tr><td>5</td><td><b>Yêu cầu giao hàng của nghiệp vụ chính?</b></td>
+<td>Không mất message. Cần hỏi thêm: có chấp nhận trùng (nếu consumer chống trùng) không, hay đòi "exactly-once" với DB?</td>
+<td>Hướng "không mất" = ghi bền (<code>acks=all</code>, RF=3, <code>min.insync.replicas=2</code>) + at-least-once ở consumer + chống trùng. Docs giới hạn exactly-once trong Kafka/Streams; ghi sang hệ thống ngoài cần phối hợp. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></td></tr>
+<tr><td>6</td><td><b>Thứ tự ràng buộc theo khoá nào (tài khoản, đơn, thiết bị)? Dự kiến throughput và số partition?</b></td>
+<td>Chưa biết.</td>
+<td>Quyết định key và số partition; số partition không giảm được và tăng sẽ làm key đổi partition. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></td></tr>
+<tr><td>7</td><td><b>Định dạng dữ liệu: Avro, Protobuf hay JSON? Có Schema Registry của ai? Quy ước versioning?</b></td>
+<td>Chưa biết.</td>
+<td>Ảnh hưởng thiết kế event và khả năng thay đổi sau này. Schema Registry không thuộc Apache Kafka lõi; chưa kiểm chứng nguồn (xem RESOURCES.md, mục Gaps).</td></tr>
+<tr><td>8</td><td><b>Cần nhiều trung tâm dữ liệu (DR) hoặc lưu giữ dài hạn / audit?</b></td>
+<td>Chưa biết.</td>
+<td>Quyết định retention, compaction, và có dùng sao chép liên cụm không. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></td></tr>
+</table>
+
+<h2>Cách hỏi (gợi ý câu chữ)</h2>
+<ul class="tight">
+<li>"Cụm đang chạy Kafka phiên bản nào? Bên mình nâng cấp theo chu kỳ nào?" (câu 1)</li>
+<li>"Topic mới tạo qua đâu: script, IaC hay tạo tay? Mặc định RF và min.insync.replicas là bao nhiêu?" (câu 3)</li>
+<li>"Với nghiệp vụ này, bên mình chấp nhận gửi trùng nếu phía nhận có chống trùng không?" (câu 5)</li>
+<li>"Event này cần giữ thứ tự theo khoá nào, và có yêu cầu giữ lại bao lâu?" (câu 6, 8)</li>
+</ul>
+<p>Sau khi có câu trả lời thật, ghi lại vào <code>MISSION.md</code> (Constraints) để các bài sau bám đúng.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Cấu hình hướng "không mất": acks=all + idempotence + topic min.insync.replicas=2 (RF=3).
+lab:
+  topic: lab-orders-safe
+spring:
+  kafka:
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+        # delivery.timeout.ms phải >= request.timeout.ms + linger.ms (Kafka producer configs).
+        # Rút ngắn từ mặc định (120000) để thí nghiệm "kill 2 broker" thấy lỗi nhanh hơn.
+        "[request.timeout.ms]": 10000
+        "[delivery.timeout.ms]": 20000

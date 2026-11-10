@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 1: Bức tranh tổng thể về Kafka</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / Bài 1 · <a href="../reference/0001-core-concepts.html">Bảng tra: bức tranh &amp; khái niệm</a></nav>
+
+<h1>Bài 1: Kafka là gì và nó giải quyết vấn đề gì?</h1>
+<p class="lede">Bức tranh toàn cảnh trước, từng bộ phận sau.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quyết từng loại vấn đề</em>, rồi áp vào bất kỳ lĩnh vực nào (kể cả ngân hàng sau này). Các bài dùng usecase từ nhiều lĩnh vực. Trước khi bàn key, acks hay rebalance, bạn cần một bản đồ trong đầu: Kafka giải quyết vấn đề gì, gồm những thành phần nào, và một event đi qua nó ra sao. Mọi bài sau sẽ treo vào bản đồ này.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> sau ~15 phút bạn kể lại được, không nhìn tài liệu, hành trình của một event đơn hàng từ service gửi tới các service nhận, gọi đúng tên 5 thành phần, và giải thích Kafka khác "gọi API trực tiếp" ở đâu.</p>
+
+<h2>1. Vấn đề mà Kafka sinh ra để giải quyết</h2>
+<p>Kịch bản minh hoạ (do mình dựng): một cửa hàng online. Khi khách đặt hàng xong, service <b>Order</b> cần báo cho <b>Notification</b> (gửi email xác nhận), <b>Inventory</b> (trừ kho) và <b>Analytics</b> (cập nhật thống kê doanh thu).</p>
+
+<figure>
+<svg class="diagram" viewBox="0 0 640 210" role="img" aria-label="So sánh gọi trực tiếp và đi qua Kafka">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <text class="muted" x="150" y="16" text-anchor="middle">Gọi trực tiếp</text>
+  <rect class="box ctrl" x="10" y="80" width="80" height="44" rx="5"/><text x="50" y="106" text-anchor="middle">Order</text>
+  <rect class="box node" x="190" y="26" width="110" height="36" rx="5"/><text x="245" y="49" text-anchor="middle">Notification</text>
+  <rect class="box node" x="190" y="84" width="110" height="36" rx="5"/><text x="245" y="107" text-anchor="middle">Inventory</text>
+  <rect class="box node" x="190" y="142" width="110" height="36" rx="5"/><text x="245" y="165" text-anchor="middle">Analytics</text>
+  <path class="arrow" d="M90 95 L188 48"/><path class="arrow" d="M90 102 L188 102"/><path class="arrow" d="M90 110 L188 160"/>
+  <text class="muted" x="150" y="198" text-anchor="middle">Order phải biết và chờ từng nơi nhận</text>
+
+  <line x1="320" y1="10" x2="320" y2="200" stroke="var(--rule)"/>
+
+  <text class="muted" x="485" y="16" text-anchor="middle">Qua Kafka</text>
+  <rect class="box ctrl" x="335" y="80" width="80" height="44" rx="5"/><text x="375" y="106" text-anchor="middle">Order</text>
+  <rect class="box part" x="450" y="55" width="60" height="94" rx="5"/><text x="480" y="107" text-anchor="middle">Kafka</text>
+  <rect class="box node" x="540" y="26" width="95" height="36" rx="5"/><text x="587" y="49" text-anchor="middle">Notification</text>
+  <rect class="box node" x="540" y="84" width="95" height="36" rx="5"/><text x="587" y="107" text-anchor="middle">Inventory</text>
+  <rect class="box node" x="540" y="142" width="95" height="36" rx="5"/><text x="587" y="165" text-anchor="middle">Analytics</text>
+  <path class="arrow" d="M415 102 L448 102"/>
+  <path class="arrow" d="M512 80 L538 48"/><path class="arrow" d="M512 102 L538 102"/><path class="arrow" d="M512 124 L538 160"/>
+  <text class="muted" x="485" y="198" text-anchor="middle">Order chỉ ghi; ai cần thì tự đọc</text>
+</svg>
+<figcaption>Bên trái: thêm một service nhận thì phải sửa Order, và một service nhận chậm hay chết sẽ kéo theo Order. Bên phải: Kafka đứng giữa.</figcaption>
+</figure>
+
+<p>Tài liệu chính thức mô tả đúng ý này: "producers and consumers are fully decoupled and agnostic of each other" và "producers never need to wait for consumers." <a href="https://kafka.apache.org/intro">[Kafka intro]</a> Trang giới thiệu liệt kê nhiều lĩnh vực dùng Kafka; một mục trong đó là "To process payments and financial transactions in real-time, such as in stock exchanges, banks, and insurances."</p>
+
+<h2>2. Ý tưởng lõi: một cuốn nhật ký chỉ ghi thêm vào cuối</h2>
+<p>Đừng hình dung Kafka là hộp thư lấy thư ra là hết. Tài liệu thiết kế viết rằng nó "more akin to a database log than a traditional messaging system." <a href="https://kafka.apache.org/44/design/design/">[Kafka design: Motivation]</a> Ba hệ quả bạn sẽ dùng mãi:</p>
+<ol class="steps">
+<li><b>Event không bị xoá khi đã đọc</b>: "events are not deleted after consumption". Bạn đặt thời gian giữ lại (retention). <a href="https://kafka.apache.org/intro">[Kafka intro]</a> Nhờ vậy một service mới <em>có thể</em> đọc lại lịch sử, và một service lỗi có thể đọc lại sau khi sửa bug. (Lưu ý: "có thể" chứ không tự động. Consumer group mới mặc định bắt đầu từ cuối, vì <code>auto.offset.reset</code> mặc định là <code>latest</code>; muốn đọc từ đầu phải cấu hình khác. <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a> Bài 5 sẽ làm rõ.)</li>
+<li><b>Consumer tự kéo (pull), không bị đẩy.</b> "A pull-based system has the nicer property that the consumer simply falls behind and catches up when it can." <a href="https://kafka.apache.org/44/design/design/">[Kafka design: push vs pull]</a> Service nhận chậm không làm sập ai.</li>
+<li><b>Mỗi bên đọc theo tốc độ và vị trí của riêng mình.</b> Vị trí đó chỉ là một con số (offset), bài 2 sẽ đi sâu.</li>
+</ol>
+
+<h2>3. Năm thành phần trong bức tranh</h2>
+<figure>
+<svg class="diagram" viewBox="0 0 680 340" role="img" aria-label="Kiến trúc tổng thể: producer, cluster 3 broker, 2 consumer group, controller">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <rect class="box ctrl" x="10" y="115" width="110" height="60" rx="6"/>
+  <text x="65" y="141" text-anchor="middle">Producer</text><text class="muted" x="65" y="159" text-anchor="middle">Order service</text>
+  <path class="arrow" d="M120 145 L178 145"/>
+  <text class="muted" x="148" y="136" text-anchor="middle">ghi</text>
+
+  <rect x="180" y="30" width="330" height="236" rx="8" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <text x="345" y="50" text-anchor="middle">Kafka cluster (3 broker), topic "orders" = P0, P1, P2</text>
+
+  <rect class="box node" x="192" y="62" width="96" height="170" rx="5"/><text x="240" y="82" text-anchor="middle">Broker 1</text>
+  <rect class="box node" x="298" y="62" width="96" height="170" rx="5"/><text x="346" y="82" text-anchor="middle">Broker 2</text>
+  <rect class="box node" x="404" y="62" width="96" height="170" rx="5"/><text x="452" y="82" text-anchor="middle">Broker 3</text>
+
+  <rect class="box ctrl" x="202" y="94" width="76" height="26" rx="3"/><text x="240" y="112" text-anchor="middle">P0 ★</text>
+  <rect class="part" x="202" y="130" width="76" height="26" rx="3"/><text x="240" y="148" text-anchor="middle">P1</text>
+  <rect class="part" x="202" y="166" width="76" height="26" rx="3"/><text x="240" y="184" text-anchor="middle">P2</text>
+
+  <rect class="part" x="308" y="94" width="76" height="26" rx="3"/><text x="346" y="112" text-anchor="middle">P0</text>
+  <rect class="box ctrl" x="308" y="130" width="76" height="26" rx="3"/><text x="346" y="148" text-anchor="middle">P1 ★</text>
+  <rect class="part" x="308" y="166" width="76" height="26" rx="3"/><text x="346" y="184" text-anchor="middle">P2</text>
+
+  <rect class="part" x="414" y="94" width="76" height="26" rx="3"/><text x="452" y="112" text-anchor="middle">P0</text>
+  <rect class="part" x="414" y="130" width="76" height="26" rx="3"/><text x="452" y="148" text-anchor="middle">P1</text>
+  <rect class="box ctrl" x="414" y="166" width="76" height="26" rx="3"/><text x="452" y="184" text-anchor="middle">P2 ★</text>
+  <text class="muted" x="345" y="222" text-anchor="middle">★ = leader (nơi producer ghi); còn lại = bản sao (follower)</text>
+  <text class="muted" x="345" y="256" text-anchor="middle">mỗi partition có 3 bản (replication factor = 3)</text>
+
+  <rect class="box ctrl" x="540" y="40" width="130" height="96" rx="6"/>
+  <text x="605" y="60" text-anchor="middle">Consumer group</text><text class="muted" x="605" y="76" text-anchor="middle">"Notification"</text>
+  <rect class="part" x="550" y="90" width="50" height="30" rx="3"/><text x="575" y="110" text-anchor="middle">C1</text>
+  <rect class="part" x="610" y="90" width="50" height="30" rx="3"/><text x="635" y="110" text-anchor="middle">C2</text>
+  <rect class="box ctrl" x="540" y="150" width="130" height="96" rx="6"/>
+  <text x="605" y="170" text-anchor="middle">Consumer group</text><text class="muted" x="605" y="186" text-anchor="middle">"Inventory"</text>
+  <rect class="part" x="550" y="200" width="50" height="30" rx="3"/><text x="575" y="220" text-anchor="middle">C1</text>
+  <rect class="part" x="610" y="200" width="50" height="30" rx="3"/><text x="635" y="220" text-anchor="middle">C2</text>
+  <path class="arrow" d="M512 90 L538 90"/><path class="arrow" d="M512 200 L538 200"/>
+  <text class="muted" x="525" y="270" text-anchor="middle">đọc (pull)</text>
+
+  <rect class="box node" x="180" y="288" width="330" height="40" rx="6"/>
+  <text x="345" y="306" text-anchor="middle">Controller (KRaft)</text><text class="muted" x="345" y="321" text-anchor="middle">giữ metadata cụm: ai là leader, topic nào có gì</text>
+  <line x1="345" y1="266" x2="345" y2="288" stroke="var(--muted)"/>
+</svg>
+<figcaption>P0, P1, P2 là 3 partition của topic <code>orders</code>. Sơ đồ rút gọn: các consumer trong một group chia nhau các partition; chi tiết ở các bài sau.</figcaption>
+</figure>
+
+<table>
+<tr><th>Thành phần</th><th>Vai trò (một câu)</th><th>Nguồn</th></tr>
+<tr><td><b>Producer</b></td><td>Ứng dụng client ghi (publish) event vào Kafka.</td><td><a href="https://kafka.apache.org/intro">intro</a></td></tr>
+<tr><td><b>Broker</b></td><td>Máy chủ thuộc tầng lưu trữ ("the storage layer, called the brokers"). Nhiều broker hợp thành cluster.</td><td><a href="https://kafka.apache.org/intro">intro</a></td></tr>
+<tr><td><b>Topic &amp; partition</b></td><td>Topic chia thành partition rải trên các broker. Mỗi partition có một <em>leader</em> nhận ghi và các <em>follower</em> sao chép từ leader.</td><td><a href="https://kafka.apache.org/44/design/design/">design: replication</a></td></tr>
+<tr><td><b>Consumer &amp; group</b></td><td>Ứng dụng client đọc (subscribe) event. Trong một group, mỗi partition do đúng một consumer đọc ("consumed by exactly one consumer within each subscribing consumer group"). Các group khác nhau đọc độc lập.</td><td><a href="https://kafka.apache.org/44/design/design/">design: consumer</a></td></tr>
+<tr><td><b>Controller (KRaft)</b></td><td>Nhóm server chạy đồng thuận (quorum) để giữ metadata của cụm, không cần hệ thống điều phối bên ngoài. Thường 3 hoặc 5 controller.</td><td><a href="https://kafka.apache.org/44/operations/kraft/">KRaft overview</a></td></tr>
+</table>
+<p>Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các bài sau điền dần nội dung vào đúng từng ô.</p>
+
+<h2>4. Hành trình của một đơn hàng</h2>
+<ol class="steps">
+<li><b>Order</b> (producer) tạo event <code>OrderPlaced</code> và gửi vào topic <code>orders</code>.</li>
+<li>Event được ghi vào <b>leader</b> của một partition; các <b>follower</b> sao chép lại. Tài liệu: một ghi được coi là committed khi mọi bản sao trong tập ISR đã nhận. <a href="https://kafka.apache.org/44/design/design/">[design: replicated logs]</a></li>
+<li>Order <b>không chờ ai đọc</b>; nó làm việc tiếp.</li>
+<li>Group <b>Notification</b> và group <b>Inventory</b> mỗi nhóm <b>tự kéo</b> event, mỗi nhóm nhận đủ mọi event, theo tốc độ của mình.</li>
+<li>Event vẫn nằm đó sau khi đọc, cho tới hết thời gian retention. Thêm group <b>Analytics</b> vào sau cũng đọc được.</li>
+<li>Nếu một broker chết, các server còn lại tiếp quản ("if any of its servers fails, the other servers will take over their work"). <a href="https://kafka.apache.org/intro">[intro]</a></li>
+</ol>
+
+<h2>5. Bản đồ: câu hỏi trong họp → bài sẽ học</h2>
+<table>
+<tr><th>Bạn sẽ nghe</th><th>Khái niệm</th><th>Bài</th></tr>
+<tr><td>"Sự kiện của cùng một đơn hàng sao bị lộn thứ tự?"</td><td>key, partition, offset</td><td><a href="0002-key-partition-offset.html">Bài 2</a></td></tr>
+<tr><td>"Dựng cụm thế nào? Broker chết thì sao?"</td><td>cluster, leader, KRaft</td><td>Bài 3</td></tr>
+<tr><td>"Broker chết thì có mất đơn hàng không?"</td><td>acks, ISR, min.insync.replicas</td><td>Bài 4</td></tr>
+<tr><td>"Sao khách nhận hai email xác nhận?" / "sao kho bị trừ hai lần?"</td><td>consumer group, commit offset, at-least-once</td><td>Bài 5</td></tr>
+<tr><td>"Một message lỗi làm kẹt cả hàng"</td><td>poison pill, retry, DLQ, rebalance</td><td>Bài 6</td></tr>
+</table>
+
+<h2>6. Tự nói thành lời (30 giây, rồi mới làm quiz)</h2>
+<p>Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): <i>"Order gửi event, Kafka ... , Notification và Inventory ..."</i> Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.</p>
+
+<h2>7. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://kafka.apache.org/intro">Apache Kafka: Introduction</a>, đọc từ đầu đến hết mục Main Concepts and Terminology (khoảng 10 phút).<br>
+<b>Bổ trợ:</b> <a href="https://developer.confluent.io/courses/apache-kafka/events/">Confluent Developer: Apache Kafka 101</a>, module Introduction (3 phút), Brokers (4), Replication (3). Sau khi làm xong bài này, mục Design trong <a href="https://kafka.apache.org/44/design/design/">tài liệu thiết kế</a> sẽ dễ đọc hơn nhiều.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0002-key-partition-offset.html">Bài 2: key, partition, offset</a>, phóng to vào cách Kafka quyết định message nằm ở đâu và thứ tự được giữ tới đâu. Bảng tra: <a href="../reference/0001-core-concepts.html">bức tranh &amp; khái niệm</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên (agent) trong phiên này, ví dụ: "Kafka khác RabbitMQ chỗ nào?", "vì sao không dùng database làm hàng đợi?". Dán dòng kết quả quiz vào cuộc trò chuyện để bài sau điều chỉnh đúng mức.</div>
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Service Order vừa ghi event OrderPlaced vào Kafka. Nó cần làm gì tiếp theo với Notification?',
+    options: ['Chờ Notification đọc xong rồi mới tiếp tục', 'Không cần chờ, hai bên độc lập nhau', 'Gọi REST sang Notification để xác nhận lại', 'Xoá event ngay khi Notification đọc xong hẳn'],
+    answer: 1, why: 'Producer và consumer được tách rời hoàn toàn; producer không phải chờ consumer.' },
+  { q: 'Notification và Inventory là hai consumer group khác nhau cùng đọc topic orders. Điều gì đúng?',
+    options: ['Hai group chia nhau, mỗi message chỉ một group', 'Group nào đọc trước thì xoá message khỏi topic', 'Chỉ group đầu tiên đăng ký mới được đọc', 'Mỗi group nhận đủ mọi message, độc lập nhau'],
+    answer: 3, why: 'Event không bị xoá khi đọc. Mỗi group có vị trí đọc riêng và nhận đủ mọi event.' },
+  { q: 'Trong cùng một consumer group, một partition được bao nhiêu consumer đọc tại một thời điểm?',
+    options: ['Chính xác một consumer trong group đó', 'Tất cả consumer trong group cùng lúc', 'Hai consumer, một chính một dự phòng', 'Tuỳ broker, chọn ngẫu nhiên mỗi lần'],
+    answer: 0, why: 'Tài liệu thiết kế: mỗi partition được đọc bởi đúng một consumer trong mỗi group đăng ký.' },
+  { q: 'Một event đã được mọi consumer đọc xong. Kafka làm gì với nó?',
+    options: ['Xoá ngay để giải phóng dung lượng ổ đĩa', 'Chuyển sang một topic khác để lưu trữ lại', 'Giữ lại theo thời gian retention bạn cấu hình', 'Đánh dấu đã xử lý rồi ẩn khỏi consumer'],
+    answer: 2, why: 'Event không bị xoá sau khi đọc; nó được giữ theo thời gian retention.' },
+  { q: 'Producer ghi message của partition P0. Nó ghi vào đâu?',
+    options: ['Broker nào đang ít việc nhất lúc gửi', 'Chỉ broker đang giữ leader của partition đó', 'Mọi broker có bản sao, ghi đồng thời', 'Broker controller, sau đó nó chuyển cho follower'],
+    answer: 1, why: 'Producer chỉ ghi vào leader; follower sao chép từ leader.' },
+  { q: 'Controller trong KRaft giữ thông tin nào?',
+    options: ['Nội dung các message của mọi topic', 'Mật khẩu đăng nhập của các service', 'Siêu dữ liệu (metadata) của cả cụm', 'Danh sách đơn hàng của mọi khách'],
+    answer: 2, why: 'Controller tạo quorum để giữ metadata cụm. Nội dung message nằm ở các broker.' }
+]);
+</script>
+</body>
+</html>

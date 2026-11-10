@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 2: Key, partition, offset</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0001-kafka-big-picture.html">Bài 1: Bức tranh tổng thể</a> / Bài 2 · <a href="../reference/0001-core-concepts.html">Bảng tra</a></nav>
+
+<h1>Bài 2: Một giao dịch đi vào Kafka nằm ở đâu?</h1>
+<p class="lede">Key, partition và offset: ba thứ quyết định thứ tự và vị trí của mọi message. Đây là phóng to vào một chi tiết của <a href="0001-kafka-big-picture.html">bức tranh ở Bài 1</a>.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Phần lớn lỗi "lạ" khi dùng Kafka (dữ liệu lộn thứ tự, một partition quá tải) đến từ việc chọn key. Hiểu cơ chế key → partition → offset giúp bạn lường trước lỗi ở bất kỳ lĩnh vực nào: gọi xe, thương mại điện tử, IoT, thanh toán.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> sau ~10 phút bạn nói được "message của một tài xế nằm ở partition nào, thứ tự được đảm bảo tới đâu, và vì sao đổi số partition là chuyện nguy hiểm".</p>
+
+<h2>1. Bức tranh</h2>
+
+<figure>
+<svg class="diagram" viewBox="0 0 640 230" role="img" aria-label="Producer gửi vào topic driver-locations có 3 partition, consumer group đọc">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <rect class="box ctrl" x="10" y="85" width="110" height="60" rx="6"/>
+  <text x="65" y="112" text-anchor="middle">Producer</text>
+  <text class="muted" x="65" y="130" text-anchor="middle">key = DRV-001</text>
+
+  <text class="muted" x="330" y="18" text-anchor="middle">topic "driver-locations" (3 partition)</text>
+  <rect class="part" x="200" y="30" width="260" height="48" rx="4"/>
+  <text class="tag" x="208" y="50">P0</text>
+  <text class="muted" x="236" y="50">off0 off1 off2 off3 → ghi thêm vào cuối</text>
+  <text class="muted" x="208" y="68">DRV-004 …</text>
+  <rect class="part" x="200" y="92" width="260" height="48" rx="4"/>
+  <text class="tag" x="208" y="112">P1</text>
+  <text class="muted" x="236" y="112">off0 off1 off2 off3 → ghi thêm vào cuối</text>
+  <text class="muted" x="208" y="130">DRV-001 DRV-001 …</text>
+  <rect class="part" x="200" y="154" width="260" height="48" rx="4"/>
+  <text class="tag" x="208" y="174">P2</text>
+  <text class="muted" x="236" y="174">off0 off1 off2 off3 → ghi thêm vào cuối</text>
+  <text class="muted" x="208" y="192">DRV-002 …</text>
+
+  <path class="arrow" d="M120 115 L198 115"/>
+  <rect class="box node" x="520" y="85" width="110" height="60" rx="6"/>
+  <text x="575" y="112" text-anchor="middle">Consumer</text>
+  <text class="muted" x="575" y="130" text-anchor="middle">đọc theo offset</text>
+  <path class="arrow" d="M462 115 L518 115"/>
+</svg>
+<figcaption>Cùng key <code>DRV-001</code> luôn rơi vào cùng một partition; trong partition, message xếp theo offset tăng dần.</figcaption>
+</figure>
+
+<h2>2. Bốn ý cần nhớ</h2>
+<ol class="steps">
+<li><b>Topic được chia thành partition</b>, nằm rải trên các broker khác nhau. <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
+<li><b>Cùng key thì cùng partition.</b> Tài liệu viết: "Events with the same event key (e.g., a customer or vehicle ID) are written to the same partition." <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
+<li><b>Thứ tự chỉ được đảm bảo trong một partition</b>, không phải cả topic: Kafka "will always read that partition's events in exactly the same order as they were written." <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
+<li><b>Offset</b> là số thứ tự của message trong <em>một partition</em>. Vị trí của consumer ở mỗi partition chỉ là một số nguyên: offset của message kế tiếp sẽ đọc. <a href="https://kafka.apache.org/44/design/design/">[Kafka design: consumer position]</a></li>
+</ol>
+<p>Hệ quả cho thiết kế: muốn giữ thứ tự các sự kiện của một đối tượng (tài xế, đơn hàng, khách hàng, thiết bị), dùng <em>mã của đối tượng đó</em> làm key. Không có key thì bạn không kiểm soát được partition nào nhận message.</p>
+
+<h2>3. Tự thử: gửi message vào các partition</h2>
+<p>Theo tài liệu producer, khi có key, producer "choose a partition based on a hash of the key"; khi không có key, nó dùng "sticky partition", đổi partition khi đã ghi ít nhất <code>batch.size</code> byte. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs: partitioner.class]</a> Bộ mô phỏng bên dưới dùng hàm băm đơn giản của riêng mình (không nhất thiết trùng hàm băm của Kafka) chỉ để thấy quy luật; với message không key, nó đổi partition sau mỗi 4 message cho dễ nhìn.</p>
+<ol class="steps">
+<li>Chọn <code>key = DRV-001</code>, bấm <b>Gửi có key</b> 3 lần. Mọi message nằm cùng một partition, offset tăng dần.</li>
+<li>Gửi thêm vài message cho <code>DRV-002</code> và <code>DRV-004</code>. Mỗi tài xế có "ngăn" riêng.</li>
+<li>Bấm <b>Gửi không key</b> khoảng 10 lần: các message dồn vào một partition một lúc rồi mới chuyển sang partition khác. Bạn không kiểm soát được message nào vào đâu.</li>
+<li>Đổi sang <b>6 partition</b> (Kafka cho phép tăng, "does not currently support reducing the number of partitions" <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a>) rồi gửi tiếp <code>DRV-001</code>. Quan sát cảnh báo.</li>
+</ol>
+<div id="sim"></div>
+<p>Điều bạn vừa thấy: sau khi đổi số partition, <code>DRV-001</code> có thể sang partition khác, nên các event cũ và mới của cùng một tài xế <em>nằm ở hai partition khác nhau</em>, không còn thứ tự chung. Tài liệu vận hành cảnh báo đúng điều này: "messages with the same key may be routed to different partitions after the expansion", và Kafka "will not attempt to automatically redistribute existing data". <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations: modifying topics]</a> Đây là lý do số partition thường được tính trước kỹ càng ở giai đoạn thiết kế. (Tài liệu consumer cũng cảnh báo về tăng partition kết hợp <code>auto.offset.reset=latest</code> có thể gây mất message âm thầm. <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a>)</p>
+
+<h2>4. Usecase oái oăm: hai lĩnh vực, cùng một bài học về key</h2>
+<h3>(a) Gọi xe: tài xế "nhảy lùi" trên bản đồ</h3>
+<p>Mỗi vài giây, app tài xế gửi <code>DriverLocationUpdated</code> vào topic <code>driver-locations</code> (3 partition). Team làm bản đồ muốn hiển thị vị trí mới nhất của từng tài xế, nhưng lại dùng <b>mã cuốc xe</b> làm key (và giữa hai cuốc, key trống). Toạ độ của cùng một tài xế rơi vào nhiều partition; consumer đọc các partition với tốc độ khác nhau nên một toạ độ cũ có thể được xử lý <em>sau</em> toạ độ mới. Trên bản đồ, xe nhảy lùi. Không có exception nào, mọi thứ "chạy bình thường".</p>
+<p>Sửa: key = <b>mã tài xế</b>. Toạ độ của một tài xế luôn cùng partition, theo thứ tự offset.</p>
+<h3>(b) Flash sale: một shop làm nghẽn một partition</h3>
+<p>Topic <code>orders</code> dùng <b>mã shop</b> làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa <em>thứ tự</em> và <em>phân tải</em>: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.</p>
+
+<h2>5. Kiểm tra (truy hồi từ trí nhớ)</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://kafka.apache.org/intro">Apache Kafka: Introduction</a> (đọc phần Main Concepts and Terminology, khoảng 10 phút).<br>
+<b>Bổ trợ (video/khoá ngắn):</b> <a href="https://developer.confluent.io/courses/apache-kafka/events/">Confluent Developer: Apache Kafka 101</a>, các module Topics và Partitions (9 + 4 phút).</div>
+
+<p><b>Bài tiếp theo (dự kiến, Bài 3):</b> dựng cụm Kafka 3 broker trên máy bạn (cài Docker trong WSL2) và gửi message đầu tiên bằng dòng lệnh để thấy offset thật. Xem <a href="../reference/0001-core-concepts.html">bảng tra bài này</a> để ôn.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên (agent) trong phiên này: ví dụ "vì sao không đảm bảo thứ tự giữa các partition?", "shop chiếm 70% đơn thì xử lý thế nào?". Dán dòng kết quả quiz ở trên vào cuộc trò chuyện để bài sau điều chỉnh đúng mức.</div>
+</main>
+
+<script src="../assets/partition-sim.js"></script>
+<script>PartitionSim.mount(document.getElementById('sim'), { keys: ['DRV-001', 'DRV-002', 'DRV-004'], partitions: [3, 6] });</script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Bản đồ cần vị trí mới nhất của từng tài xế, kể cả qua nhiều cuốc xe, theo đúng thứ tự gửi. Bạn chọn key nào?',
+    options: ['Mã cuốc xe, mỗi cuốc một mã riêng', 'Thời điểm gửi tin, tính bằng mili giây', 'Mã tài xế, chung cho mọi vị trí', 'Không đặt key, để Kafka tự động chia'],
+    answer: 2, why: 'Cùng key thì cùng partition, và thứ tự chỉ được giữ trong một partition. Key phải là mã đối tượng cần giữ thứ tự (tài xế), không phải mã của một cuốc cụ thể.' },
+  { q: 'Topic driver-locations có 3 partition. Đảm bảo thứ tự của Kafka áp dụng ở phạm vi nào?',
+    options: ['Trong từng partition, không xuyên suốt topic', 'Trên toàn bộ topic, qua mọi partition', 'Trong từng broker, qua mọi topic khác', 'Trong từng consumer, theo thời gian nhận'],
+    answer: 0, why: 'Tài liệu: thứ tự được giữ trong một partition. Giữa các partition của một topic không có thứ tự chung.' },
+  { q: 'Offset là gì?',
+    options: ['Số thứ tự message trong toàn bộ topic', 'Thời điểm message được ghi vào ổ disk', 'Mã định danh của consumer đang đọc tin', 'Số thứ tự của message trong một partition'],
+    answer: 3, why: 'Offset chỉ có nghĩa trong một partition; hai partition đều có "offset 0" riêng.' },
+  { q: 'Consumer vừa đọc xong message offset 41 của một partition. Vị trí (position) của nó là gì?',
+    options: ['Offset 41, chính message vừa đọc xong', 'Offset 42, message sẽ đọc kế tiếp', 'Offset 40, message đọc ngay trước đó', 'Offset 0, vì luôn đọc từ đầu'],
+    answer: 1, why: 'Position là offset của message kế tiếp sẽ đọc. Nó chỉ là một số nguyên, nên rất rẻ để lưu (checkpoint).' },
+  { q: 'Bạn tăng topic từ 3 lên 6 partition, key vẫn là mã tài xế. Điều gì có thể xảy ra?',
+    options: ['Mọi message cũ tự động chuyển sang partition mới', 'Không có gì, key luôn gắn chặt với partition', 'Key cũ có thể đổi partition, vỡ thứ tự', 'Kafka khoá topic tới khi consumer xử lý xong'],
+    answer: 2, why: 'Vị trí của key phụ thuộc số partition. Message mới của cùng tài xế có thể sang partition khác, thứ tự với message cũ không còn được đảm bảo.' }
+]);
+</script>
+</body>
+</html>

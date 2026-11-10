@@ -113,3 +113,17 @@ svg.diagram .tag { fill: var(--accent); font-weight: 700; font-size: 12px; }
 .step label.tick { display: inline-block; font-family: system-ui, sans-serif; font-size: .85rem; margin-top: .3rem; cursor: pointer; }
 .expect { font-family: system-ui, sans-serif; font-size: .85rem; background: var(--ok-bg); border-radius: 4px; padding: .5rem .8rem; margin: .5rem 0; }
 .warn { font-family: system-ui, sans-serif; font-size: .85rem; background: var(--bad-bg); border-radius: 4px; padding: .5rem .8rem; margin: .5rem 0; }
+
+/* Mô phỏng partition (xem partition-sim.js) */
+.sim { border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; background: var(--card); font-family: system-ui, sans-serif; font-size: .85rem; margin: 1.2rem 0; }
+.sim .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .6rem; }
+.sim input[type=text], .sim select { font: inherit; padding: .25rem .4rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.sim input[type=text] { width: 9rem; }
+.sim button { font: inherit; padding: .3rem .7rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: inherit; cursor: pointer; }
+.sim button:hover { border-color: var(--accent); }
+.sim .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: .5rem; margin-top: .5rem; }
+.sim .part { border: 1px solid var(--muted); border-radius: 4px; background: var(--bg); min-height: 4rem; padding: .3rem .4rem; }
+.sim .part h4 { margin: 0 0 .3rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.sim .msg { display: block; font-family: "Cascadia Code", Consolas, monospace; font-size: .72rem; background: var(--node); border-radius: 3px; padding: .08rem .3rem; margin: .12rem 0; }
+.sim .note { margin-top: .6rem; padding: .4rem .6rem; border-radius: 4px; background: var(--ok-bg); }
+.sim .note.bad { background: var(--bad-bg); }

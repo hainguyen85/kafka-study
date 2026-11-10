@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 3: Dựng cụm 3 broker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0002-key-partition-offset.html">Bài 2</a> / Bài 3 · <a href="../reference/0001-core-concepts.html">Bảng tra</a></nav>
+
+<h1>Bài 3: Dựng cụm 3 broker và nhìn tận mắt leader, ISR</h1>
+<p class="lede">Đọc về leader và replica thì dễ quên. Kill một broker và thấy leader đổi thì nhớ lâu.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu như "broker chết thì chuyện gì xảy ra?" gần như chắc chắn xuất hiện trong buổi họp. Sau bài này bạn trả lời được bằng thứ bạn đã thấy tận mắt, không phải bằng sách.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn có cụm 3 broker chạy trên máy, tạo được topic có RF=3, đọc được <code>--describe</code>, và giải thích được vì sao kill 1 broker thì cụm vẫn chạy còn kill 2 thì không.</p>
+
+<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<ol class="steps">
+<li><b>Mỗi node có thể vừa là broker vừa là controller.</b> <code>process.roles</code> nhận <code>broker</code>, <code>controller</code> hoặc cả hai (combined mode). Combined mode đơn giản cho lab nhưng "is not recommended in critical deployment environments." <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
+<li><b>Controller giữ metadata của cụm theo kiểu đồng thuận (quorum).</b> Cần đa số controller còn sống: "3 controllers tolerate 1 failure and 5 tolerate 2". Chịu N lỗi cần 2N+1 controller. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
+<li><b>Mỗi partition có một leader và các follower.</b> Producer chỉ ghi vào leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+<li><b>Giá trị mặc định phía broker rất "mỏng":</b> <code>num.partitions=1</code>, <code>default.replication.factor=1</code>, <code>min.insync.replicas=1</code> và <code>auto.create.topics.enable=true</code>. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
+<li><b>Hộp "đọc tutorial cũ thì coi chừng":</b> từ Kafka 4.0, "ZooKeeper mode has been removed". Tutorial dùng <code>--zookeeper</code> hay <code>zookeeper.connect</code> không còn áp dụng. <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></li>
+</ol>
+
+<h2>2. Thực hành (mỗi bước có kết quả mong đợi)</h2>
+<p>Ghi lại điều bạn <em>thật sự thấy</em>. Các "mong đợi" dưới đây suy ra từ tài liệu; nếu bạn thấy khác, đó là thông tin quý, hãy báo lại cho giáo viên.</p>
+
+<div class="step">
+<h3>Bước 1. Chạy wizard dựng cụm</h3>
+<p>Mở Ubuntu (WSL), vào thư mục repo (đường dẫn dạng <code>/mnt/d/Workspace/study/kafka</code>) và chạy:</p>
+<pre><code>bash scripts/wizard-03-docker-kafka.sh</code></pre>
+<p>Wizard dẫn 6 stage: kiểm tra systemd, cài Docker Engine, chạy docker không cần sudo, chạy cụm, tạo topic và kiểm tra, kết nối từ Windows. Nó hỏi mật khẩu sudo và xác nhận ở từng bước.</p>
+<div class="expect">Mong đợi: cuối cùng wizard báo "Setup complete" và liệt kê những việc còn lại phải làm tay (nếu có).</div>
+<div class="warn">Nếu wizard yêu cầu <code>wsl.exe --shutdown</code> (bật systemd lần đầu), làm theo rồi chạy lại. Script mới được kiểm tra cú pháp, chưa chạy thật trên máy bạn: nếu nó lỗi ở đâu, dán lỗi cho giáo viên.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã chạy xong wizard</label>
+</div>
+
+<div class="step">
+<h3>Bước 2. Đọc <code>--describe</code></h3>
+<pre><code>docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic lab-orders</code></pre>
+<div class="expect">Mong đợi: 3 dòng partition. Mỗi dòng có <code>Leader</code> là một trong 1,2,3; <code>Replicas</code> gồm 3 broker; <code>Isr</code> gồm 3 broker. Dòng đầu có <code>min.insync.replicas=2</code>.</div>
+<p>Câu tự hỏi: leader của 3 partition có cùng một broker không? Vì sao điều đó (không) quan trọng?</p>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã đọc được Leader, Replicas, Isr</label>
+</div>
+
+<div class="step">
+<h3>Bước 3. Gửi và nhận message bằng dòng lệnh</h3>
+<p>Terminal A (consumer), terminal B (producer):</p>
+<pre><code># A
+docker exec -it kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-1:19092 --topic lab-orders --from-beginning
+# B (gõ vài dòng, mỗi dòng một message, Ctrl-C để thoát)
+docker exec -it kafka-1 /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-1:19092 --topic lab-orders</code></pre>
+<div class="expect">Mong đợi: dòng gõ ở B xuất hiện ở A. Dừng A rồi chạy lại với <code>--from-beginning</code>: các dòng cũ vẫn còn (event không bị xoá khi đã đọc, như Bài 1).</div>
+<label class="tick"><input type="checkbox" data-step="3"> Tôi đã thấy message đi qua cụm</label>
+</div>
+
+<div class="step">
+<h3>Bước 4. Kill một broker, xem leader và ISR đổi</h3>
+<pre><code>docker kill kafka-3
+# chạy ngay, rồi chạy lại sau ~40 giây
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic lab-orders</code></pre>
+<div class="expect">Mong đợi: partition từng do broker 3 làm leader chuyển sang broker khác. Lần chạy đầu <code>Isr</code> có thể vẫn còn 3; sau khoảng 30 giây (<code>replica.lag.time.max.ms</code> mặc định 30000) broker 3 bị loại khỏi <code>Isr</code>. Producer ở terminal B vẫn gửi được. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></div>
+<label class="tick"><input type="checkbox" data-step="4"> Tôi đã thấy leader đổi và ISR co lại</label>
+</div>
+
+<div class="step">
+<h3>Bước 5. Bật lại broker</h3>
+<pre><code>docker start kafka-3
+# chờ vài chục giây rồi describe lại</code></pre>
+<div class="expect">Mong đợi: <code>Isr</code> trở lại 3 broker. Leader có thể quay về broker ưu tiên (<code>auto.leader.rebalance.enable</code> mặc định bật, theo broker configs); ghi lại bạn có thấy không.</div>
+<label class="tick"><input type="checkbox" data-step="5"> Tôi đã thấy ISR phục hồi</label>
+</div>
+
+<div class="step">
+<h3>Bước 6. Kill hai broker: cụm "sống" mà không dùng được</h3>
+<pre><code>docker kill kafka-2 kafka-3
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic lab-orders
+# xong thì bật lại
+docker start kafka-2 kafka-3</code></pre>
+<div class="expect">Mong đợi (suy ra từ tài liệu KRaft, chưa kiểm chứng): vì cả 3 node đều là controller, mất 2 node là mất đa số quorum, nên lệnh quản trị treo hoặc lỗi và cụm không bầu được leader mới. Ghi lại chính xác bạn thấy gì.</div>
+<label class="tick"><input type="checkbox" data-step="6"> Tôi đã thử kill hai broker và ghi lại kết quả</label>
+</div>
+
+<h2>3. Usecase oái oăm</h2>
+<h3>(a) Kho lạnh mất điện cả giá đỡ (IoT)</h3>
+<p>Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt. Còn đúng một node "sống", nhưng dashboard trống và không cảm biến nào ghi được. Lý do: mất đa số controller thì cụm không đổi được metadata, không bầu được leader. Sống một node không có nghĩa là cụm còn dùng được. Cách giảm đau (khái niệm): đặt các node ở các khu vực mất điện khác nhau, và tách controller khỏi broker ở môi trường quan trọng (tài liệu khuyến nghị tránh combined mode).</p>
+<h3>(b) Topic "ma" do gõ sai tên (microservices dùng chung cụm)</h3>
+<p>Service A gửi vào <code>order-evnts</code> (gõ nhầm), service B đọc <code>order-events</code>. Không ai báo lỗi vì broker tự tạo <code>order-evnts</code> với 1 partition và RF=1 (giá trị mặc định ở mục 1). Message không mất, nhưng không ai đọc, và topic đó không chịu nổi việc broker chết. Cách xử lý: tắt <code>auto.create.topics.enable</code> và tạo topic có chủ đích (lab của bạn đã làm đúng việc này; Stage 5 của wizard có kiểm tra).</p>
+
+<h2>4. Tự nói thành lời</h2>
+<p>Không nhìn tài liệu, giải thích trong 30 giây: <i>"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."</i> Dùng đúng các từ: leader, follower, ISR, controller, quorum.</p>
+
+<h2>5. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://kafka.apache.org/44/operations/kraft/">KRaft overview</a> (khoảng 10 phút), và mục "Replication" trong <a href="https://kafka.apache.org/44/design/design/">Design</a>.<br>
+<b>Bổ trợ:</b> <a href="https://developer.confluent.io/courses/apache-kafka/events/">Confluent Developer: Kafka 101</a>, module Brokers và Replication.<br>
+<b>Mã nguồn bài này:</b> <code>labs/03-cluster/docker-compose.yml</code> (dựa trên <a href="https://github.com/apache/kafka/tree/trunk/docker/examples">ví dụ chính thức</a>) và <code>scripts/wizard-03-docker-kafka.sh</code>.</div>
+
+<p><b>Bài tiếp theo:</b> Bài 4, producer và độ bền: bạn sẽ chạy <code>labs/04-producer-durability</code> (Spring Kafka) để thấy <code>acks=1</code> làm mất message sau khi đã báo thành công, còn <code>acks=all</code> với <code>min.insync.replicas=2</code> thì không. Đã có sẵn code và README; bài viết sẽ làm sau khi bạn có kết quả thật từ cụm này.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên (agent), ví dụ "ISR khác replica ở chỗ nào?", "vì sao combined mode không khuyến nghị?". Nếu wizard lỗi, dán nguyên thông báo lỗi. Dán dòng kết quả quiz để bài sau điều chỉnh đúng mức.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Cụm lab có 3 node, mỗi node vừa là broker vừa là controller. Cụm chịu mất tối đa mấy node mà vẫn bầu được leader mới?',
+    options: ['Một node, vì cần đa số controller sống', 'Hai node, vì chỉ cần một controller sống', 'Không node nào, mọi bản sao phải sống', 'Ba node, vì dữ liệu đã sao lưu'],
+    answer: 0, why: 'Quorum cần đa số controller còn sống: 3 controller chịu được 1 lỗi (chịu N lỗi cần 2N+1 controller).' },
+  { q: 'Một tutorial bảo chạy kafka-topics.sh kèm --zookeeper. Với Kafka 4.4, điều nào đúng?',
+    options: ['Vẫn chạy bình thường nếu cài thêm ZooKeeper', 'Tutorial đã lỗi thời vì ZooKeeper bị gỡ', 'Chỉ chạy được trên broker dùng combined mode', 'Chạy được nhưng chậm hơn so với bootstrap'],
+    answer: 1, why: 'Từ Kafka 4.0 chỉ còn chế độ KRaft; ZooKeeper bị gỡ. Dùng --bootstrap-server.' },
+  { q: 'Một follower bị kill. Khi nào broker loại nó khỏi ISR?',
+    options: ['Ngay lập tức khi container dừng chạy', 'Sau khi producer gửi thêm một message', 'Sau khi nó tụt lại quá replica.lag.time.max.ms', 'Khi controller khởi động lại toàn cụm'],
+    answer: 2, why: 'Follower bị loại khỏi ISR khi tụt lại quá replica.lag.time.max.ms (mặc định 30000, tức 30 giây), không phải ngay lập tức.' },
+  { q: 'Producer gõ nhầm tên topic order-evnts; broker để auto.create.topics.enable mặc định. Chuyện gì xảy ra?',
+    options: ['Producer báo lỗi vì topic không tồn tại', 'Broker tự sửa lại tên về order-events đúng', 'Message được chuyển thẳng vào topic dead letter', 'Broker tạo topic mới với 1 partition, RF=1'],
+    answer: 3, why: 'Tự tạo topic bật sẵn; topic mới lấy num.partitions=1 và default.replication.factor=1 mặc định, nên lỗi gõ tên không ai thấy.' },
+  { q: 'Vì sao topic lab-orders (RF=3) đặt min.insync.replicas=2 chứ không đặt 3?',
+    options: ['Vì Kafka không cho đặt giá trị bằng ba', 'Để mất một broker vẫn ghi được an toàn', 'Để mỗi message được ghi nhanh gần gấp đôi', 'Vì controller cần đúng hai bản sao dữ liệu'],
+    answer: 1, why: 'Với acks=all, ghi bị từ chối khi ISR nhỏ hơn giá trị này. Đặt 2 cho phép mất 1 broker mà vẫn ghi được; đặt 3 thì mất 1 broker là ngừng ghi.' }
+]);
+</script>
+</body>
+</html>

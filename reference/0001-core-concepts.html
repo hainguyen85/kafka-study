@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bảng tra: bức tranh và khái niệm</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · từ <a href="../lessons/0001-kafka-big-picture.html">Bài 1</a> và <a href="../lessons/0002-key-partition-offset.html">Bài 2</a></nav>
+<h1>Bảng tra: bức tranh tổng thể và khái niệm</h1>
+<p class="lede">Một trang, in được. Nguồn: <a href="https://kafka.apache.org/intro">Kafka intro</a>, <a href="https://kafka.apache.org/44/design/design/">Kafka design</a>, <a href="https://kafka.apache.org/44/operations/kraft/">KRaft overview</a>.</p>
+
+<h2>Bức tranh một dòng</h2>
+<p>Producer ghi event vào topic; topic chia thành partition rải trên các broker (mỗi partition có leader + follower); nhiều consumer group đọc độc lập, mỗi group chia nhau các partition; controller (KRaft) giữ metadata cụm. Event không bị xoá khi đã đọc, chỉ hết hạn theo retention.</p>
+<h2>Thành phần</h2>
+<table>
+<tr><th>Thành phần</th><th>Vai trò</th></tr>
+<tr><td><b>Producer</b></td><td>Client ghi event vào Kafka; không phải chờ consumer.</td></tr>
+<tr><td><b>Broker / cluster</b></td><td>Server lưu trữ; nhiều broker hợp thành cluster.</td></tr>
+<tr><td><b>Leader / follower</b></td><td>Mỗi partition: leader nhận ghi, follower sao chép từ leader.</td></tr>
+<tr><td><b>ISR</b></td><td>Tập replica đang bắt kịp leader; ghi được coi là committed khi mọi thành viên ISR đã nhận.</td></tr>
+<tr><td><b>Consumer / consumer group</b></td><td>Client kéo (pull) event; trong một group, mỗi partition do đúng một consumer đọc; group khác nhau đọc độc lập.</td></tr>
+<tr><td><b>Controller (KRaft)</b></td><td>Quorum (thường 3 hoặc 5) giữ metadata cụm; <code>process.roles</code> = broker, controller, hoặc cả hai (combined, không khuyến nghị cho môi trường quan trọng).</td></tr>
+<tr><td><b>Retention</b></td><td>Thời gian giữ event; event không bị xoá khi đã đọc.</td></tr>
+</table>
+<h2>Khái niệm dữ liệu</h2>
+<table>
+<tr><th>Thuật ngữ</th><th>Nghĩa ngắn gọn</th><th>Nhớ gì khi thiết kế</th></tr>
+<tr><td><b>Event / message</b></td><td>Một sự việc đã xảy ra (key, value, thời gian).</td><td>Là "sự thật đã xảy ra", nên đặt tên ở thì quá khứ: <code>OrderPlaced</code>.</td></tr>
+<tr><td><b>Topic</b></td><td>Nhóm các event cùng loại, giống thư mục chứa file.</td><td>Chia thành partition.</td></tr>
+<tr><td><b>Partition</b></td><td>Một "ngăn" của topic, chỉ ghi thêm vào cuối, nằm trên một broker (có bản sao ở broker khác).</td><td>Thứ tự chỉ đảm bảo <em>trong</em> partition.</td></tr>
+<tr><td><b>Key</b></td><td>Giá trị đi kèm message; cùng key thì cùng partition.</td><td>Chọn mã đối tượng cần giữ thứ tự (tài xế, đơn hàng, khách hàng, thiết bị).</td></tr>
+<tr><td><b>Offset</b></td><td>Số thứ tự của message trong một partition.</td><td>Hai partition đều có offset 0; offset không so sánh được giữa partition.</td></tr>
+<tr><td><b>Position</b></td><td>Offset của message kế tiếp consumer sẽ đọc, mỗi partition một số.</td><td>Lưu rẻ; có thể tua lại để đọc lại dữ liệu.</td></tr>
+<tr><td><b>Replication factor</b></td><td>Số bản sao của mỗi partition.</td><td>Production thường dùng 3 (nguồn: intro).</td></tr>
+</table>
+
+<h2>Bẫy đã gặp trong lessons</h2>
+<ul class="tight">
+<li><b>Key sai</b> (mã cuốc xe thay vì mã tài xế) → sự kiện của cùng đối tượng rơi vào nhiều partition → xử lý sai thứ tự mà không có lỗi nào báo.</li>
+<li><b>Tăng số partition</b> → key có thể đổi partition → event cũ và mới của cùng đối tượng mất thứ tự chung.</li>
+<li><b>Key "nóng"</b> (một shop chiếm 70% đơn khi flash sale) → dồn vào một partition → điểm nghẽn; thêm consumer không giúp.</li>
+</ul>
+</main>
+</body>
+</html>

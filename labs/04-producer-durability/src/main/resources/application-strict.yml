@@ -1,0 +1,11 @@
+# Như "safe" nhưng topic min.insync.replicas=3: chỉ cần 1 broker chết (ISR còn 2) là producer bị từ chối ghi.
+lab:
+  topic: lab-orders-strict
+spring:
+  kafka:
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+        "[request.timeout.ms]": 10000
+        "[delivery.timeout.ms]": 20000
