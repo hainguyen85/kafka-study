@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 7: Idempotent consumer, outbox, transaction</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0006-error-handling-dlt.html">Bài 6</a> / Bài 7 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a></nav>
+
+<h1>Bài 7: Không mất nghĩa là có thể trùng. Làm sao để trùng cũng không sao?</h1>
+<p class="lede">Bài 4-6 đẩy bạn về phía "ít nhất một lần". Bài này lo nửa còn lại: tác dụng phụ chỉ xảy ra một lần dù message được giao nhiều lần.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+"Không mất" + at-least-once = có trùng. Ai đó trong họp sẽ hỏi: "vậy có bị trừ tiền hai lần không?". Bạn cần ba câu trả lời có tên: idempotent consumer, outbox, transaction; và biết phạm vi của "exactly-once" để không hứa quá.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn thiết kế được consumer chống trùng đúng chỗ (cùng transaction DB với tác dụng phụ), giải thích vì sao "dedup trong RAM" vẫn sai, và nói được exactly-once của Kafka phủ tới đâu và dừng ở đâu.</p>
+
+<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<ol class="steps">
+<li><b>Ba ngữ nghĩa giao hàng:</b> at-most-once, at-least-once, exactly-once. Docs nói Kafka hỗ trợ exactly-once cho luồng đọc Kafka → ghi Kafka (như trong Kafka Streams); khi ghi sang hệ thống ngoài, cần phối hợp giữa offset và đầu ra. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<li><b>Cách docs mô tả cho hệ thống ngoài:</b> lưu offset <em>cùng</em> kết quả trong một giao dịch ở hệ thống đích, và khi khởi động lại thì <code>seek()</code> tới offset đã lưu. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc: storing offsets outside Kafka]</a></li>
+<li><b>Idempotent producer chỉ phủ "một session"</b>; resend ở tầng ứng dụng "cannot be de-duplicated" (Bài 4). <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a></li>
+<li><b>Idempotent consumer và outbox là pattern ứng dụng.</b> Cả Apache lẫn Spring Kafka đều không có tài liệu chính thức cho chúng (<a href="../research/0002-spring-kafka.md">research/0002, mục 2.4</a>). Bài này dạy chúng như thiết kế, không như tính năng.</li>
+<li><b>Transaction trong Spring Boot:</b> chỉ cần đặt <code>spring.kafka.producer.transaction-id-prefix</code> thì Boot tự dựng <code>KafkaTransactionManager</code> và gắn vào container. <code>transactional.id</code> = prefix + n; prefix phải khác nhau ở mỗi instance. Container mở transaction, gửi offset vào cùng transaction (<code>sendOffsetsToTransaction</code>), và rollback + giao lại khi listener ném lỗi. <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a> <a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html">[Exactly Once]</a></li>
+<li><b>Phía đọc:</b> consumer cần <code>isolation.level=read_committed</code> (mặc định <code>read_uncommitted</code>) và <code>enable.auto.commit=false</code>. <code>read_committed</code> chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. <code>transaction.timeout.ms</code> mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense">[KIP-890]</a></li>
+<li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
+</ol>
+
+<h2>2. Dự đoán, rồi chạy</h2>
+<p>Đọc <code>S9IdempotentConsumer.java</code>: 5 sự kiện, user <code>u1..u5</code> được cộng <code>10 × n</code> điểm, <em>mỗi sự kiện được gửi 2 lần</em> với cùng <code>eventId</code> (mô phỏng ứng dụng gửi lại sau restart), producer idempotent bật. Trả lời trước khi chạy:</p>
+<div id="predict"></div>
+
+<div class="warn"><b>Trạng thái trung thực:</b> <code>s9</code> và <code>s9dedup</code> đã chạy trên broker nhúng 1 node (kết quả bên dưới là quan sát được). <code>s10</code> lần chạy đầu lộ ra lỗi trong code của mình (xem bước 3); đã sửa nhưng <b>chưa chạy lại</b>, nên "mong đợi" ở s10 là dự đoán. Chưa có kết quả trên cụm 3 broker của bạn.</div>
+
+<div class="step">
+<h3>Bước 1. S9: điểm bị gấp đôi</h3>
+<pre><code>cd labs/05-scenarios
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></pre>
+<div class="expect">Đã quan sát: điểm là {20, 40, 60, 80, 100} thay vì {10, 20, 30, 40, 50}. Producer idempotent không cứu được vì hai lần gửi là hai record riêng biệt.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã chạy s9 và thấy điểm gấp đôi</label>
+</div>
+<div class="step">
+<h3>Bước 2. S9dedup: chống trùng bằng eventId</h3>
+<pre><code>mvn -q spring-boot:run -Dspring-boot.run.profiles=s9dedup</code></pre>
+<div class="expect">Đã quan sát: điểm đúng. <b>Cảnh báo trong chính file code:</b> tập "đã xử lý" nằm trong RAM chỉ để minh hoạ. Hãy làm bài tập ở mục 3 để thấy vì sao.</div>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã chạy s9dedup</label>
+</div>
+<div class="step">
+<h3>Bước 3. S10: transaction consume-transform-produce</h3>
+<pre><code>mvn -q spring-boot:run -Dspring-boot.run.profiles=s10       # ~15 giây</code></pre>
+<p>Đầu vào <code>a, b, BOOM, c</code>; với <code>BOOM</code> lần đầu listener ném lỗi, transaction abort, container giao lại. Hai consumer đọc topic <code>s10-out</code> bằng <code>read_uncommitted</code> và <code>read_committed</code>.</p>
+<div class="expect">Mong đợi (dự đoán, chưa chạy lại): <code>read_uncommitted</code> thấy BOOM hai lần (một bản thuộc transaction aborted); <code>read_committed</code> thấy mỗi giá trị đúng một lần. Bài học từ lần chạy đầu: <code>template.send</code> là bất đồng bộ, nên nếu ném lỗi ngay thì producer hủy cả lô chưa gửi (<code>TransactionAbortedException</code>) và không có bản ghi aborted nào để thấy; code đã thêm <code>.get(10, SECONDS)</code> trước khi ném.</div>
+<label class="tick"><input type="checkbox" data-step="3"> Tôi đã chạy s10 và so hai chế độ đọc</label>
+</div>
+
+<div id="predict2"></div>
+
+<h2>3. Bài tập thiết kế: đưa dedup vào đúng chỗ</h2>
+<p>Hàm cộng điểm (khoảng 5 dòng) hiện chạy trong RAM. Bạn viết lại cho production, dùng DB quan hệ. Tự viết trước, rồi mở đáp án.</p>
+<ol class="steps">
+<li>Bảng nào, ràng buộc nào, khoá là gì?</li>
+<li>Thứ tự các thao tác trong <em>một</em> transaction DB là gì?</li>
+<li>Khi nào ack offset?</li>
+<li>Crash ở ba điểm (trước DB commit, sau DB commit trước ack, sau ack) thì chuyện gì xảy ra?</li>
+</ol>
+<details>
+<summary>Mở đáp án gợi ý</summary>
+<p><b>Bảng:</b> <code>processed_event(event_id PRIMARY KEY, processed_at)</code> (hoặc <code>UNIQUE</code> trên chính bảng điểm). <b>Trong một transaction:</b> <code>INSERT processed_event</code>; nếu vi phạm khoá thì đã xử lý rồi, bỏ qua việc cộng điểm; nếu thành công thì cộng điểm; <code>COMMIT</code>. <b>Ack offset sau COMMIT</b> (ack-mode manual, Bài 5).</p>
+<p><b>Crash:</b> trước COMMIT: DB không đổi, offset chưa commit → giao lại, xử lý lại đúng một lần. Sau COMMIT trước ack: giao lại, lần này <code>INSERT</code> vi phạm khoá → bỏ qua, không cộng lần hai (đây là chỗ dedup trong RAM sai vì RAM mất khi crash). Sau ack: xong.</p>
+<p><b>Chọn khoá:</b> dùng <em>mã nghiệp vụ</em> của sự kiện (<code>eventId</code> do producer sinh một lần cho một hành động). Khoá <code>topic-partition-offset</code> chỉ chống được việc <em>giao lại</em> cùng record, không chống được <em>record trùng do ứng dụng gửi lại</em> (S9: hai record có hai offset khác nhau). Đây là lý do chính bài này tồn tại. Điều kiện kèm theo: <code>eventId</code> phải ổn định qua các lần gửi lại (sinh ở nơi phát sinh sự kiện, không sinh lại lúc gửi).</p>
+<p><b>Dọn dẹp:</b> bảng <code>processed_event</code> lớn dần; giữ theo cửa sổ thời gian lớn hơn thời gian tối đa mà một bản trùng có thể xuất hiện (retention của topic).</p>
+</details>
+
+<h2>4. Usecase oái oăm</h2>
+<h3>(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
+<p>Dịch vụ lưu đơn vào DB rồi <code>send</code> sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. <b>Outbox</b>: ghi sự kiện vào bảng <code>outbox</code> <em>cùng transaction DB</em> với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.</p>
+<h3>(b) Kho + đơn hàng: transaction chỉ phủ trong Kafka</h3>
+<p>Consume "đơn mới" → produce "đã giữ hàng" trong một transaction Kafka là exactly-once <em>trong Kafka</em>. Nhưng bước "trừ tồn kho trong DB" ở giữa nằm ngoài. Nếu bạn nói trong họp "bên mình có exactly-once", câu hỏi kế tiếp sẽ là "với DB thì sao?". Câu trả lời trung thực: at-least-once + idempotent consumer cho DB; transaction Kafka dùng khi cả đầu vào và đầu ra đều là topic.</p>
+<h3>(c) Producer chết giữa transaction: consumer đứng yên</h3>
+<p>Producer transactional bị kill -9 khi transaction đang mở. Consumer <code>read_committed</code> không đọc qua LSO cho tới khi coordinator đóng transaction (sau <code>transaction.timeout.ms</code>, mặc định 60 giây). Tức là một sự cố nhỏ ở producer biến thành độ trễ cho mọi consumer <code>read_committed</code> của partition đó. Hạ <code>transaction.timeout.ms</code> nếu nghiệp vụ không cho phép chờ lâu; transaction chưa tới 60 giây thì đừng hạ quá thấp. (Chưa có lab cho tình huống này.)</p>
+<h3>(d) <code>transactional.id</code> trùng giữa hai instance</h3>
+<p>Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trước (<code>ProducerFencedException</code>, lỗi fatal chỉ còn <code>close()</code>). Hệ quả vận hành: prefix cần khác nhau mỗi instance, nhưng ổn định qua restart nếu muốn giữ tính chống trùng qua restart. Điều này xung đột với autoscaling kiểu "pod tên ngẫu nhiên": cần một cách đặt tên ổn định (ví dụ StatefulSet). Ghi vào danh sách câu hỏi cho platform team.</p>
+<h3>(e) Nếu là ngân hàng</h3>
+<p>"At-least-once + idempotent consumer với <code>UNIQUE(eventId)</code> trong cùng transaction DB, kèm outbox ở phía phát" là thiết kế mặc định cho sự kiện tiền. Transaction Kafka chỉ thêm khi có luồng topic → topic thật sự.</p>
+
+<h2>5. Tự nói thành lời</h2>
+<p>Trong 60 giây: <i>"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."</i> Dùng: at-least-once, idempotent, outbox, <code>read_committed</code>, LSO.</p>
+
+<h2>6. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> mục "Message Delivery Semantics" trong <a href="https://kafka.apache.org/44/design/design/">Design</a>, rồi <a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html">Spring Kafka: Exactly Once</a> và <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">Transactions</a> (tổng khoảng 30 phút).<br>
+<b>Bổ trợ:</b> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense">KIP-890</a> (đọc phần động cơ).<br>
+<b>Mã nguồn bài này:</b> <code>labs/05-scenarios</code> (<code>S9IdempotentConsumer</code>, <code>S10Transactions</code>). <b>Tra nhanh:</b> <a href="../reference/0003-tricky-scenarios.html">Sổ tay</a>, nhóm C (E2, E3).</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0008-topic-design.html">Bài 8: thiết kế topic</a>: gom mọi thứ đã học thành quyết định cho một topic mới.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "outbox polling hay CDC?", "dedup nên giữ bao lâu?". Dán kết quả quiz và những gì bạn thấy khi chạy s9/s10.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('predict'), [
+  { q: 'Mỗi sự kiện được gửi hai lần bởi ứng dụng, producer đã bật idempotence. Consumer cộng điểm mỗi lần nhận. Điểm của u1 (sự kiện 10 điểm) sẽ là?',
+    options: ['Mười điểm, vì producer idempotent', 'Hai mươi điểm, vì hai record riêng', 'Năm điểm, vì broker chia đôi', 'Không xác định, vì tùy cấu hình acks'],
+    answer: 1, why: 'Idempotence chỉ chống trùng do retry trong một session; hai lần gửi của ứng dụng là hai record khác nhau (đã quan sát ở s9: 20, 40, 60, 80, 100).' },
+  { q: 'Consumer dedup bằng khoá topic-partition-offset. Hai record trùng do ứng dụng gửi lại có hai offset khác nhau. Dedup này làm gì?',
+    options: ['Chặn cả hai record nhờ cùng nội dung', 'Chỉ chặn việc giao lại cùng một record', 'Chặn record thứ hai vì offset lớn hơn', 'Hỏng khi số partition bằng đúng ba']
+    , answer: 1, why: 'Khoá theo offset chỉ nhận ra "cùng record được giao lại". Hai record gửi lại có hai offset nên cả hai đều lọt. Cần khoá theo mã nghiệp vụ (eventId).' }
+]);
+Quiz.mount(document.getElementById('predict2'), [
+  { q: 'Trong s10, consumer đọc topic s10-out bằng read_uncommitted sẽ thấy gì về bản ghi của transaction đã abort?',
+    options: ['Không thấy, vì đã bị xóa ngay', 'Thấy, vì chế độ này đọc cả bản abort', 'Thấy nhưng đánh dấu để bỏ qua sau', 'Chỉ thấy khi bật enable.auto.commit']
+    , answer: 1, why: 'read_uncommitted trả mọi record, kể cả của transaction đã abort; read_committed chỉ trả record đã commit (tới LSO).' }
+]);
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Dedup bằng một Set<String> trong RAM của consumer sai ở điểm nào khi service restart?',
+    options: ['Set đầy bộ nhớ nên service tự dừng', 'Set mất sau restart nên bản trùng lọt', 'Set làm chậm poll nên bị rebalance', 'Set không dùng được với nhiều partition']
+    , answer: 1, why: 'Crash giữa xử lý và ack làm record được giao lại; RAM đã mất nên không nhớ đã xử lý. Dedup phải nằm cùng transaction DB với tác dụng phụ.' },
+  { q: 'Mục đích chính của bảng outbox là gì?',
+    options: ['Ghi sự kiện cùng transaction với dữ liệu', 'Thay thế hoàn toàn topic trong Kafka', 'Giúp consumer đọc nhanh hơn từ DB', 'Giảm số partition cần dùng cho topic'],
+    answer: 0, why: 'Outbox giải bài toán ghi kép DB và Kafka: sự kiện nằm cùng transaction DB với dữ liệu, rồi một relay gửi lên Kafka (at-least-once).' },
+  { q: 'Nghiệp vụ đọc topic A rồi ghi topic B và commit offset. Công cụ nào của Kafka cho kết quả ghi đúng một lần trong Kafka?',
+    options: ['acks=all cùng min.insync.replicas=2', 'Transaction cùng isolation read_committed', 'enable.auto.commit đặt bằng giá trị true', 'Static membership qua group.instance.id']
+    , answer: 1, why: 'Transaction (offset commit cùng transaction với ghi) + consumer read_committed cho exactly-once trong phạm vi Kafka. Các lựa chọn khác phục vụ độ bền hoặc rebalance.' },
+  { q: 'Service nói "mình exactly-once". Câu hỏi trung thực đầu tiên bạn nên đặt lại là gì?',
+    options: ['Bao nhiêu partition dùng cho topic', 'Có dùng Spring Boot phiên bản mới', 'Đầu ra cuối cùng là Kafka hay DB', 'Broker chạy trên bao nhiêu máy chủ']
+    , answer: 2, why: 'Exactly-once của Kafka chỉ phủ luồng Kafka → Kafka. Nếu đầu ra là DB hay HTTP, cần at-least-once cộng idempotent consumer.' },
+  { q: 'Producer transactional bị kill giữa transaction. Consumer read_committed trên cùng partition sẽ thế nào?',
+    options: ['Đọc tiếp bình thường qua phần dở dang', 'Báo lỗi ngay và dừng consumer group', 'Đứng chờ tới khi transaction bị đóng', 'Tự chuyển sang chế độ read_uncommitted']
+    , answer: 2, why: 'read_committed không đọc qua LSO; transaction treo giữ LSO cho tới khi coordinator đóng nó sau transaction.timeout.ms (mặc định 60000).' }
+]);
+</script>
+</body>
+</html>

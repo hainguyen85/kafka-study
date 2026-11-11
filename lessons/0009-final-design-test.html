@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 9: Bài kiểm tra cuối</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+.timer { font-family: system-ui, sans-serif; font-size: 1.6rem; font-variant-numeric: tabular-nums; margin: .5rem 0; }
+.card textarea { width: 100%; min-height: 3.2rem; font: inherit; font-size: .85rem; padding: .35rem .5rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: var(--fg); box-sizing: border-box; }
+.card label { display: block; font-family: system-ui, sans-serif; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: .7rem; }
+.card button, .timer-row button { font: inherit; padding: .3rem .8rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: inherit; cursor: pointer; margin-right: .4rem; }
+</style>
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0008-topic-design.html">Bài 8</a> / Bài 9 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a> · <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">Managed trên AWS</a></nav>
+
+<h1>Bài 9: 30 phút, một bài toán lạ, nói như đang họp</h1>
+<p class="lede">Đây là bài kiểm tra cuối trong mission của bạn. Không có phần kiến thức mới: bạn dùng những gì đã học và chúng ta xem chỗ nào còn hổng.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mission đặt điều kiện thành công: cho một bài toán mới trong lĩnh vực bất kỳ, trong 30 phút tự đề xuất topic, key, số partition, cấu hình độ bền, cấu hình producer/consumer, cách xử lý trùng/lỗi, và giải thích đánh đổi bằng lời như đang họp. Bài này đúng là bài thi đó.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> một thẻ thiết kế hoàn chỉnh cho bài toán lạ, tự chấm bằng thang bên dưới, và một danh sách ngắn những chỗ cần học lại (nếu có).</p>
+
+<h2>1. Phần A: gọi lại tổng hợp (10 phút, không nhìn bài cũ)</h2>
+<p>Tám câu trộn lẫn các bài 1-8 (xen kẽ chủ đề, cố ý). Câu nào sai thì quay lại bài tương ứng sau khi làm xong phần B.</p>
+<div id="quiz"></div>
+
+<h2>2. Phần B: bài toán lạ (30 phút)</h2>
+<p><b>Cách làm:</b> đặt đồng hồ, điền thẻ bên dưới <em>không nhìn tài liệu</em>, rồi nói to 2 phút "như trong họp". Sau đó mới mở thang chấm và đáp án mẫu. Nếu bạn muốn một đề chưa từng thấy, bảo giáo viên "ra đề cho tôi" và dùng cùng thẻ.</p>
+
+<div class="mission"><b>Đề mẫu: bán vé sự kiện</b>
+Một sàn bán vé mở bán 5.000 ghế cho 50.000 người cùng giành, đỉnh khoảng 20.000 yêu cầu/giây trong 2 phút. Người dùng giữ ghế trong 10 phút để thanh toán; hết hạn thì ghế được thả. Yêu cầu: không bán một ghế hai lần; không mất thanh toán đã thành công; email xác nhận gửi ít nhất một lần, trùng thì chấp nhận được nhưng nên hiếm. Dịch vụ thanh toán bên thứ ba có thể gọi lại (webhook) nhiều lần.</div>
+
+<div class="timer-row">
+<div class="timer" id="clock">30:00</div>
+<button type="button" id="start">Bắt đầu</button><button type="button" id="stop">Dừng</button>
+</div>
+
+<div class="card" id="card">
+<label for="f1">1. Các topic và quan hệ giữa chúng (tên, ai ghi, ai đọc)</label><textarea id="f1"></textarea>
+<label for="f2">2. Key của từng topic, vì sao</label><textarea id="f2"></textarea>
+<label for="f3">3. Số partition và cách bạn chọn (kèm dư địa)</label><textarea id="f3"></textarea>
+<label for="f4">4. Độ bền: RF, min.insync.replicas, producer acks/idempotence, cách đọc kết quả gửi</label><textarea id="f4"></textarea>
+<label for="f5">5. Consumer: commit, xử lý trùng, xử lý lỗi (retry, DLT), thứ tự</label><textarea id="f5"></textarea>
+<label for="f6">6. Retention hay compaction, kích thước message, schema/eventId</label><textarea id="f6"></textarea>
+<label for="f7">7. Ba rủi ro lớn nhất và đánh đổi bạn đã chọn</label><textarea id="f7"></textarea>
+<label for="f8">8. Câu hỏi bạn sẽ hỏi platform team (managed Kafka)</label><textarea id="f8"></textarea>
+<p><button type="button" id="clear">Xoá thẻ</button> <span style="font-size:.8rem;color:var(--muted)">Thẻ được lưu trong trình duyệt của bạn (nếu trình duyệt cho phép), không gửi đi đâu.</span></p>
+</div>
+
+<h2>3. Thang chấm (tự chấm, mỗi mục 0-2 điểm)</h2>
+<table>
+<tr><th>#</th><th>Mục</th><th>2 điểm khi bạn...</th><th>Bài</th></tr>
+<tr><td>1</td><td>Key và thứ tự</td><td>chọn key theo đối tượng cần giữ thứ tự, và nêu rủi ro key nóng hoặc key quá thô</td><td>2, 8</td></tr>
+<tr><td>2</td><td>Partition</td><td>gắn số partition với song song hoá cần có, nói được không giảm được và tăng làm đổi mapping</td><td>2, 8</td></tr>
+<tr><td>3</td><td>Độ bền</td><td>nêu đủ RF=3, minISR=2 ở topic, acks=all, và đánh đổi sẵn sàng/bền; nói rõ lỗi gửi được đọc ở đâu</td><td>4</td></tr>
+<tr><td>4</td><td>Consumer</td><td>tắt auto-commit hoặc ack sau xử lý, nêu crash ở đâu gây trùng, chọn ack-mode</td><td>5</td></tr>
+<tr><td>5</td><td>Trùng</td><td>dedup bằng mã nghiệp vụ trong cùng transaction DB với tác dụng phụ; nhắc webhook gọi lại; nói đúng phạm vi exactly-once</td><td>7</td></tr>
+<tr><td>6</td><td>Lỗi</td><td>có retry giới hạn + DLT cùng số partition + cảnh báo/replay; nêu đánh đổi thứ tự của retry topic</td><td>6</td></tr>
+<tr><td>7</td><td>Dữ liệu</td><td>chọn retention/compaction hợp lý, nêu kích thước message và <code>eventId</code>/phiên bản schema</td><td>8</td></tr>
+<tr><td>8</td><td>Nói như họp</td><td>mở bằng yêu cầu, đi qua quyết định kèm đánh đổi, kết bằng rủi ro còn lại và câu hỏi cho platform team</td><td>Tất cả</td></tr>
+</table>
+<p><b>Cách đọc điểm:</b> 13-16 điểm: sẵn sàng "chém". 9-12: quay lại bài ứng với các mục bạn được 0-1. Dưới 9: làm lại một đề khác sau khi ôn các bài yếu. Điểm này tự chấm nên mang tính hướng dẫn; dán thẻ cho giáo viên để chấm giúp.</p>
+
+<h2>4. Đáp án mẫu (mở sau khi đã làm)</h2>
+<details>
+<summary>Mở đáp án mẫu cho đề bán vé</summary>
+<p><b>Topic (gợi ý):</b> <code>seat-commands</code> (yêu cầu giữ ghế), <code>seat-events</code> (kết quả: đã giữ, từ chối, đã thả), <code>payment-events</code> (kết quả thanh toán, gồm webhook), <code>notifications</code> (gửi email). Mỗi topic có DLT riêng.</p>
+<p><b>Key:</b> <code>seatId</code> cho <code>seat-commands</code> và <code>seat-events</code>: mọi yêu cầu cho cùng một ghế đi vào cùng một partition, được xử lý tuần tự bởi một consumer, nên "ai thắng ghế" là quyết định có thứ tự. Đánh đổi: key theo <code>eventId</code> (sự kiện) sẽ dồn mọi yêu cầu vào một partition: tải nóng và không song song. <code>orderId</code> cho <code>payment-events</code>. <code>userId</code> hoặc <code>notificationId</code> cho <code>notifications</code>.</p>
+<p><b>Partition:</b> tính từ đỉnh 20.000 yêu cầu/giây và số consumer cần chạy song song, cộng dư địa vì không giảm được và tăng làm đổi mapping; kiểm quota partition của dịch vụ managed. Con số cụ thể cần đo, không đoán.</p>
+<p><b>Độ bền:</b> <code>seat-commands</code> và <code>payment-events</code>: RF=3, minISR=2, <code>acks=all</code>, idempotence, đọc kết quả gửi bằng <code>whenComplete</code>/<code>get</code>; nếu gửi lỗi thì API trả lỗi cho người dùng chứ không âm thầm nuốt. Hỏi platform team về <code>unclean.leader.election.enable</code>.</p>
+<p><b>Không bán hai lần:</b> bảo đảm cuối cùng nằm ở <em>DB</em>, không ở Kafka: cập nhật ghế bằng điều kiện (<code>UPDATE seat SET status='HELD' WHERE id=? AND status='FREE'</code>) hoặc ràng buộc duy nhất. Kafka cho thứ tự và giảm tranh chấp; DB là trọng tài. Consumer idempotent: <code>UNIQUE(commandId)</code> trong cùng transaction DB, ack sau COMMIT.</p>
+<p><b>Thanh toán:</b> webhook của bên thứ ba có thể gọi lại: khoá dedup là mã giao dịch của họ (mã nghiệp vụ, không phải offset). Phía phát dùng outbox để ghi DB và sự kiện cùng transaction.</p>
+<p><b>Lỗi:</b> <code>DefaultErrorHandler</code> + <code>DeadLetterPublishingRecoverer</code> (DLT cùng số partition, minISR=2), back-off ngắn cho lỗi tạm thời, không retry lỗi dữ liệu; cảnh báo khi DLT có record; có quy trình replay. Với <code>seat-commands</code> thứ tự theo ghế quan trọng nên ưu tiên blocking retry ngắn thay vì retry topic.</p>
+<p><b>Hết hạn giữ ghế (10 phút):</b> đây là bộ đếm giờ nghiệp vụ. Trong những gì chúng ta đã học Kafka không có hẹn giờ giao message (retry topic chỉ phục vụ retry), nên đặt hạn trong DB và một job quét định kỳ, rồi phát sự kiện <code>SeatReleased</code>. Ghi chú: đây là quyết định thiết kế, không phải tính năng Kafka.</p>
+<p><b>Thông báo:</b> at-least-once, dedup theo <code>notificationId</code> (hiếm trùng, không nghiêm trọng); sự kiện này chịu được minISR thấp hơn nếu doanh nghiệp đồng ý, nhưng với mail xác nhận thanh toán thì dùng cấu hình như thanh toán cho đơn giản.</p>
+<p><b>Dữ liệu:</b> <code>retention.ms</code> vài ngày cho command (đủ để sửa lỗi và replay), dài hơn cho <code>payment-events</code> nếu cần đối soát; không compaction vì cần lịch sử. Message nhỏ; <code>eventId</code> (hoặc <code>commandId</code>) và phiên bản schema ngay từ đầu.</p>
+<p><b>Rủi ro còn lại cần nói:</b> (1) đỉnh tải vượt dự tính làm lag tăng và hết hạn giữ ghế trước khi xử lý xong: cần giám sát lag; (2) key nóng nếu một ghế bị tranh quá nhiều; (3) DLT không ai xem.</p>
+<p><b>Câu hỏi cho platform team:</b> xem 8 câu ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>, đặc biệt: ai sở hữu cấu hình cụm, <code>unclean.leader.election.enable</code>, quyền tạo topic và trần partition, trần kích thước message, và lịch bảo trì (broker khởi động lại lần lượt, producer cần <code>delivery.timeout.ms</code> đủ dài).</p>
+</details>
+
+<h2>5. Sau bài này</h2>
+<ul class="tight">
+<li><b>Dán thẻ của bạn cho giáo viên</b> để chấm và chỉ ra chỗ cần ôn; mình sẽ ghi một learning record dựa trên kết quả thật, không phải trên dự đoán.</li>
+<li><b>Chạy những lab chưa kiểm chứng:</b> lab 04 (ba thí nghiệm độ bền), s6, s10, s13. Kết quả của bạn quyết định các câu "Mong đợi" trong bài 4, 5, 7, 8 còn đúng không.</li>
+<li><b>Hỏi platform team</b> 8 câu ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a> ngay tuần đầu onboarding; và nếu muốn học thêm Schema Registry, nói để mình chạy research có nguồn trước khi dạy.</li>
+<li><b>Cộng đồng:</b> xem mục Communities trong <code>RESOURCES.md</code> để kiểm tra "chém" của bạn với người làm thật.</li>
+</ul>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên. Một yêu cầu rất hữu ích: "ra cho tôi một đề khác" (domain bất kỳ), hoặc "đóng vai người phản biện thiết kế của tôi".</div>
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Một message được ghi vào partition 2 với offset 7. Điều nào đúng về thứ tự?',
+    options: ['Nó đứng sau mọi message cũ hơn trong topic', 'Nó đứng sau offset 6 của partition 2', 'Nó đứng sau offset 6 ở mọi partition', 'Nó có thể được đọc trước offset 6 cùng partition'],
+    answer: 1, why: 'Thứ tự chỉ được đảm bảo trong một partition (Bài 2).' },
+  { q: 'Cụm 3 node combined mode. Hai node chết cùng lúc. Vì sao cụm không dùng được?',
+    options: ['Dữ liệu trong topic bị xoá hết', 'Producer tự tắt vì acks quá cao', 'Consumer group bị giải tán vĩnh viễn', 'Mất đa số controller của quorum'],
+    answer: 3, why: 'Quorum cần đa số controller; 3 controller chịu được 1 lỗi (Bài 3).' },
+  { q: 'acks=all, min.insync.replicas=1, ISR chỉ còn leader, leader chết. Với unclean.leader.election.enable=false, partition ra sao?',
+    options: ['Offline cho tới khi một replica ISR sống lại', 'Tự bầu follower ngoài ISR làm leader ngay', 'Vẫn ghi bình thường nhờ min.insync.replicas', 'Tự chuyển sang topic dự phòng cùng tên'],
+    answer: 0, why: 'Chọn nhất quán: chờ replica trong ISR; unclean=true mới cho bầu replica ngoài ISR và chấp nhận mất dữ liệu (Bài 4).' },
+  { q: 'Listener giao việc cho thread pool rồi return; auto-commit bật. Crash. Điều gì có thể xảy ra?',
+    options: ['Chỉ trùng, không bao giờ mất', 'Chỉ chậm, không mất không trùng', 'Có thể mất việc đã commit chưa xong', 'Broker tự giữ việc cho lần sau'],
+    answer: 2, why: 'Offset đi trước việc xử lý nên có thể mất (Bài 5).' },
+  { q: 'Spring Kafka mặc định, message hỏng làm listener ném lỗi. Sau 10 lần giao thì sao?',
+    options: ['Log ERROR rồi bị bỏ qua', 'Vào topic -dlt tự động', 'Consumer dừng cho tới khi sửa', 'Quay lại đầu hàng đợi mãi mãi'],
+    answer: 0, why: 'DefaultErrorHandler mặc định chỉ log và commit offset: mất im lặng (Bài 6).' },
+  { q: 'Hai record trùng do ứng dụng gửi lại có offset khác nhau. Khoá dedup nào bắt được cả hai?',
+    options: ['Offset của record trong partition', 'Số partition cộng với tên topic', 'Thời điểm nhận của consumer', 'Mã nghiệp vụ của sự kiện'],
+    answer: 3, why: 'Chỉ mã nghiệp vụ (eventId) ổn định qua các lần gửi lại (Bài 7).' },
+  { q: 'Topic 6 partition cần tăng lên 12 mà vẫn giữ thứ tự theo key. Nhận định đúng nhất?',
+    options: ['Không đảm bảo: key có thể đổi partition', 'Làm được nếu bật idempotence cho producer', 'Làm được nếu đặt lại min.insync.replicas', 'Làm được, Kafka tự chia lại dữ liệu cũ'],
+    answer: 0, why: 'Tăng partition làm đổi mapping key và không phân phối lại dữ liệu cũ (Bài 8, s12).' },
+  { q: 'Một dịch vụ nói "exactly-once". Dữ liệu cuối cùng được ghi vào DB quan hệ. Bạn nên hiểu thế nào?',
+    options: ['Đúng, vì transaction Kafka bao cả DB', 'Đúng, vì producer đã bật idempotence', 'Chỉ đúng nếu có dedup ở phía DB', 'Sai, vì acks=all luôn gây trùng']
+    , answer: 2, why: 'Transaction Kafka chỉ phủ Kafka→Kafka; với DB cần at-least-once + idempotent consumer (Bài 7).' }
+]);
+
+(function () {
+  var ids = ['f1','f2','f3','f4','f5','f6','f7','f8'], KEY = 'kafka-bai9-card';
+  var data = {};
+  try { data = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  ids.forEach(function (id) {
+    var t = document.getElementById(id);
+    if (data[id]) t.value = data[id];
+    t.addEventListener('input', function () {
+      data[id] = t.value;
+      try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+    });
+  });
+  document.getElementById('clear').addEventListener('click', function () {
+    ids.forEach(function (id) { document.getElementById(id).value = ''; });
+    data = {}; try { localStorage.removeItem(KEY); } catch (e) {}
+  });
+  var clock = document.getElementById('clock'), left = 1800, h = null;
+  function draw() { var m = Math.floor(left / 60), s = left % 60; clock.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s; }
+  document.getElementById('start').addEventListener('click', function () {
+    if (h) return; left = 1800; draw();
+    h = setInterval(function () { left--; draw(); if (left <= 0) { clearInterval(h); h = null; clock.textContent = 'Hết giờ'; } }, 1000);
+  });
+  document.getElementById('stop').addEventListener('click', function () { if (h) { clearInterval(h); h = null; } });
+})();
+</script>
+</body>
+</html>

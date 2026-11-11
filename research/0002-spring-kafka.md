@@ -361,6 +361,11 @@ Các khoá trong 4 file trên đều có trong metadata ([jar-meta]) trừ giá 
 
 ---
 
+## Đính chính sau khi chạy thử (2026-11-11)
+
+- Mục 2.2 ghi "nếu factory không đặt ack mode thủ công thì Acknowledgment sẽ là null": **sai khi chạy thật**. Với Spring Kafka 4.1.2, listener khai báo tham số `Acknowledgment` mà container không ở chế độ manual thì ném `IllegalStateException: No Acknowledgment available as an argument, the listener container must have a MANUAL AckMode to populate the Acknowledgment.` và record bị xử lý như lỗi listener (DefaultErrorHandler thử 10 lần rồi bỏ qua). Phát hiện khi chạy `labs/05-scenarios` profile s6 trên broker nhúng.
+- Mục 2.1/2.3: `template.send(...)` trong transaction mà ném lỗi ngay sau đó thì lô chưa gửi bị hủy (`TransactionAbortedException: Failing batch since transaction was aborted`); muốn thấy bản ghi aborted phải chờ `.get()` trước khi ném lỗi (labs/05-scenarios S10).
+
 ## Unverified
 
 1. Tương thích kafka-clients **4.2.2** (Boot 4.1.2) với broker **4.4**: không có câu chính thức; chỉ có mốc "clients/brokers >= 2.1" cho 4.0 ([kf-upgrade]). Không fetch KIP-896.

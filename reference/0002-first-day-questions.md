@@ -4,7 +4,7 @@
 
 # 8 câu hỏi cho ngày đầu ở nơi mới
 
-Mỗi câu có một lý do kỹ thuật: câu trả lời đổi cách bạn cấu hình. Cập nhật 2026-11-10. Nguồn: [research/0001, mục 4](../research/0001-curriculum-coverage.md) và mục 1-2 cho phần giải thích.
+**Đã có bản mới hợp với dịch vụ managed (MSK / Confluent Cloud): [xem bảng này](0004-managed-kafka-msk-vs-confluent.md).** Bản dưới đây là bản đầu, viết khi còn nghĩ cụm là Apache Kafka tự vận hành. Mỗi câu có một lý do kỹ thuật: câu trả lời đổi cách bạn cấu hình. Cập nhật 2026-11-10. Nguồn: [research/0001, mục 4](../research/0001-curriculum-coverage.md) và mục 1-2 cho phần giải thích.
 
 | # | Câu hỏi | Đã biết | Vì sao quan trọng |
 |---|---|---|---|

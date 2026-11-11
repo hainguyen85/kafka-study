@@ -103,7 +103,7 @@ docker start kafka-2 kafka-3</code></pre>
 <b>Bổ trợ:</b> <a href="https://developer.confluent.io/courses/apache-kafka/events/">Confluent Developer: Kafka 101</a>, module Brokers và Replication.<br>
 <b>Mã nguồn bài này:</b> <code>labs/03-cluster/docker-compose.yml</code> (dựa trên <a href="https://github.com/apache/kafka/tree/trunk/docker/examples">ví dụ chính thức</a>) và <code>scripts/wizard-03-docker-kafka.sh</code>.</div>
 
-<p><b>Bài tiếp theo:</b> Bài 4, producer và độ bền: bạn sẽ chạy <code>labs/04-producer-durability</code> (Spring Kafka) để thấy <code>acks=1</code> làm mất message sau khi đã báo thành công, còn <code>acks=all</code> với <code>min.insync.replicas=2</code> thì không. Đã có sẵn code và README; bài viết sẽ làm sau khi bạn có kết quả thật từ cụm này.</p>
+<p><b>Bài tiếp theo:</b> <a href="0004-producer-durability.html">Bài 4, producer và độ bền</a>: mô phỏng để tự làm mất message, rồi chạy <code>labs/04-producer-durability</code> (Spring Kafka) trên cụm này.</p>
 
 <div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên (agent), ví dụ "ISR khác replica ở chỗ nào?", "vì sao combined mode không khuyến nghị?". Nếu wizard lỗi, dán nguyên thông báo lỗi. Dán dòng kết quả quiz để bài sau điều chỉnh đúng mức.</div>
 </main>

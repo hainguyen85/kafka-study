@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: lab-scenarios
+  main:
+    web-application-type: none
+  kafka:
+    bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
+    admin:
+      fail-fast: true
+    consumer:
+      auto-offset-reset: earliest   # mặc định của Kafka là latest: group mới sẽ bỏ qua dữ liệu đã có
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka.listener: INFO   # để thấy log rebalance của container
+
+# Số replica và min.insync.replicas cho topic lab. Cụm 3 broker: 3 và 2. Broker nhúng 1 node: 1 và 1.
+lab:
+  replicas: 3
+  min-isr: 2

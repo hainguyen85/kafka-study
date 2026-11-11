@@ -7,11 +7,19 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Bài 1: Bức tranh tổng thể về Kafka](lessons/0001-kafka-big-picture.md) · [html](lessons/0001-kafka-big-picture.html)
 - [Bài 2: Key, partition, offset](lessons/0002-key-partition-offset.md) · [html](lessons/0002-key-partition-offset.html)
 - [Bài 3: Dựng cụm 3 broker](lessons/0003-build-cluster.md) · [html](lessons/0003-build-cluster.html)
+- [Bài 4: Producer và độ bền](lessons/0004-producer-durability.md) · [html](lessons/0004-producer-durability.html)
+- [Bài 5: Consumer, offset, commit, rebalance](lessons/0005-consumer-offset-commit.md) · [html](lessons/0005-consumer-offset-commit.html)
+- [Bài 6: Poison pill, retry, DLT](lessons/0006-error-handling-dlt.md) · [html](lessons/0006-error-handling-dlt.html)
+- [Bài 7: Idempotent consumer, outbox, transaction](lessons/0007-idempotent-consumer-transactions.md) · [html](lessons/0007-idempotent-consumer-transactions.html)
+- [Bài 8: Thiết kế topic](lessons/0008-topic-design.md) · [html](lessons/0008-topic-design.html)
+- [Bài 9: Bài kiểm tra cuối](lessons/0009-final-design-test.md) · [html](lessons/0009-final-design-test.html)
 
 ## Bảng tra
 
 - [Bảng tra: bức tranh và khái niệm](reference/0001-core-concepts.md) · [html](reference/0001-core-concepts.html)
 - [Bảng tra: 8 câu hỏi cho ngày đầu](reference/0002-first-day-questions.md) · [html](reference/0002-first-day-questions.html)
+- [Sổ tay: usecase oái oăm](reference/0003-tricky-scenarios.md) · [html](reference/0003-tricky-scenarios.html)
+- [Bảng tra: Kafka managed trên AWS](reference/0004-managed-kafka-msk-vs-confluent.md) · [html](reference/0004-managed-kafka-msk-vs-confluent.html)
 
 ## Khác
 

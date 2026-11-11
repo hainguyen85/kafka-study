@@ -1,0 +1,8 @@
+# S10: transaction. Chỉ cần đặt transaction-id-prefix, Boot tự dựng KafkaTransactionManager (research/0002 mục 2.5).
+spring:
+  kafka:
+    producer:
+      transaction-id-prefix: tx-s10-
+    consumer:
+      isolation-level: read-committed
+      enable-auto-commit: false

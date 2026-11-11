@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 8: Thiết kế topic</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0007-idempotent-consumer-transactions.html">Bài 7</a> / Bài 8 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a> · <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">Managed trên AWS</a></nav>
+
+<h1>Bài 8: Bạn là người tạo topic. Bảy quyết định không sửa lại được dễ dàng</h1>
+<p class="lede">Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Bạn tự tạo và cấu hình topic ở nơi mới. Đây là phần thiết kế ảnh hưởng lớn nhất và khó đảo ngược nhất. Bài kiểm tra cuối (Bài 9) đòi bạn đưa ra các quyết định này trong 30 phút cho một bài toán lạ.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> với một bài toán, bạn điền được "thẻ thiết kế topic" (key, số partition, RF/minISR, retention hay compaction, kích thước message, tên, schema) kèm lý do và đánh đổi, và biết quyết định nào gần như không đổi lại được.</p>
+
+<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<ol class="steps">
+<li><b>Số partition chỉ tăng, không giảm; tăng làm key đổi partition.</b> Docs: sau khi mở rộng "messages with the same key may be routed to different partitions"; Kafka không phân phối lại dữ liệu cũ. Với consumer <code>auto.offset.reset=latest</code>, thêm partition "may cause silent message loss". <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
+<li><b>Song song hoá bị chặn bởi số partition:</b> trong một group, mỗi partition chỉ có một consumer; thêm consumer vượt số partition là consumer nhàn rỗi. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+<li><b>Retention mặc định:</b> <code>cleanup.policy=delete</code>, <code>retention.ms</code>=604800000 (7 ngày), <code>retention.bytes</code>=-1. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
+<li><b>Compaction:</b> <code>cleanup.policy=compact</code> giữ giá trị mới nhất mỗi key; thứ tự và offset không đổi. Compaction chạy ngầm, hạn chót "is not a hard guarantee"; <code>min.cleanable.dirty.ratio</code>=0.5, <code>min.compaction.lag.ms</code>=0, segment đang ghi không bị compact. Tombstone (value <code>null</code>) bị xoá sau <code>delete.retention.ms</code>=86400000; consumer chậm hơn thế có thể bỏ lỡ lệnh xoá. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/design/design/">[Design: log compaction]</a></li>
+<li><b>Kích thước message có bốn tầng giới hạn độc lập:</b> producer <code>max.request.size</code>=1048576; broker/topic <code>message.max.bytes</code>/<code>max.message.bytes</code> (kích thước batch sau nén); follower <code>replica.fetch.max.bytes</code>=1048576; consumer <code>max.partition.fetch.bytes</code>=1048576 và <code>fetch.max.bytes</code>=52428800, hai giá trị này <em>không phải giới hạn cứng</em> (batch đầu quá lớn vẫn được trả). Lỗi: <code>RecordTooLargeException</code>. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer]</a></li>
+<li><b>Độ bền là cấu hình của <em>topic</em></b> (Bài 4): RF và <code>min.insync.replicas</code> đặt khi tạo, kiểm bằng <code>--describe</code>. Với Spring: <code>TopicBuilder</code> không có <code>minInsyncReplicas()</code>, dùng <code>.config(...)</code>; topic đã tồn tại thì không bị sửa trừ khi bật <code>modify-topic-configs</code>. <a href="../research/0002-spring-kafka.md">[research/0002, mục 2.6]</a></li>
+<li><b>Tên và tạo topic:</b> tắt auto-create (Apache mặc định bật, MSK và Confluent Cloud tắt) để lỗi gõ tên không đẻ ra "topic ma" RF=1; tạo bằng code (<code>NewTopic</code>) hay IaC đều cần quyền. <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">[Bảng managed]</a></li>
+</ol>
+
+<h2>2. Quyết định số 1: key, và vì sao thêm partition là chuyện lớn</h2>
+<p>Đây là bộ mô phỏng của Bài 2, dùng lại để nhớ lại bằng tay. Gửi vài message với cùng key ở 3 partition, đổi sang 6 và gửi tiếp, quan sát key nằm ở nhiều partition. (Hàm băm trong mô phỏng không phải của Kafka thật.)</p>
+<div id="sim"></div>
+<div class="expect"><b>Số liệu thật từ lab:</b> <code>labs/05-scenarios</code> profile <code>s12</code> ghi 20 key vào topic 3 partition, tăng lên 6, ghi lại: <b>9/20 key đổi partition</b> (quan sát trên broker nhúng). Lab còn lại cho bạn chạy trên cụm: <code>--lab.phase=before</code>, tăng partition bằng <code>kafka-topics.sh --alter --partitions 6</code>, rồi <code>--lab.phase=after</code> (lệnh đầy đủ ở README).</div>
+
+<h2>3. Thẻ thiết kế topic</h2>
+<table>
+<tr><th>#</th><th>Quyết định</th><th>Câu hỏi để chọn</th><th>Khó đổi?</th></tr>
+<tr><td>1</td><td>Key</td><td>Thứ tự phải giữ theo đối tượng nào (đơn, tài khoản, thiết bị)? Key có phân bố đều không (key "nóng" làm một partition quá tải)?</td><td>Rất khó: đổi key là đổi cách đọc dữ liệu cũ</td></tr>
+<tr><td>2</td><td>Số partition</td><td>Cần tối đa bao nhiêu consumer song song? Có chấp nhận key đổi partition sau này không? Trần số partition của dịch vụ managed?</td><td>Chỉ tăng; tăng làm đổi mapping</td></tr>
+<tr><td>3</td><td>RF và <code>min.insync.replicas</code></td><td>Mất vài message có chấp nhận không? Mất 1 broker có phải tiếp tục ghi không?</td><td>Sửa được, nhưng phải biết để kiểm</td></tr>
+<tr><td>4</td><td>Retention hay compaction</td><td>Cần lịch sử hay chỉ cần trạng thái mới nhất? Bao lâu thì nhập lại dữ liệu cũ?</td><td>Sửa được; dữ liệu đã xoá thì mất</td></tr>
+<tr><td>5</td><td>Kích thước message</td><td>Payload lớn nhất là bao nhiêu? Có thể giữ file ngoài rồi gửi tham chiếu?</td><td>Sửa 4 tầng đồng bộ</td></tr>
+<tr><td>6</td><td>Tên, topic phụ (DLT, retry)</td><td>Quy ước tên? DLT có đủ partition, đúng minISR?</td><td>Đổi tên = topic mới</td></tr>
+<tr><td>7</td><td>Schema (định dạng)</td><td>Ai sở hữu schema, thay đổi thế nào mà không phá consumer cũ?</td><td>Phá vỡ tương thích là khó nhất</td></tr>
+</table>
+
+<div class="warn"><b>Schema: ranh giới của bài này.</b> Mission chỉ dành một bài ngắn cho Schema Registry, nhưng <b>chưa có nguồn chính nào về Schema Registry/Avro/Protobuf trong workspace</b> (xem mục Gaps của <code>RESOURCES.md</code>), và Schema Registry không thuộc Apache Kafka lõi. Mình không dạy chi tiết từ trí nhớ. Mức thiết kế duy nhất an toàn lúc này: <em>coi định dạng message là hợp đồng giữa các service</em>, đặt <code>eventId</code> và một trường phiên bản ngay từ đầu (Bài 7 cần <code>eventId</code>), và hỏi platform team về registry và quy tắc tương thích. Bước tiếp theo nếu bạn muốn: mình chạy một vòng research riêng cho Schema Registry/tương thích schema rồi mới viết bài.</div>
+
+<h2>4. Thực hành: bốn thẻ thiết kế</h2>
+<p>Điền từng thẻ <em>trước</em>, rồi mở đáp án. Không có đáp án duy nhất: chấm theo việc bạn nêu đúng đánh đổi hay chưa.</p>
+
+<h3>Thẻ A. Vị trí tài xế (gọi xe)</h3>
+<p>200.000 tài xế gửi toạ độ mỗi 3 giây. Hệ thống điều phối chỉ cần vị trí mới nhất; lịch sử chỉ để phân tích 1 ngày. Mất vài điểm không sao.</p>
+<details><summary>Mở đáp án gợi ý</summary>
+<p><b>Key:</b> <code>driverId</code> (thứ tự theo tài xế). <b>Partition:</b> theo số consumer cần chạy song song cộng dư địa, vì không giảm được. <b>RF/minISR:</b> có thể RF=3 minISR=1 và <code>acks=1</code>, chấp nhận mất điểm đổi lấy độ trễ và thông lượng (đúng ngược với dòng tiền). <b>Retention:</b> <code>delete</code> ngắn (ví dụ 1-2 ngày) vì vị trí cũ vô giá trị; không cần compaction cho điều phối vì consumer luôn bám đuôi. <b>Cảnh báo:</b> 200.000/3 ≈ 67.000 message/giây: tính thông lượng và quota partition của dịch vụ managed trước khi chốt.</p></details>
+
+<h3>Thẻ B. Sự kiện thanh toán</h3>
+<p>Mỗi giao dịch có thể bị gửi lại; không được mất; thứ tự theo tài khoản; cần truy vết 90 ngày.</p>
+<details><summary>Mở đáp án gợi ý</summary>
+<p><b>Key:</b> <code>accountId</code> (thứ tự theo tài khoản; chú ý tài khoản "nóng"). <b>RF=3, minISR=2</b>, producer <code>acks=all</code> + idempotence + đọc kết quả gửi (Bài 4); <code>unclean.leader.election.enable=false</code> và kiểm giá trị thực tế trên dịch vụ managed. <b>Consumer:</b> tắt auto-commit, ack sau khi ghi DB, <code>UNIQUE(eventId)</code> (Bài 5, 7). <b>Lỗi:</b> <code>DefaultErrorHandler</code> + DLT cùng số partition, minISR=2, cảnh báo (Bài 6). <b>Retention:</b> <code>retention.ms</code> ≥ 90 ngày (nhớ <code>offsets.retention.minutes</code> mặc định 7 ngày nếu có consumer chạy thưa). <b>Phía phát:</b> outbox. <b>Bẫy:</b> blocking retry giữ thứ tự theo tài khoản nhưng làm cả partition đứng khi lỗi kéo dài.</p></details>
+
+<h3>Thẻ C. Bảng giá sản phẩm</h3>
+<p>Mỗi sản phẩm có giá thay đổi thường xuyên; dịch vụ mới khởi động phải nạp được giá hiện tại của mọi sản phẩm; có sản phẩm bị gỡ.</p>
+<details><summary>Mở đáp án gợi ý</summary>
+<p><b>Compaction:</b> <code>cleanup.policy=compact</code>, key = <code>productId</code>, value = giá; gỡ sản phẩm bằng tombstone (value <code>null</code>). Dịch vụ mới đọc từ <code>earliest</code> sẽ thấy giá mới nhất mỗi key (sau khi compaction chạy; trước đó vẫn có bản cũ, và nó không phải đảm bảo cứng). <b>Bẫy:</b> consumer chậm hơn <code>delete.retention.ms</code> (1 ngày mặc định) có thể bỏ lỡ tombstone nên giữ sản phẩm đã gỡ trong bộ nhớ. Trên MSK Express và Serverless có giới hạn về compaction (xem bảng managed). Code: <code>S13Compaction</code> (chưa chạy, xem README).</p></details>
+
+<h3>Thẻ D. Tài liệu quét (ảnh 2-5 MB)</h3>
+<details><summary>Mở đáp án gợi ý</summary>
+<p>Lựa chọn ưu tiên: <b>không đưa file vào Kafka</b>; lưu file ở object storage và gửi tham chiếu (pattern, không phải tính năng Kafka). Nếu bắt buộc đưa vào: nâng đồng bộ bốn tầng (producer <code>max.request.size</code>, topic <code>max.message.bytes</code>, <code>replica.fetch.max.bytes</code>, và kiểm consumer), cân nhắc nén; trên dịch vụ managed có thể có trần cứng (Confluent: 8 MB Basic/Standard, 20 MB Enterprise/Dedicated; MSK Serverless: 8 MiB) theo <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>. S11 đã chạy: mặc định lỗi ở producer (2000089 &gt; 1048576), nâng producer thì lỗi ở broker, nâng topic <code>max.message.bytes=3000000</code> thì thành công.</p></details>
+
+<div class="step">
+<h3>Chạy ba lab trên cụm</h3>
+<pre><code>cd labs/05-scenarios
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s11        # 4 dòng kết quả
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s12 -Dspring-boot.run.arguments="--lab.phase=before"
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --alter --topic s12-keys --partitions 6
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s12 -Dspring-boot.run.arguments="--lab.phase=after"
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code></pre>
+<div class="warn"><b>Trạng thái trung thực:</b> s11 và s12 đã chạy trên broker nhúng (kết quả ở trên là quan sát được). <b>s13 (compaction) chưa từng được chạy</b>: code biên dịch được, kết quả "số record theo key trước và sau compaction" là điều bạn sẽ là người đầu tiên thấy. Compaction không tất định về thời điểm, nên nếu thấy chưa gọn, đó là hành vi bình thường chứ chưa chắc là lỗi.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã chạy s11, s12 trên cụm</label><br>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã chạy s13 và ghi lại số record trước/sau</label>
+</div>
+
+<h2>5. Điều khác đi khi nơi mới là dịch vụ managed</h2>
+<p>Cụm tự dựng của bạn là chỗ để <em>học</em>; nơi làm việc là dịch vụ do devops lo. Bốn thứ cần hỏi trước khi chốt thẻ thiết kế (chi tiết, so sánh MSK/Confluent và nguồn ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>): <b>(1)</b> RF/minISR có bị khoá không (MSK Express khoá, Serverless không cho sửa, Confluent nhận minISR 1 hoặc 2); <b>(2)</b> <code>unclean.leader.election.enable</code> hiệu lực là gì (MSK Standard mặc định <b>true</b>); <b>(3)</b> bạn có quyền tạo topic và trần partition là bao nhiêu; <b>(4)</b> trần kích thước message. Những khái niệm của bài 4-8 dùng được ở mọi nơi; chỉ giá trị và quyền thay đổi.</p>
+
+<h2>6. Tự nói thành lời</h2>
+<p>Trong 60 giây, cho "bảng giá sản phẩm": <i>"Mình tạo topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."</i></p>
+
+<h2>7. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://kafka.apache.org/44/configuration/topic-configs/">Topic configs</a> (đọc <code>cleanup.policy</code>, <code>retention.ms</code>, <code>min.insync.replicas</code>, <code>max.message.bytes</code>, các mục compaction) và mục "Log compaction" trong <a href="https://kafka.apache.org/44/design/design/">Design</a> (khoảng 30 phút).<br>
+<b>Bổ trợ:</b> <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">Basic operations</a>, mục thêm partition.<br>
+<b>Mã nguồn bài này:</b> <code>labs/05-scenarios</code> (<code>TopicsConfig</code>, <code>S11</code>, <code>S12</code>, <code>S13</code>). <b>Tra nhanh:</b> <a href="../reference/0003-tricky-scenarios.html">Sổ tay</a>, nhóm D.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0009-final-design-test.html">Bài 9: bài kiểm tra cuối</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "chọn bao nhiêu partition cho topic này?", "key nóng xử lý thế nào?". Dán kết quả quiz và thẻ thiết kế bạn tự điền để mình chấm.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/partition-sim.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+PartitionSim.mount(document.getElementById('sim'), { keys: ['DRV-001', 'DRV-002', 'DRV-003'], partitions: [3, 6] });
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Topic 3 partition cần tăng lên 6 vì lượng tải tăng. Điều nào đúng về dữ liệu và key?',
+    options: ['Dữ liệu cũ được chia lại theo partition mới', 'Key mới có thể đi partition khác key cũ', 'Mọi key giữ nguyên partition ban đầu', 'Chỉ các key chưa từng xuất hiện bị đổi']
+    , answer: 1, why: 'Kafka không phân phối lại dữ liệu cũ; sau khi tăng, message cùng key có thể đi tới partition khác (s12: 9/20 key đổi). Thứ tự theo key bị vỡ qua điểm tăng.' },
+  { q: 'Bảng giá cần "giá mới nhất mỗi sản phẩm" cho service khởi động lại. Chọn cấu hình nào?',
+    options: ['cleanup.policy=compact với key là productId', 'cleanup.policy=delete và retention ngắn', 'min.insync.replicas bằng ba cho topic', 'Số partition bằng số sản phẩm đang bán']
+    , answer: 0, why: 'Compaction giữ giá trị mới nhất mỗi key. Xoá sản phẩm bằng tombstone (value null). Retention theo thời gian sẽ xoá cả giá còn hiệu lực.' },
+  { q: 'Message 2 MB bị RecordTooLargeException. Bạn nâng max.request.size ở producer lên 3 MB. Điều gì rất có thể xảy ra tiếp?',
+    options: ['Gửi thành công và consumer đọc được', 'Producer tự chia nhỏ message cho vừa', 'Consumer báo lỗi vì fetch size thấp', 'Broker vẫn từ chối vì giới hạn của topic']
+    , answer: 3, why: 'Bốn tầng giới hạn độc lập (s11): sau producer tới topic max.message.bytes. Consumer mặc định vẫn đọc được record 2 MB vì fetch size không phải giới hạn cứng.' },
+  { q: 'Topic dòng tiền cần "không mất", 3 broker chịu mất 1 mà vẫn ghi được. Cặp RF và min.insync.replicas hợp lý?',
+    options: ['RF=3 và min.insync.replicas=2', 'RF=3 và min.insync.replicas=3', 'RF=2 và min.insync.replicas=2', 'RF=1 và min.insync.replicas=1'],
+    answer: 0, why: 'RF=3, minISR=2 cho phép mất một broker mà vẫn ghi an toàn; minISR=3 làm mất một broker là ngừng ghi (thí nghiệm strict ở Bài 4).' },
+  { q: 'Nơi làm việc dùng MSK Standard. Giá trị mặc định nào có thể làm bạn mất dữ liệu đã ack khi partition sống lại?',
+    options: ['num.partitions của mỗi topic', 'auto.create.topics.enable', 'unclean.leader.election.enable', 'delete.retention.ms của compaction']
+    , answer: 2, why: 'Theo bảng managed: MSK Standard mặc định unclean.leader.election.enable=true (non-tiered), trong khi Apache là false. Bật nghĩa là chấp nhận mất dữ liệu để partition sống lại.' }
+]);
+</script>
+</body>
+</html>

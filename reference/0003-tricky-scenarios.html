@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sổ tay: usecase oái oăm</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>main { max-width: 60rem; } table { font-size: .8rem; } td:first-child { white-space: nowrap; font-weight: 600; }</style>
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · <a href="0004-managed-kafka-msk-vs-confluent.html">Kafka managed trên AWS</a> · <a href="../labs/05-scenarios/README.md">Lab 05</a> · <a href="../labs/04-producer-durability/README.md">Lab 04</a></nav>
+<h1>Sổ tay: usecase oái oăm và cách xử lý</h1>
+<p class="lede">Triệu chứng, nguyên nhân, cấu hình hoặc thiết kế để xử lý, code để thử, và <b>trạng thái kiểm chứng trung thực</b>. Cập nhật 2026-11-11. Danh mục gốc (16 tình huống, có nguồn) nằm ở <a href="../research/0001-curriculum-coverage.md">research/0001, mục 2</a>.</p>
+
+<h2>Trạng thái kiểm chứng: đọc trước</h2>
+<ul class="tight">
+<li><b>Đã chạy</b>: code đã chạy thật trên broker Kafka nhúng 1 node (KRaft) và kết quả bên dưới là kết quả quan sát được. Broker nhúng chỉ có 1 node nên <b>không kiểm tra được độ bền đa broker</b> (acks, ISR, kill broker).</li>
+<li><b>Có code</b>: code biên dịch được nhưng chưa chạy với cụm 3 broker (máy chưa có Docker). Phần "kết quả dự kiến" trong README là dự đoán từ tài liệu.</li>
+<li><b>Đã sửa, chưa chạy lại</b>: lần chạy thử phát hiện lỗi trong code của mình, đã sửa nhưng chưa biên dịch và chạy lại (harness bị dừng khi máy thiếu bộ nhớ).</li>
+<li><b>Chưa có code</b>: chỉ mô tả từ tài liệu chính thức.</li>
+</ul>
+
+<h2>A. Ghi message (producer)</h2>
+<table>
+<tr><th>Mã</th><th>Tình huống</th><th>Nguyên nhân</th><th>Xử lý</th><th>Code</th><th>Trạng thái</th></tr>
+<tr><td>P1</td><td>Flash sale: đơn "đã nhận" nhưng biến mất sau khi broker leader chết</td><td><code>acks=1</code> chỉ leader xác nhận; hoặc ISR co lại còn mình leader và <code>min.insync.replicas=1</code></td><td><code>acks=all</code> (mặc định client 4.x), RF=3, <code>min.insync.replicas=2</code> đặt ở topic. <b>MSK Standard:</b> <code>unclean.leader.election.enable</code> mặc định <b>true</b>, phải đặt false</td><td>Lab 04: <code>risky</code> so với <code>safe</code>, rồi <code>verify</code></td><td>Có code</td></tr>
+<tr><td>P2</td><td>IoT: cụm "sống" nhưng producer không ghi được</td><td>ISR nhỏ hơn <code>min.insync.replicas</code> sau khi follower bị loại (<code>replica.lag.time.max.ms</code> 30 giây) → <code>NotEnoughReplicasException</code>; producer thử lại tới hết <code>delivery.timeout.ms</code></td><td>Đặt <code>min.insync.replicas</code> ≤ RF-1 (AWS khuyến nghị); chọn đánh đổi bền/sẵn sàng theo domain</td><td>Lab 04: <code>strict</code> (topic minISR=3, kill 1 broker)</td><td>Có code</td></tr>
+<tr><td>P3</td><td>Game: partition "chết" thay vì mất dữ liệu</td><td>Khi mọi replica ISR chết, Kafka chờ replica nhất quán (<code>unclean.leader.election.enable=false</code>)</td><td>Giữ false; chấp nhận mất sẵn sàng. Bật true là đổi dữ liệu lấy sẵn sàng</td><td>-</td><td>Chưa có code</td></tr>
+<tr><td>P4</td><td>Logistics: DELIVERED đến trước PICKED_UP dù cùng key</td><td>Retry + <code>max.in.flight&gt;1</code> khi idempotence tắt có thể đảo thứ tự</td><td>Giữ <code>enable.idempotence=true</code> (mặc định 4.x), in-flight ≤ 5. Đặt tường minh idempotence=true cùng acks≠all sẽ ném <code>ConfigException</code> (đã kiểm chứng bằng client thật)</td><td>-</td><td>Chưa có code (khó tái hiện tất định)</td></tr>
+<tr><td>P5</td><td>Quét tài liệu: message 2 MB, sửa xong tầng này lại lỗi tầng khác</td><td>Bốn tầng giới hạn độc lập: <code>max.request.size</code> (producer), <code>max.message.bytes</code> (topic/broker), <code>replica.fetch.max.bytes</code>, fetch size của consumer (không phải giới hạn cứng)</td><td>Nâng đồng bộ từng tầng; nén; hoặc giữ file ngoài Kafka rồi gửi tham chiếu</td><td>Lab 05: <code>s11</code></td><td><b>Đã chạy</b></td></tr>
+</table>
+<p><b>Kết quả quan sát S11:</b> lần 1 (mặc định): <code>RecordTooLargeException: The message is 2000089 bytes when serialized which is larger than 1048576, which is the value of the max.request.size configuration.</code> Lần 2 (producer 3 MB, topic mặc định): <code>RecordTooLargeException: The request included a message larger than the max message size the server will accept.</code> Lần 3 (topic <code>max.message.bytes=3000000</code>): thành công. Lần 4: consumer mặc định (<code>max.partition.fetch.bytes</code> 1 MB) vẫn đọc được record 2 MB.</p>
+
+<h2>B. Đọc message (consumer)</h2>
+<table>
+<tr><th>Mã</th><th>Tình huống</th><th>Nguyên nhân</th><th>Xử lý</th><th>Code</th><th>Trạng thái</th></tr>
+<tr><td>C1</td><td>Gửi email: vừa mất vừa trùng sau crash</td><td>Auto-commit đẩy offset đi trước khi việc xử lý bất đồng bộ xong</td><td><code>enable.auto.commit=false</code>, ack thủ công <b>sau</b> khi xử lý xong (<code>ack-mode=manual_immediate</code>) → at-least-once, rồi chống trùng ở consumer (E2)</td><td>Lab 05: <code>s6</code>, <code>s6fix</code></td><td><code>s6fix</code>: <b>Đã chạy</b> (MẤT 0, TRÙNG 0 với crash giả lập đóng êm). <code>s6</code>: <b>Đã sửa, chưa chạy lại</b> (lần chạy đầu lỗi vì khai báo tham số <code>Acknowledgment</code> ở chế độ không manual)</td></tr>
+<tr><td>C2</td><td>OCR/xử lý ảnh: bị đá khỏi group, rebalance liên hồi, xử lý lặp</td><td>Không gọi <code>poll()</code> trong <code>max.poll.interval.ms</code> (mặc định 300000) → coi là chết</td><td>Giảm <code>max.poll.records</code> hoặc tăng <code>max.poll.interval.ms</code>; đẩy việc nặng sang worker (và pause/resume)</td><td>Lab 05: <code>s7</code></td><td><b>Đã chạy</b>: cả 3 offset đầu đều được xử lý <b>3 lần</b></td></tr>
+<tr><td>C3</td><td>Gọi xe: mỗi lần deploy cả group dừng vài giây</td><td>Giao thức rebalance cũ (classic) có rào chắn toàn group</td><td>Static membership (<code>group.instance.id</code> khác nhau mỗi instance; AWS khuyên luôn đặt); assignor cooperative sticky; hoặc <code>group.protocol=consumer</code> (KIP-848, Kafka ≥ 4.0)</td><td>-</td><td>Chưa có code (cần ≥ 2 process)</td></tr>
+<tr><td>C4</td><td>Job ETL nghỉ lễ quay lại: không đọc được gì hoặc nhảy tới cuối</td><td>Offset đã commit hết hạn sau <code>offsets.retention.minutes</code> (7 ngày); khi đó <code>auto.offset.reset</code> (mặc định <code>latest</code>) quyết định</td><td><code>earliest</code> hoặc <code>none</code>; tăng retention theo chu kỳ job</td><td>-</td><td>Chưa có code</td></tr>
+</table>
+
+<h2>C. Lỗi và trùng</h2>
+<table>
+<tr><th>Mã</th><th>Tình huống</th><th>Nguyên nhân</th><th>Xử lý</th><th>Code</th><th>Trạng thái</th></tr>
+<tr><td>E1</td><td>Một message hỏng (poison pill)</td><td>Mặc định Spring Kafka <code>DefaultErrorHandler</code> thử lại 10 lần giao rồi <b>chỉ log ERROR và bỏ qua</b>: message mất im lặng</td><td><code>DefaultErrorHandler</code> + <code>DeadLetterPublishingRecoverer</code> + <code>FixedBackOff</code>; topic <code>*-dlt</code> phải có ít nhất số partition của topic gốc. Đây là tính năng của Spring Kafka, docs Apache chỉ có DLQ cho Connect và Share Groups</td><td>Lab 05: <code>s8</code> so với <code>s8dlt</code></td><td><b>Đã chạy</b>: <code>s8</code> xử lý m0-m4, m6-m9, POISON không ở đâu cả; <code>s8dlt</code>: POISON nằm trong DLT</td></tr>
+<tr><td>E2</td><td>Đặt vé/tích điểm: bị cộng gấp đôi dù producer đã bật idempotence</td><td>Idempotence chỉ chống trùng trong một session của producer; ứng dụng tự gửi lại thì broker thấy hai record khác nhau</td><td>Chống trùng ở consumer bằng mã sự kiện, kiểu <code>UNIQUE(eventId)</code> trong cùng transaction với tác dụng phụ (outbox/inbox là pattern ứng dụng, không có docs chính thức)</td><td>Lab 05: <code>s9</code> so với <code>s9dedup</code></td><td><b>Đã chạy</b>: <code>s9</code> điểm {20,40,60,80,100} thay vì {10..50}; <code>s9dedup</code> đúng. Dedup trong RAM chỉ để minh hoạ</td></tr>
+<tr><td>E3</td><td>Kho + đơn hàng: consume-transform-produce chỉ được ghi 1 lần</td><td>Transaction + <code>isolation.level=read_committed</code>; consumer mặc định <code>read_uncommitted</code> thấy cả bản ghi của transaction đã abort. Phạm vi exactly-once chỉ trong Kafka</td><td><code>spring.kafka.producer.transaction-id-prefix</code> (khác nhau mỗi instance), consumer <code>read-committed</code>, <code>enable-auto-commit=false</code></td><td>Lab 05: <code>s10</code></td><td><b>Đã sửa, chưa chạy lại</b>. Lần chạy đầu cho thấy <code>send</code> bất đồng bộ bị hủy cả lô khi transaction abort (<code>TransactionAbortedException</code>), nên phải chờ <code>.get()</code> mới thấy bản aborted</td></tr>
+</table>
+
+<h2>D. Thiết kế dữ liệu</h2>
+<table>
+<tr><th>Mã</th><th>Tình huống</th><th>Nguyên nhân</th><th>Xử lý</th><th>Code</th><th>Trạng thái</th></tr>
+<tr><td>D1</td><td>IoT: thêm partition làm thứ tự theo thiết bị bị vỡ</td><td>Key được băm theo số partition; Kafka không phân phối lại dữ liệu cũ và không giảm được số partition</td><td>Tính số partition từ đầu; dùng <code>auto.offset.reset</code> hợp lý khi tăng</td><td>Lab 05: <code>s12</code></td><td><b>Đã chạy</b>: tăng 3 lên 6 partition, <b>9/20 key đổi partition</b></td></tr>
+<tr><td>D2</td><td>Bảng giá sản phẩm: kỳ vọng mỗi key một bản ghi nhưng vẫn thấy nhiều</td><td>Compaction chạy ngầm trên segment đã đóng, không có hạn chót cứng; tombstone bị xoá sau <code>delete.retention.ms</code></td><td><code>cleanup.policy=compact</code>; hiểu consumer chậm có thể bỏ lỡ lệnh xoá. <b>Managed:</b> Express chỉ compact sau 256 MB/partition; Serverless 120 partition compact</td><td>Lab 05: <code>s13</code></td><td><b>Có code, chưa chạy</b></td></tr>
+<tr><td>D3</td><td>Microservice dùng chung cụm: gõ sai tên topic, không ai báo lỗi</td><td>Apache bật auto-create: topic mới lấy 1 partition và RF=1. MSK và Confluent Cloud tắt auto-create</td><td>Tạo topic có chủ đích (<code>NewTopic</code> / IaC) và kiểm tra quyền tạo topic</td><td>Lab 03 wizard (stage 5), <code>TopicsConfig</code></td><td>Có code</td></tr>
+</table>
+
+<h2>Cách dùng sổ tay khi "chém"</h2>
+<ul class="tight">
+<li>Mở bằng <b>triệu chứng</b> ("message biến mất", "bị cộng gấp đôi", "partition chậm") thay vì bằng tên cấu hình. Người nghe thường kể triệu chứng trước.</li>
+<li>Nói <b>đánh đổi</b> của cách xử lý: <code>min.insync.replicas=2</code> đổi sẵn sàng lấy bền; ack thủ công đổi tốc độ lấy an toàn; DLT đổi độ phức tạp lấy dấu vết.</li>
+<li>Gắn với dịch vụ thật: xem <a href="0004-managed-kafka-msk-vs-confluent.html">bảng MSK / Confluent Cloud</a> để biết cấu hình nào bị khoá hoặc mặc định khác.</li>
+</ul>
+</main>
+</body>
+</html>

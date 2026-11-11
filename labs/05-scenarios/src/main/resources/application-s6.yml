@@ -1,0 +1,6 @@
+# S6 (KHÔNG an toàn): auto-commit bật tường minh. Container Spring không ép false khi đã đặt tường minh.
+spring:
+  kafka:
+    consumer:
+      enable-auto-commit: true
+      auto-commit-interval: 500ms

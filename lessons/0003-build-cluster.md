@@ -200,6 +200,6 @@ Với acks=all, ghi bị từ chối khi ISR nhỏ hơn giá trị này. Đặt 
 >
 > **Mã nguồn bài này:** `labs/03-cluster/docker-compose.yml` (dựa trên [ví dụ chính thức](https://github.com/apache/kafka/tree/trunk/docker/examples)) và `scripts/wizard-03-docker-kafka.sh`.
 
-**Bài tiếp theo:** Bài 4, producer và độ bền: bạn sẽ chạy `labs/04-producer-durability` (Spring Kafka) để thấy `acks=1` làm mất message sau khi đã báo thành công, còn `acks=all` với `min.insync.replicas=2` thì không. Đã có sẵn code và README; bài viết sẽ làm sau khi bạn có kết quả thật từ cụm này.
+**Bài tiếp theo:** [Bài 4, producer và độ bền](0004-producer-durability.md): mô phỏng để tự làm mất message, rồi chạy `labs/04-producer-durability` (Spring Kafka) trên cụm này.
 
 > **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên (agent), ví dụ "ISR khác replica ở chỗ nào?", "vì sao combined mode không khuyến nghị?". Nếu wizard lỗi, dán nguyên thông báo lỗi. Dán dòng kết quả quiz để bài sau điều chỉnh đúng mức.

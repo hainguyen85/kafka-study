@@ -1,0 +1,7 @@
+# S6 sửa: tắt auto-commit, ack thủ công sau khi xử lý xong.
+spring:
+  kafka:
+    consumer:
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate

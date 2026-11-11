@@ -1,0 +1,7 @@
+# S7: xử lý (12 giây/record) lâu hơn max.poll.interval.ms (10 giây) => bị đá khỏi group.
+# Sửa thử:  --spring.kafka.consumer.max-poll-records=1 --spring.kafka.consumer.max-poll-interval=30s
+spring:
+  kafka:
+    consumer:
+      max-poll-records: 3
+      max-poll-interval: 10s
