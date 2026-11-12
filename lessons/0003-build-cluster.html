@@ -21,10 +21,21 @@ Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu nh�
 <h2>1. Kiến thức tối thiểu (có nguồn)</h2>
 <ol class="steps">
 <li><b>Mỗi node có thể vừa là broker vừa là controller.</b> <code>process.roles</code> nhận <code>broker</code>, <code>controller</code> hoặc cả hai (combined mode). Combined mode đơn giản cho lab nhưng "is not recommended in critical deployment environments." <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
-<li><b>Controller giữ metadata của cụm theo kiểu đồng thuận (quorum).</b> Cần đa số controller còn sống: "3 controllers tolerate 1 failure and 5 tolerate 2". Chịu N lỗi cần 2N+1 controller. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
-<li><b>Mỗi partition có một leader và các follower.</b> Producer chỉ ghi vào leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+<li><b>Controller giữ metadata của cụm theo kiểu đồng thuận (quorum), và quorum cần <em>đa số</em> controller còn sống.</b> Tài liệu: "3 controllers tolerate 1 failure and 5 tolerate 2"; muốn chịu được N controller hỏng thì cần 2N+1 controller. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a> Áp vào cụm lab (3 node, node nào cũng là controller):
+  <ul class="tight">
+  <li>Chết 1 node: còn 2/3, vẫn là đa số, cụm bầu được leader mới và chạy tiếp.</li>
+  <li>Chết 2 node: còn 1/3, không còn đa số. Node còn lại vẫn "sống" nhưng cụm không đổi được metadata, không bầu được leader: coi như không dùng được.</li>
+  <li>Hệ quả: số controller nên là số lẻ (3, 5). Thêm node thứ 4 không giúp chịu thêm lỗi (4 cần đa số 3, vẫn chỉ chịu được 1).</li>
+  </ul></li>
+<li><b>Mỗi partition có một leader và các follower.</b> Producer chỉ ghi vào leader; follower chép lại từ leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+<li><b>ISR (in-sync replicas) co giãn theo thời gian, không tức thì.</b> ISR là tập replica đang bám kịp leader. Follower bị loại khỏi ISR khi tụt lại quá <code>replica.lag.time.max.ms</code> (mặc định 30000, tức 30 giây), chứ không bị loại ngay khi nó chết. Nên ngay sau khi kill một broker, <code>--describe</code> có thể vẫn hiện ISR đủ 3; khoảng 30 giây sau mới co còn 2. Khi broker sống lại và bám kịp, nó vào lại ISR. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
 <li><b>Giá trị mặc định phía broker rất "mỏng":</b> <code>num.partitions=1</code>, <code>default.replication.factor=1</code>, <code>min.insync.replicas=1</code> và <code>auto.create.topics.enable=true</code>. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
-<li><b>Hộp "đọc tutorial cũ thì coi chừng":</b> từ Kafka 4.0, "ZooKeeper mode has been removed". Tutorial dùng <code>--zookeeper</code> hay <code>zookeeper.connect</code> không còn áp dụng. <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></li>
+<li><b>Vì sao lab đặt RF=3 và <code>min.insync.replicas=2</code>, không phải 3.</b> Khi producer dùng <code>acks=all</code>, broker từ chối ghi nếu ISR nhỏ hơn <code>min.insync.replicas</code>. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> Với RF=3:
+  <ul class="tight">
+  <li><code>min.insync.replicas=2</code>: mất 1 broker, ISR còn 2, vẫn ghi được, và mỗi ghi có ít nhất 2 bản sao.</li>
+  <li><code>min.insync.replicas=3</code>: mất 1 broker là ISR còn 2 &lt; 3, mọi ghi bị từ chối. Bền hơn không đáng kể mà mất sẵn sàng.</li>
+  <li><code>min.insync.replicas=1</code>: luôn ghi được, nhưng một ghi có thể chỉ nằm ở một bản sao. Bài 4 đi sâu vào cái bẫy này.</li>
+  </ul></li>
 </ol>
 
 <h2>2. Thực hành (mỗi bước có kết quả mong đợi)</h2>
@@ -94,6 +105,7 @@ docker start kafka-2 kafka-3</code></pre>
 
 <h2>4. Tự nói thành lời</h2>
 <p>Không nhìn tài liệu, giải thích trong 30 giây: <i>"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."</i> Dùng đúng các từ: leader, follower, ISR, controller, quorum.</p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0003-build-cluster.md">tóm tắt Bài 3</a> (đọc sau khi đã tự nói).</p>
 
 <h2>5. Kiểm tra</h2>
 <div id="quiz"></div>
@@ -115,9 +127,9 @@ Quiz.mount(document.getElementById('quiz'), [
   { q: 'Cụm lab có 3 node, mỗi node vừa là broker vừa là controller. Cụm chịu mất tối đa mấy node mà vẫn bầu được leader mới?',
     options: ['Một node, vì cần đa số controller sống', 'Hai node, vì chỉ cần một controller sống', 'Không node nào, mọi bản sao phải sống', 'Ba node, vì dữ liệu đã sao lưu'],
     answer: 0, why: 'Quorum cần đa số controller còn sống: 3 controller chịu được 1 lỗi (chịu N lỗi cần 2N+1 controller).' },
-  { q: 'Một tutorial bảo chạy kafka-topics.sh kèm --zookeeper. Với Kafka 4.4, điều nào đúng?',
-    options: ['Vẫn chạy bình thường nếu cài thêm ZooKeeper', 'Tutorial đã lỗi thời vì ZooKeeper bị gỡ', 'Chỉ chạy được trên broker dùng combined mode', 'Chạy được nhưng chậm hơn so với bootstrap'],
-    answer: 1, why: 'Từ Kafka 4.0 chỉ còn chế độ KRaft; ZooKeeper bị gỡ. Dùng --bootstrap-server.' },
+  { q: 'Cụm đang có 3 controller. Bạn thêm controller thứ 4. Cụm giờ chịu mất tối đa mấy controller mà vẫn hoạt động?',
+    options: ['Hai controller, vì đã có thêm một node', 'Một controller, vì đa số của bốn là ba', 'Ba controller, chỉ cần một node còn sống', 'Không controller nào, phải đủ cả bốn'],
+    answer: 1, why: 'Quorum cần đa số: 4 controller cần 3 còn sống, nên vẫn chỉ chịu được 1 lỗi như cụm 3. Muốn chịu 2 lỗi cần 5 controller (2N+1). Vì vậy số controller nên là số lẻ.' },
   { q: 'Một follower bị kill. Khi nào broker loại nó khỏi ISR?',
     options: ['Ngay lập tức khi container dừng chạy', 'Sau khi producer gửi thêm một message', 'Sau khi nó tụt lại quá replica.lag.time.max.ms', 'Khi controller khởi động lại toàn cụm'],
     answer: 2, why: 'Follower bị loại khỏi ISR khi tụt lại quá replica.lag.time.max.ms (mặc định 30000, tức 30 giây), không phải ngay lập tức.' },

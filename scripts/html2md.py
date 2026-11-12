@@ -299,6 +299,12 @@ def main():
             index.append(f"- [{title}]({folder}/{p.stem}.md) · [html]({folder}/{p.name})")
             print("ok", p.relative_to(ROOT))
         index.append("")
+        if folder == "lessons":  # tóm tắt từng bài: viết tay bằng Markdown, chỉ liệt kê
+            index += ["## Tóm tắt từng bài (ôn nhanh)", ""]
+            for m in sorted((ROOT / "summaries").glob("*.md")):
+                first = m.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
+                index.append(f"- [{first}](summaries/{m.name})")
+            index.append("")
     index += ["## Khác", "", "- [Mission](MISSION.md)", "- [Tài nguyên](RESOURCES.md)", "- [Ghi chú và lộ trình](NOTES.md)", ""]
     (ROOT / "INDEX.md").write_text("\n".join(index), encoding="utf-8", newline="\n")
 

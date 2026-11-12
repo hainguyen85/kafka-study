@@ -46,6 +46,12 @@ Sửa: key = **mã tài xế**. Toạ độ của một tài xế luôn cùng pa
 
 Topic `orders` dùng **mã shop** làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa *thứ tự* và *phân tải*: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.
 
+## Tự nói thành lời (60 giây)
+
+Không nhìn tài liệu, nói to: *"Một message có key đi vào partition nào, thứ tự được giữ tới đâu, offset là gì, và vì sao tăng số partition là chuyện lớn."*
+
+**Ôn nhanh:** [tóm tắt Bài 2](../summaries/0002-key-partition-offset.md) (đọc sau khi đã tự nói).
+
 ## 5. Kiểm tra (truy hồi từ trí nhớ)
 
 **1. Bản đồ cần vị trí mới nhất của từng tài xế, kể cả qua nhiều cuốc xe, theo đúng thứ tự gửi. Bạn chọn key nào?**

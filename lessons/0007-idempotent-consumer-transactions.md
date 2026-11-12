@@ -104,6 +104,8 @@ Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trư�
 
 Trong 60 giây: *"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."* Dùng: at-least-once, idempotent, outbox, `read_committed`, LSO.
 
+**Ôn nhanh:** [tóm tắt Bài 7](../summaries/0007-idempotent-consumer-transactions.md) (đọc sau khi đã tự nói).
+
 ## 6. Kiểm tra
 
 **1. Mỗi sự kiện được gửi hai lần bởi ứng dụng, producer đã bật idempotence. Consumer cộng điểm mỗi lần nhận. Điểm của u1 (sự kiện 10 điểm) sẽ là?**

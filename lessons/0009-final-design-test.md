@@ -191,6 +191,8 @@ Mở đáp án mẫu cho đề bán vé
 
 **Câu hỏi cho platform team:** xem 8 câu ở [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md), đặc biệt: ai sở hữu cấu hình cụm, `unclean.leader.election.enable`, quyền tạo topic và trần partition, trần kích thước message, và lịch bảo trì (broker khởi động lại lần lượt, producer cần `delivery.timeout.ms` đủ dài).
 
+**Ôn nhanh:** [tóm tắt Bài 9](../summaries/0009-final-design-test.md) (đọc sau khi đã tự nói).
+
 ## 5. Sau bài này
 
 - **Dán thẻ của bạn cho giáo viên** để chấm và chỉ ra chỗ cần ôn; mình sẽ ghi một learning record dựa trên kết quả thật, không phải trên dự đoán.

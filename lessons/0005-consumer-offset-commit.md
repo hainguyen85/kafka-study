@@ -117,6 +117,8 @@ Rolling restart 10 instance, mỗi lần một instance rời/vào là một l�
 
 Trong 45 giây: *"Consumer crash giữa chừng thì ... vì offset được commit ... Để không mất, mình ... và chấp nhận ... Để hết trùng thì ..."* Dùng: poll, commit, at-least-once, rebalance, `max.poll.interval.ms`.
 
+**Ôn nhanh:** [tóm tắt Bài 5](../summaries/0005-consumer-offset-commit.md) (đọc sau khi đã tự nói).
+
 ## 6. Kiểm tra
 
 **1. Consumer Kafka thuần đang auto-commit, và hàm xử lý chỉ giao việc cho thread pool rồi trả về. Crash xảy ra. Điều gì đúng?**

@@ -10,6 +10,12 @@ Bức tranh toàn cảnh trước, từng bộ phận sau.
 
 **Thắng lợi của bài này:** sau ~15 phút bạn kể lại được, không nhìn tài liệu, hành trình của một event đơn hàng từ service gửi tới các service nhận, gọi đúng tên 5 thành phần, và giải thích Kafka khác "gọi API trực tiếp" ở đâu.
 
+## Kafka là gì? (định nghĩa ngắn, trước khi vào bài)
+
+**Apache Kafka là một nền tảng "event streaming" phân tán:** một hệ thống để các ứng dụng *ghi* các sự kiện (event) vào, *lưu* chúng bền vững, và để các ứng dụng khác *đọc* chúng, theo thời gian thực hoặc đọc lại sau. Một **event** ghi lại một điều đã xảy ra: "đơn hàng #123 vừa được đặt lúc 10:02", "tài xế DRV-001 ở toạ độ này". Trang giới thiệu chính thức liệt kê ba khả năng cốt lõi: publish/subscribe các luồng event, lưu chúng bền vững trong bao lâu tuỳ ý, và xử lý chúng ngay khi xảy ra hoặc sau đó. [[Kafka intro]](https://kafka.apache.org/intro)
+
+**Cách nhớ nhanh:** Kafka giống một *cuốn nhật ký chung, chỉ ghi thêm vào cuối*, mà nhiều ứng dụng cùng đọc theo tốc độ của riêng mình (mục 2). Nó không phải database để truy vấn linh hoạt, và không phải hộp thư lấy ra là hết. Nó nằm *giữa* các service để chúng không phải gọi thẳng nhau (mục 1 ngay dưới). Phần còn lại của bài giải thích từng chữ trong định nghĩa này.
+
 ## 1. Vấn đề mà Kafka sinh ra để giải quyết
 
 Kịch bản minh hoạ (do mình dựng): một cửa hàng online. Khi khách đặt hàng xong, service **Order** cần báo cho **Notification** (gửi email xác nhận), **Inventory** (trừ kho) và **Analytics** (cập nhật thống kê doanh thu).
@@ -28,17 +34,37 @@ Tài liệu chính thức mô tả đúng ý này: "producers and consumers are 
 
 ## 3. Năm thành phần trong bức tranh
 
-*P0, P1, P2 là 3 partition của topic `orders`. Sơ đồ rút gọn: các consumer trong một group chia nhau các partition; chi tiết ở các bài sau.*
+*P0, P1, P2 là 3 partition của topic `orders`. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.*
+
+**Đừng lẫn partition với bản sao (replica).** Hai chiều của hình là hai khái niệm khác nhau:
+
+- **Theo cột dọc, trong một broker (P0 so với P1 so với P2): khác nội dung.** Topic được *chia* thành partition; mỗi đơn hàng chỉ vào *một* partition (đơn #1 vào P0, đơn #2 vào P1...). Gộp P0 + P1 + P2 mới ra toàn bộ topic.
+- **Theo hàng ngang, qua các broker (P0 ở Broker 1, 2, 3): cùng nội dung.** Đó là 3 *bản sao* của cùng một partition P0, để một broker chết không mất dữ liệu. Chỉ bản leader (★) nhận ghi; follower chép lại từ leader. Consumer đọc *partition*, không đọc từng bản sao: đọc P0 là đọc nội dung của P0, dù nằm ở broker nào.
+- **Vì sao hình trông như "broker nào cũng có đủ P0, P1, P2"?** Vì cụm có đúng 3 broker và replication factor cũng là 3, nên mỗi broker phải giữ một bản của mọi partition. Với 6 broker và RF=3, mỗi partition chỉ có bản sao trên 3 trong 6 broker, và broker nào cũng chỉ giữ một phần topic. Điều "rải trên các broker" thể hiện qua *leader*: leader của P0, P1, P2 nằm ở ba broker khác nhau nên việc ghi được chia tải. [[Design: replication]](https://kafka.apache.org/44/design/design/)
 
 | Thành phần | Vai trò (một câu) | Nguồn |
 |---|---|---|
 | **Producer** | Ứng dụng client ghi (publish) event vào Kafka. | [intro](https://kafka.apache.org/intro) |
 | **Broker** | Máy chủ thuộc tầng lưu trữ ("the storage layer, called the brokers"). Nhiều broker hợp thành cluster. | [intro](https://kafka.apache.org/intro) |
 | **Topic & partition** | Topic chia thành partition rải trên các broker. Mỗi partition có một *leader* nhận ghi và các *follower* sao chép từ leader. | [design: replication](https://kafka.apache.org/44/design/design/) |
-| **Consumer & group** | Ứng dụng client đọc (subscribe) event. Trong một group, mỗi partition do đúng một consumer đọc ("consumed by exactly one consumer within each subscribing consumer group"). Các group khác nhau đọc độc lập. | [design: consumer](https://kafka.apache.org/44/design/design/) |
+| **Consumer & group** | Ứng dụng client đọc (subscribe) event; "một consumer" ở đây là một *instance đang chạy* (một process hoặc thread), không phải một máy. Trong một group, mỗi partition do đúng một consumer đọc ("consumed by exactly one consumer within each subscribing consumer group"). Các group khác nhau đọc độc lập. | [design: consumer](https://kafka.apache.org/44/design/design/) |
 | **Controller (KRaft)** | Nhóm server chạy đồng thuận (quorum) để giữ metadata của cụm, không cần hệ thống điều phối bên ngoài. Thường 3 hoặc 5 controller. | [KRaft overview](https://kafka.apache.org/44/operations/kraft/) |
 
 Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các bài sau điền dần nội dung vào đúng từng ô.
+
+### Một group chia partition thế nào?
+
+*Hai group đọc cùng một topic và *độc lập* nhau: group nào cũng nhận đủ mọi message. Trong group Notification, C1 xử lý đơn #1 #4 #2 #5, C2 xử lý #3 #6: hai consumer chia nhau công việc, không làm trùng. Trong từng group, mỗi partition có đúng một consumer; một consumer có thể giữ nhiều partition.*
+
+**Đọc hình:**
+
+- **Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc**, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là *consumer instance*, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.
+- Chiều ngược lại không bị cấm: một consumer có thể đọc *nhiều* partition (C1 giữ P0 và P1).
+- Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy **số partition là trần song song hoá của một group** (Bài 8).
+- Việc chia này *không cố định*: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là **rebalance** (Bài 5). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.
+- **Vì sao thiết kế vậy?** Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.
+- **Hai group khác nhau không tranh nhau:** Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.
+- Ngoại lệ về sau: **Share Groups** (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)
 
 ## 4. Hành trình của một đơn hàng
 
@@ -62,6 +88,8 @@ Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các
 ## 6. Tự nói thành lời (30 giây, rồi mới làm quiz)
 
 Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): *"Order gửi event, Kafka ... , Notification và Inventory ..."* Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.
+
+**Ôn nhanh:** [tóm tắt Bài 1](../summaries/0001-kafka-big-picture.md) (đọc sau khi đã tự nói).
 
 ## 7. Kiểm tra
 
@@ -95,7 +123,37 @@ Event không bị xoá khi đọc. Mỗi group có vị trí đọc riêng và n
 
 </details>
 
-**3. Trong cùng một consumer group, một partition được bao nhiêu consumer đọc tại một thời điểm?**
+**3. Cụm 3 broker, topic orders có 3 partition, RF=3. Broker 1 và Broker 2 đều có P0. Điều nào đúng?**
+
+- **A.** P0 và P1 chứa cùng các đơn hàng
+- **B.** Hai bản P0 giống nhau, P1 thì khác P0
+- **C.** Hai bản P0 khác nhau vì broker khác
+- **D.** Consumer phải đọc cả hai bản của P0
+
+<details><summary>Đáp án</summary>
+
+**B. Hai bản P0 giống nhau, P1 thì khác P0**
+
+P0, P1, P2 chia nhau dữ liệu của topic (khác nội dung). Các bản P0 trên nhiều broker là bản sao của cùng một partition (cùng nội dung). Consumer đọc partition (mặc định từ bản leader), không đọc gộp các bản sao.
+
+</details>
+
+**4. Topic có 3 partition. Một consumer group chạy 5 instance trên 5 máy khác nhau. Điều gì đúng?**
+
+- **A.** Cả 5 instance cùng đọc mọi partition
+- **B.** Mỗi máy đọc một phần của mỗi partition
+- **C.** Hai instance còn lại có thể ngồi chờ không
+- **D.** Kafka tự tăng partition lên đủ năm cái
+
+<details><summary>Đáp án</summary>
+
+**C. Hai instance còn lại có thể ngồi chờ không**
+
+Trong một group mỗi partition chỉ có một consumer; 3 partition nên tối đa 3 instance có việc, 2 instance còn lại nhàn rỗi (cho tới khi rebalance giao việc lại).
+
+</details>
+
+**5. Trong cùng một consumer group, một partition được bao nhiêu consumer đọc tại một thời điểm?**
 
 - **A.** Chính xác một consumer trong group đó
 - **B.** Tất cả consumer trong group cùng lúc
@@ -110,7 +168,7 @@ Tài liệu thiết kế: mỗi partition được đọc bởi đúng một con
 
 </details>
 
-**4. Một event đã được mọi consumer đọc xong. Kafka làm gì với nó?**
+**6. Một event đã được mọi consumer đọc xong. Kafka làm gì với nó?**
 
 - **A.** Xoá ngay để giải phóng dung lượng ổ đĩa
 - **B.** Chuyển sang một topic khác để lưu trữ lại
@@ -125,7 +183,7 @@ Event không bị xoá sau khi đọc; nó được giữ theo thời gian reten
 
 </details>
 
-**5. Producer ghi message của partition P0. Nó ghi vào đâu?**
+**7. Producer ghi message của partition P0. Nó ghi vào đâu?**
 
 - **A.** Broker nào đang ít việc nhất lúc gửi
 - **B.** Chỉ broker đang giữ leader của partition đó
@@ -140,7 +198,7 @@ Producer chỉ ghi vào leader; follower sao chép từ leader.
 
 </details>
 
-**6. Controller trong KRaft giữ thông tin nào?**
+**8. Controller trong KRaft giữ thông tin nào?**
 
 - **A.** Nội dung các message của mọi topic
 - **B.** Mật khẩu đăng nhập của các service

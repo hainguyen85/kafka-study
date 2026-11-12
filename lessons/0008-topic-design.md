@@ -99,6 +99,8 @@ Cụm tự dựng của bạn là chỗ để *học*; nơi làm việc là dị
 
 Trong 60 giây, cho "bảng giá sản phẩm": *"Mình tạo topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."*
 
+**Ôn nhanh:** [tóm tắt Bài 8](../summaries/0008-topic-design.md) (đọc sau khi đã tự nói).
+
 ## 7. Kiểm tra
 
 **1. Topic 3 partition cần tăng lên 6 vì lượng tải tăng. Điều nào đúng về dữ liệu và key?**

@@ -18,6 +18,10 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
 
 <p class="win"><b>Thắng lợi của bài này:</b> sau ~15 phút bạn kể lại được, không nhìn tài liệu, hành trình của một event đơn hàng từ service gửi tới các service nhận, gọi đúng tên 5 thành phần, và giải thích Kafka khác "gọi API trực tiếp" ở đâu.</p>
 
+<h2>Kafka là gì? (định nghĩa ngắn, trước khi vào bài)</h2>
+<p><b>Apache Kafka là một nền tảng "event streaming" phân tán:</b> một hệ thống để các ứng dụng <em>ghi</em> các sự kiện (event) vào, <em>lưu</em> chúng bền vững, và để các ứng dụng khác <em>đọc</em> chúng, theo thời gian thực hoặc đọc lại sau. Một <b>event</b> ghi lại một điều đã xảy ra: "đơn hàng #123 vừa được đặt lúc 10:02", "tài xế DRV-001 ở toạ độ này". Trang giới thiệu chính thức liệt kê ba khả năng cốt lõi: publish/subscribe các luồng event, lưu chúng bền vững trong bao lâu tuỳ ý, và xử lý chúng ngay khi xảy ra hoặc sau đó. <a href="https://kafka.apache.org/intro">[Kafka intro]</a></p>
+<p><b>Cách nhớ nhanh:</b> Kafka giống một <em>cuốn nhật ký chung, chỉ ghi thêm vào cuối</em>, mà nhiều ứng dụng cùng đọc theo tốc độ của riêng mình (mục 2). Nó không phải database để truy vấn linh hoạt, và không phải hộp thư lấy ra là hết. Nó nằm <em>giữa</em> các service để chúng không phải gọi thẳng nhau (mục 1 ngay dưới). Phần còn lại của bài giải thích từng chữ trong định nghĩa này.</p>
+
 <h2>1. Vấn đề mà Kafka sinh ra để giải quyết</h2>
 <p>Kịch bản minh hoạ (do mình dựng): một cửa hàng online. Khi khách đặt hàng xong, service <b>Order</b> cần báo cho <b>Notification</b> (gửi email xác nhận), <b>Inventory</b> (trừ kho) và <b>Analytics</b> (cập nhật thống kê doanh thu).</p>
 
@@ -73,19 +77,20 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
   <rect class="box node" x="298" y="62" width="96" height="170" rx="5"/><text x="346" y="82" text-anchor="middle">Broker 2</text>
   <rect class="box node" x="404" y="62" width="96" height="170" rx="5"/><text x="452" y="82" text-anchor="middle">Broker 3</text>
 
-  <rect class="box ctrl" x="202" y="94" width="76" height="26" rx="3"/><text x="240" y="112" text-anchor="middle">P0 ★</text>
-  <rect class="part" x="202" y="130" width="76" height="26" rx="3"/><text x="240" y="148" text-anchor="middle">P1</text>
-  <rect class="part" x="202" y="166" width="76" height="26" rx="3"/><text x="240" y="184" text-anchor="middle">P2</text>
+  <rect class="box ctrl" x="202" y="94" width="76" height="26" rx="3"/><text x="240" y="112" text-anchor="middle" style="font-size:10.5px">P0 ★ · #1 #4</text>
+  <rect class="part" x="202" y="130" width="76" height="26" rx="3"/><text x="240" y="148" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="202" y="166" width="76" height="26" rx="3"/><text x="240" y="184" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
 
-  <rect class="part" x="308" y="94" width="76" height="26" rx="3"/><text x="346" y="112" text-anchor="middle">P0</text>
-  <rect class="box ctrl" x="308" y="130" width="76" height="26" rx="3"/><text x="346" y="148" text-anchor="middle">P1 ★</text>
-  <rect class="part" x="308" y="166" width="76" height="26" rx="3"/><text x="346" y="184" text-anchor="middle">P2</text>
+  <rect class="part" x="308" y="94" width="76" height="26" rx="3"/><text x="346" y="112" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="box ctrl" x="308" y="130" width="76" height="26" rx="3"/><text x="346" y="148" text-anchor="middle" style="font-size:10.5px">P1 ★ · #2 #5</text>
+  <rect class="part" x="308" y="166" width="76" height="26" rx="3"/><text x="346" y="184" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
 
-  <rect class="part" x="414" y="94" width="76" height="26" rx="3"/><text x="452" y="112" text-anchor="middle">P0</text>
-  <rect class="part" x="414" y="130" width="76" height="26" rx="3"/><text x="452" y="148" text-anchor="middle">P1</text>
-  <rect class="box ctrl" x="414" y="166" width="76" height="26" rx="3"/><text x="452" y="184" text-anchor="middle">P2 ★</text>
+  <rect class="part" x="414" y="94" width="76" height="26" rx="3"/><text x="452" y="112" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="414" y="130" width="76" height="26" rx="3"/><text x="452" y="148" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="box ctrl" x="414" y="166" width="76" height="26" rx="3"/><text x="452" y="184" text-anchor="middle" style="font-size:10.5px">P2 ★ · #3 #6</text>
   <text class="muted" x="345" y="222" text-anchor="middle">★ = leader (nơi producer ghi); còn lại = bản sao (follower)</text>
-  <text class="muted" x="345" y="256" text-anchor="middle">mỗi partition có 3 bản (replication factor = 3)</text>
+  <text class="muted" x="345" y="244" text-anchor="middle">mỗi partition có 3 bản sao (replication factor = 3)</text>
+  <text class="muted" x="345" y="259" text-anchor="middle">#1..#6 = đơn hàng: P0, P1, P2 chứa đơn KHÁC nhau</text>
 
   <rect class="box ctrl" x="540" y="40" width="130" height="96" rx="6"/>
   <text x="605" y="60" text-anchor="middle">Consumer group</text><text class="muted" x="605" y="76" text-anchor="middle">"Notification"</text>
@@ -102,18 +107,70 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
   <text x="345" y="306" text-anchor="middle">Controller (KRaft)</text><text class="muted" x="345" y="321" text-anchor="middle">giữ metadata cụm: ai là leader, topic nào có gì</text>
   <line x1="345" y1="266" x2="345" y2="288" stroke="var(--muted)"/>
 </svg>
-<figcaption>P0, P1, P2 là 3 partition của topic <code>orders</code>. Sơ đồ rút gọn: các consumer trong một group chia nhau các partition; chi tiết ở các bài sau.</figcaption>
+<figcaption>P0, P1, P2 là 3 partition của topic <code>orders</code>. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.</figcaption>
 </figure>
+
+<div class="warn"><b>Đừng lẫn partition với bản sao (replica).</b> Hai chiều của hình là hai khái niệm khác nhau:
+<ul class="tight">
+<li><b>Theo cột dọc, trong một broker (P0 so với P1 so với P2): khác nội dung.</b> Topic được <em>chia</em> thành partition; mỗi đơn hàng chỉ vào <em>một</em> partition (đơn #1 vào P0, đơn #2 vào P1...). Gộp P0 + P1 + P2 mới ra toàn bộ topic.</li>
+<li><b>Theo hàng ngang, qua các broker (P0 ở Broker 1, 2, 3): cùng nội dung.</b> Đó là 3 <em>bản sao</em> của cùng một partition P0, để một broker chết không mất dữ liệu. Chỉ bản leader (★) nhận ghi; follower chép lại từ leader. Consumer đọc <em>partition</em>, không đọc từng bản sao: đọc P0 là đọc nội dung của P0, dù nằm ở broker nào.</li>
+<li><b>Vì sao hình trông như "broker nào cũng có đủ P0, P1, P2"?</b> Vì cụm có đúng 3 broker và replication factor cũng là 3, nên mỗi broker phải giữ một bản của mọi partition. Với 6 broker và RF=3, mỗi partition chỉ có bản sao trên 3 trong 6 broker, và broker nào cũng chỉ giữ một phần topic. Điều "rải trên các broker" thể hiện qua <em>leader</em>: leader của P0, P1, P2 nằm ở ba broker khác nhau nên việc ghi được chia tải. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+</ul></div>
 
 <table>
 <tr><th>Thành phần</th><th>Vai trò (một câu)</th><th>Nguồn</th></tr>
 <tr><td><b>Producer</b></td><td>Ứng dụng client ghi (publish) event vào Kafka.</td><td><a href="https://kafka.apache.org/intro">intro</a></td></tr>
 <tr><td><b>Broker</b></td><td>Máy chủ thuộc tầng lưu trữ ("the storage layer, called the brokers"). Nhiều broker hợp thành cluster.</td><td><a href="https://kafka.apache.org/intro">intro</a></td></tr>
 <tr><td><b>Topic &amp; partition</b></td><td>Topic chia thành partition rải trên các broker. Mỗi partition có một <em>leader</em> nhận ghi và các <em>follower</em> sao chép từ leader.</td><td><a href="https://kafka.apache.org/44/design/design/">design: replication</a></td></tr>
-<tr><td><b>Consumer &amp; group</b></td><td>Ứng dụng client đọc (subscribe) event. Trong một group, mỗi partition do đúng một consumer đọc ("consumed by exactly one consumer within each subscribing consumer group"). Các group khác nhau đọc độc lập.</td><td><a href="https://kafka.apache.org/44/design/design/">design: consumer</a></td></tr>
+<tr><td><b>Consumer &amp; group</b></td><td>Ứng dụng client đọc (subscribe) event; "một consumer" ở đây là một <em>instance đang chạy</em> (một process hoặc thread), không phải một máy. Trong một group, mỗi partition do đúng một consumer đọc ("consumed by exactly one consumer within each subscribing consumer group"). Các group khác nhau đọc độc lập.</td><td><a href="https://kafka.apache.org/44/design/design/">design: consumer</a></td></tr>
 <tr><td><b>Controller (KRaft)</b></td><td>Nhóm server chạy đồng thuận (quorum) để giữ metadata của cụm, không cần hệ thống điều phối bên ngoài. Thường 3 hoặc 5 controller.</td><td><a href="https://kafka.apache.org/44/operations/kraft/">KRaft overview</a></td></tr>
 </table>
 <p>Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các bài sau điền dần nội dung vào đúng từng ô.</p>
+
+<h3>Một group chia partition thế nào?</h3>
+<figure>
+<svg class="diagram" viewBox="0 0 680 400" role="img" aria-label="Group 2 consumer chia 3 partition; group 4 consumer thì một consumer nhàn rỗi">
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <text class="muted" x="20" y="18">Group "Notification": 2 consumer, topic 3 partition</text>
+  <rect class="part" x="20" y="34" width="80" height="32" rx="3"/><text x="60" y="55" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="20" y="80" width="80" height="32" rx="3"/><text x="60" y="101" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="20" y="126" width="80" height="32" rx="3"/><text x="60" y="147" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+  <rect x="290" y="26" width="150" height="140" rx="6" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <rect class="box ctrl" x="330" y="44" width="70" height="34" rx="4"/><text x="365" y="66" text-anchor="middle">C1</text>
+  <rect class="box ctrl" x="330" y="108" width="70" height="34" rx="4"/><text x="365" y="130" text-anchor="middle">C2</text>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 50 L328 58"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 96 L328 66"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 142 L328 125"/>
+  <text class="muted" x="450" y="65">C1 đọc P0 và P1</text>
+  <text class="muted" x="450" y="129">C2 đọc P2</text>
+
+  <text class="muted" x="20" y="208">Group "Inventory": 4 consumer, cùng topic 3 partition</text>
+  <rect class="part" x="20" y="224" width="80" height="32" rx="3"/><text x="60" y="245" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="20" y="270" width="80" height="32" rx="3"/><text x="60" y="291" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="20" y="316" width="80" height="32" rx="3"/><text x="60" y="337" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+  <rect x="290" y="216" width="150" height="176" rx="6" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <rect class="box ctrl" x="330" y="226" width="70" height="30" rx="4"/><text x="365" y="246" text-anchor="middle">C1</text>
+  <rect class="box ctrl" x="330" y="266" width="70" height="30" rx="4"/><text x="365" y="286" text-anchor="middle">C2</text>
+  <rect class="box ctrl" x="330" y="306" width="70" height="30" rx="4"/><text x="365" y="326" text-anchor="middle">C3</text>
+  <rect x="330" y="346" width="70" height="30" rx="4" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/><text x="365" y="366" text-anchor="middle">C4</text>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 240 L328 241"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 286 L328 281"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 332 L328 321"/>
+  <text class="muted" x="450" y="285">mỗi consumer một partition</text>
+  <text class="muted" x="450" y="366">C4 nhàn rỗi: không còn partition nào</text>
+</svg>
+<figcaption>Hai group đọc cùng một topic và <em>độc lập</em> nhau: group nào cũng nhận đủ mọi message. Trong group Notification, C1 xử lý đơn #1 #4 #2 #5, C2 xử lý #3 #6: hai consumer chia nhau công việc, không làm trùng. Trong từng group, mỗi partition có đúng một consumer; một consumer có thể giữ nhiều partition.</figcaption>
+</figure>
+<p><b>Đọc hình:</b></p>
+<ul class="tight">
+<li><b>Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc</b>, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là <em>consumer instance</em>, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.</li>
+<li>Chiều ngược lại không bị cấm: một consumer có thể đọc <em>nhiều</em> partition (C1 giữ P0 và P1).</li>
+<li>Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy <b>số partition là trần song song hoá của một group</b> (Bài 8).</li>
+<li>Việc chia này <em>không cố định</em>: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là <b>rebalance</b> (Bài 5). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.</li>
+<li><b>Vì sao thiết kế vậy?</b> Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.</li>
+<li><b>Hai group khác nhau không tranh nhau:</b> Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.</li>
+<li>Ngoại lệ về sau: <b>Share Groups</b> (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka">[KIP-932]</a></li>
+</ul>
 
 <h2>4. Hành trình của một đơn hàng</h2>
 <ol class="steps">
@@ -137,6 +194,7 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
 
 <h2>6. Tự nói thành lời (30 giây, rồi mới làm quiz)</h2>
 <p>Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): <i>"Order gửi event, Kafka ... , Notification và Inventory ..."</i> Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.</p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0001-kafka-big-picture.md">tóm tắt Bài 1</a> (đọc sau khi đã tự nói).</p>
 
 <h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
@@ -159,6 +217,12 @@ Quiz.mount(document.getElementById('quiz'), [
   { q: 'Notification và Inventory là hai consumer group khác nhau cùng đọc topic orders. Điều gì đúng?',
     options: ['Hai group chia nhau, mỗi message chỉ một group', 'Group nào đọc trước thì xoá message khỏi topic', 'Chỉ group đầu tiên đăng ký mới được đọc', 'Mỗi group nhận đủ mọi message, độc lập nhau'],
     answer: 3, why: 'Event không bị xoá khi đọc. Mỗi group có vị trí đọc riêng và nhận đủ mọi event.' },
+  { q: 'Cụm 3 broker, topic orders có 3 partition, RF=3. Broker 1 và Broker 2 đều có P0. Điều nào đúng?',
+    options: ['P0 và P1 chứa cùng các đơn hàng', 'Hai bản P0 giống nhau, P1 thì khác P0', 'Hai bản P0 khác nhau vì broker khác', 'Consumer phải đọc cả hai bản của P0'],
+    answer: 1, why: 'P0, P1, P2 chia nhau dữ liệu của topic (khác nội dung). Các bản P0 trên nhiều broker là bản sao của cùng một partition (cùng nội dung). Consumer đọc partition (mặc định từ bản leader), không đọc gộp các bản sao.' },
+  { q: 'Topic có 3 partition. Một consumer group chạy 5 instance trên 5 máy khác nhau. Điều gì đúng?',
+    options: ['Cả 5 instance cùng đọc mọi partition', 'Mỗi máy đọc một phần của mỗi partition', 'Hai instance còn lại có thể ngồi chờ không', 'Kafka tự tăng partition lên đủ năm cái'],
+    answer: 2, why: 'Trong một group mỗi partition chỉ có một consumer; 3 partition nên tối đa 3 instance có việc, 2 instance còn lại nhàn rỗi (cho tới khi rebalance giao việc lại).' },
   { q: 'Trong cùng một consumer group, một partition được bao nhiêu consumer đọc tại một thời điểm?',
     options: ['Chính xác một consumer trong group đó', 'Tất cả consumer trong group cùng lúc', 'Hai consumer, một chính một dự phòng', 'Tuỳ broker, chọn ngẫu nhiên mỗi lần'],
     answer: 0, why: 'Tài liệu thiết kế: mỗi partition được đọc bởi đúng một consumer trong mỗi group đăng ký.' },

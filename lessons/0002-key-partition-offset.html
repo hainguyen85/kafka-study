@@ -77,6 +77,10 @@ Phần lớn lỗi "lạ" khi dùng Kafka (dữ liệu lộn thứ tự, một p
 <h3>(b) Flash sale: một shop làm nghẽn một partition</h3>
 <p>Topic <code>orders</code> dùng <b>mã shop</b> làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa <em>thứ tự</em> và <em>phân tải</em>: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.</p>
 
+<h2>Tự nói thành lời (60 giây)</h2>
+<p>Không nhìn tài liệu, nói to: <i>"Một message có key đi vào partition nào, thứ tự được giữ tới đâu, offset là gì, và vì sao tăng số partition là chuyện lớn."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0002-key-partition-offset.md">tóm tắt Bài 2</a> (đọc sau khi đã tự nói).</p>
+
 <h2>5. Kiểm tra (truy hồi từ trí nhớ)</h2>
 <div id="quiz"></div>
 

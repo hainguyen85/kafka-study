@@ -12,11 +12,24 @@
 
 ## 1. Kiến thức tối thiểu (có nguồn)
 
+**Controller giữ metadata của cụm theo kiểu đồng thuận (quorum), và quorum cần *đa số* controller còn sống.** Tài liệu: "3 controllers tolerate 1 failure and 5 tolerate 2"; muốn chịu được N controller hỏng thì cần 2N+1 controller. [[KRaft overview]](https://kafka.apache.org/44/operations/kraft/) Áp vào cụm lab (3 node, node nào cũng là controller):
+
+- Chết 1 node: còn 2/3, vẫn là đa số, cụm bầu được leader mới và chạy tiếp.
+- Chết 2 node: còn 1/3, không còn đa số. Node còn lại vẫn "sống" nhưng cụm không đổi được metadata, không bầu được leader: coi như không dùng được.
+- Hệ quả: số controller nên là số lẻ (3, 5). Thêm node thứ 4 không giúp chịu thêm lỗi (4 cần đa số 3, vẫn chỉ chịu được 1).
+
+**Vì sao lab đặt RF=3 và `min.insync.replicas=2`, không phải 3.** Khi producer dùng `acks=all`, broker từ chối ghi nếu ISR nhỏ hơn `min.insync.replicas`. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/) Với RF=3:
+
+- `min.insync.replicas=2`: mất 1 broker, ISR còn 2, vẫn ghi được, và mỗi ghi có ít nhất 2 bản sao.
+- `min.insync.replicas=3`: mất 1 broker là ISR còn 2 < 3, mọi ghi bị từ chối. Bền hơn không đáng kể mà mất sẵn sàng.
+- `min.insync.replicas=1`: luôn ghi được, nhưng một ghi có thể chỉ nằm ở một bản sao. Bài 4 đi sâu vào cái bẫy này.
+
 1. **Mỗi node có thể vừa là broker vừa là controller.** `process.roles` nhận `broker`, `controller` hoặc cả hai (combined mode). Combined mode đơn giản cho lab nhưng "is not recommended in critical deployment environments." [[KRaft overview]](https://kafka.apache.org/44/operations/kraft/)
-2. **Controller giữ metadata của cụm theo kiểu đồng thuận (quorum).** Cần đa số controller còn sống: "3 controllers tolerate 1 failure and 5 tolerate 2". Chịu N lỗi cần 2N+1 controller. [[KRaft overview]](https://kafka.apache.org/44/operations/kraft/)
-3. **Mỗi partition có một leader và các follower.** Producer chỉ ghi vào leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. [[Design: replication]](https://kafka.apache.org/44/design/design/)
-4. **Giá trị mặc định phía broker rất "mỏng":** `num.partitions=1`, `default.replication.factor=1`, `min.insync.replicas=1` và `auto.create.topics.enable=true`. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/) [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/)
-5. **Hộp "đọc tutorial cũ thì coi chừng":** từ Kafka 4.0, "ZooKeeper mode has been removed". Tutorial dùng `--zookeeper` hay `zookeeper.connect` không còn áp dụng. [[Upgrade notes]](https://kafka.apache.org/44/getting-started/upgrade/)
+2. 
+3. **Mỗi partition có một leader và các follower.** Producer chỉ ghi vào leader; follower chép lại từ leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. [[Design: replication]](https://kafka.apache.org/44/design/design/)
+4. **ISR (in-sync replicas) co giãn theo thời gian, không tức thì.** ISR là tập replica đang bám kịp leader. Follower bị loại khỏi ISR khi tụt lại quá `replica.lag.time.max.ms` (mặc định 30000, tức 30 giây), chứ không bị loại ngay khi nó chết. Nên ngay sau khi kill một broker, `--describe` có thể vẫn hiện ISR đủ 3; khoảng 30 giây sau mới co còn 2. Khi broker sống lại và bám kịp, nó vào lại ISR. [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
+5. **Giá trị mặc định phía broker rất "mỏng":** `num.partitions=1`, `default.replication.factor=1`, `min.insync.replicas=1` và `auto.create.topics.enable=true`. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/) [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/)
+6. 
 
 ## 2. Thực hành (mỗi bước có kết quả mong đợi)
 
@@ -115,6 +128,8 @@ Service A gửi vào `order-evnts` (gõ nhầm), service B đọc `order-events`
 
 Không nhìn tài liệu, giải thích trong 30 giây: *"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."* Dùng đúng các từ: leader, follower, ISR, controller, quorum.
 
+**Ôn nhanh:** [tóm tắt Bài 3](../summaries/0003-build-cluster.md) (đọc sau khi đã tự nói).
+
 ## 5. Kiểm tra
 
 **1. Cụm lab có 3 node, mỗi node vừa là broker vừa là controller. Cụm chịu mất tối đa mấy node mà vẫn bầu được leader mới?**
@@ -132,18 +147,18 @@ Quorum cần đa số controller còn sống: 3 controller chịu được 1 l�
 
 </details>
 
-**2. Một tutorial bảo chạy kafka-topics.sh kèm --zookeeper. Với Kafka 4.4, điều nào đúng?**
+**2. Cụm đang có 3 controller. Bạn thêm controller thứ 4. Cụm giờ chịu mất tối đa mấy controller mà vẫn hoạt động?**
 
-- **A.** Vẫn chạy bình thường nếu cài thêm ZooKeeper
-- **B.** Tutorial đã lỗi thời vì ZooKeeper bị gỡ
-- **C.** Chỉ chạy được trên broker dùng combined mode
-- **D.** Chạy được nhưng chậm hơn so với bootstrap
+- **A.** Hai controller, vì đã có thêm một node
+- **B.** Một controller, vì đa số của bốn là ba
+- **C.** Ba controller, chỉ cần một node còn sống
+- **D.** Không controller nào, phải đủ cả bốn
 
 <details><summary>Đáp án</summary>
 
-**B. Tutorial đã lỗi thời vì ZooKeeper bị gỡ**
+**B. Một controller, vì đa số của bốn là ba**
 
-Từ Kafka 4.0 chỉ còn chế độ KRaft; ZooKeeper bị gỡ. Dùng --bootstrap-server.
+Quorum cần đa số: 4 controller cần 3 còn sống, nên vẫn chỉ chịu được 1 lỗi như cụm 3. Muốn chịu 2 lỗi cần 5 controller (2N+1). Vì vậy số controller nên là số lẻ.
 
 </details>
 

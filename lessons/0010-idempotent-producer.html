@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 4b: Idempotent producer</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0004-producer-durability.html">Bài 4</a> / Bài 4b · <a href="0005-consumer-offset-commit.html">Bài 5</a> · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a></nav>
+
+<h1>Bài 4b: Idempotent producer, gửi lại mà không trùng</h1>
+<p class="lede">Bài 4 lo "không mất". Cái giá của không mất là gửi lại; bài này lo để gửi lại không sinh bản trùng, và chỉ ra chỗ nó không lo được.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Khi bạn nói "producer bật idempotence rồi", người nghe hay hiểu thành "không bao giờ trùng". Sai. Sau bài này bạn nói được chính xác nó chặn trùng ở đâu, không chặn ở đâu, và cấu hình thế nào để không ai vô tình tắt nó.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn giải thích được cơ chế producer ID + sequence number, dự đoán đúng kết quả của 4 tình huống gửi lại (mô phỏng ở mục 3), và viết được cấu hình Spring Kafka tường minh khiến cấu hình sai lộ ra ngay lúc khởi động.</p>
+
+<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<ol class="steps">
+<li><b>Vấn đề gốc: không nhận được ack thì phải gửi lại.</b> Producer không biết lần gửi trước đã ghi hay chưa, nên gửi lại; nếu lần trước thật ra đã ghi thì log có hai bản. Docs gọi đó là at-least-once: "the message may be written to the log again during resending if the original request had in fact succeeded." <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<li><b>Cơ chế:</b> "the broker assigns each producer an ID and deduplicates messages using a sequence number that is sent by the producer along with every message." Diễn ra như sau:
+  <ul class="tight">
+  <li>Mỗi producer có một <b>producer ID (PID)</b> do broker cấp. Mỗi batch gửi vào một partition mang một <b>sequence number</b> tăng dần.</li>
+  <li>Broker nhớ sequence cuối của từng PID. Retry mang lại đúng sequence cũ, nên broker nhận ra "đã có" và không ghi thêm.</li>
+  </ul>
+  <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+<li><b>Hai thứ bạn được:</b> "producer retries will no longer introduce duplicates" <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a>, và <b>thứ tự được giữ</b> kể cả khi có nhiều request đang bay: docs của <code>max.in.flight.requests.per.connection</code> nói giá trị &gt; 1 cộng retry có thể đảo thứ tự khi idempotence tắt, còn khi idempotence bật thì thứ tự được giữ. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+<li><b>Thứ bạn không được: trùng do ứng dụng gửi lại.</b> Javadoc: "it is imperative to avoid application level re-sends since these cannot be de-duplicated", và "the producer can only guarantee idempotence for messages sent within a single session." Restart producer là session mới, PID mới; gửi lại cùng nội dung là bản ghi mới với broker. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a> Chống trùng loại này phải làm ở consumer (Bài 7).</li>
+<li><b>Ba điều kiện bắt buộc:</b> <code>acks=all</code>, <code>retries</code> &gt; 0, <code>max.in.flight.requests.per.connection</code> ≤ 5 (mô tả config nói broker chỉ giữ thông tin 5 batch gần nhất của mỗi producer). Mặc định của client đã thoả cả ba. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+<li><b>Mặc định bật, nhưng có thể bị tắt âm thầm.</b> <code>enable.idempotence</code> mặc định <code>true</code> từ Kafka 3.0. "Idempotence is enabled by default if no conflicting configurations are set." Nếu cấu hình xung đột (ví dụ <code>acks=1</code>):
+  <ul class="tight">
+  <li>bạn <b>không ghi</b> <code>enable.idempotence</code>: client tắt nó và chạy tiếp, không báo gì;</li>
+  <li>bạn <b>ghi tường minh</b> <code>enable.idempotence=true</code>: client ném <code>ConfigException</code>.</li>
+  </ul>
+  <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[Javadoc]</a></li>
+<li><b>Khi lỗi vẫn lọt qua:</b> nếu <code>send</code> vẫn báo lỗi dù retry vô hạn (ví dụ message hết hạn trong buffer trước khi gửi), javadoc khuyên đóng producer và kiểm tra message cuối để chắc nó không bị trùng. Gặp <code>OutOfOrderSequenceException</code> thì vẫn gửi tiếp được nhưng có thể sai thứ tự; muốn giữ thứ tự, đóng producer và tạo mới. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[Javadoc]</a></li>
+<li><b>Nối sang Bài 7:</b> đặt <code>transactional.id</code> thì idempotence được bật kèm ("enable.idempotence is implied"), và ID này có ý nghĩa qua nhiều session của producer. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+</ol>
+
+<h2>2. Cấu hình trong Spring Boot</h2>
+<p>Spring Boot không đổi mặc định của producer (<a href="../research/0002-spring-kafka.md">research/0002</a>), nên với kafka-clients 4.x <b>không cấu hình gì cũng đã bật idempotence</b>. Vấn đề là nó bị tắt âm thầm khi ai đó đặt <code>acks: "1"</code> để "chạy nhanh hơn". Cách phòng: ghi tường minh, để cấu hình sai thành lỗi khởi động chứ không thành mất an toàn thầm lặng.</p>
+<pre><code>spring:
+  kafka:
+    producer:
+      acks: all                          # điều kiện 1
+      properties:
+        "[enable.idempotence]": true     # tường minh: xung đột sẽ ném ConfigException
+        # retries và max.in.flight.requests.per.connection: để mặc định (MAX_VALUE, 5)
+        "[delivery.timeout.ms]": 120000  # giới hạn thời gian retry (Bài 4)</code></pre>
+<p>Boot không có property riêng cho <code>enable.idempotence</code>, nên phải đi qua <code>properties[...]</code>. Kiểm tra giá trị thật: client in bảng "ProducerConfig values" ở mức INFO khi tạo producer; tìm dòng <code>enable.idempotence</code>.</p>
+
+<div class="step">
+<h3>Thí nghiệm: làm cấu hình sai lộ ra (lab 04, không cần sửa code)</h3>
+<p>Profile <code>risky</code> của lab 04 đặt <code>acks: "1"</code> và tắt idempotence tường minh. Bạn ghi đè để đòi idempotence cùng <code>acks=1</code>:</p>
+<pre><code>cd labs/04-producer-durability
+mvn -q -DskipTests package
+java -jar target/producer-durability-0.0.1-SNAPSHOT.jar --spring.profiles.active=risky \
+  "--spring.kafka.producer.properties[enable.idempotence]=true" \
+  --logging.level.org.apache.kafka.clients.producer.ProducerConfig=INFO</code></pre>
+<div class="expect">Mong đợi: tạo producer thất bại với <code>ConfigException</code> nói idempotence cần <code>acks=all</code>. Hành vi này đã kiểm chứng bằng kafka-clients thật trong workspace, nhưng <b>lệnh trên chưa chạy thử</b>; chạy khi cụm Bài 3 đang lên (lab đặt <code>admin.fail-fast=true</code> nên không có cụm thì app dừng sớm vì lý do khác). Rồi bỏ dòng ghi đè, chạy lại với profile <code>safe</code> và tìm <code>enable.idempotence = true</code> trong log.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã thấy ConfigException và đọc được giá trị thật trong log</label>
+</div>
+
+<h2>3. Mô phỏng: bốn kiểu gửi lại</h2>
+<p>Một partition, xem log broker ghi gì. Mô phỏng theo mô hình ở mục 1, không phải client thật. Với mỗi nút, <b>đoán trước</b> rồi bấm, lần lượt khi bật và khi tắt idempotence (đổi ô tick sẽ làm lại từ đầu).</p>
+<div id="isim"></div>
+<ol class="tight">
+<li><b>"Gửi, ack bị mất trên đường về"</b>: broker đã ghi, producer tự retry. Bật: không trùng. Tắt: trùng.</li>
+<li><b>"Gửi 2 batch, batch đầu lỗi tạm thời"</b>: batch sau tới trước. Bật: broker từ chối batch nhảy cóc, thứ tự giữ nguyên. Tắt: đảo thứ tự.</li>
+<li><b>"Producer restart, ứng dụng gửi lại đơn cuối"</b>: PID mới, sequence về 0. Bật hay tắt đều <b>trùng</b>: đây là giới hạn "single session".</li>
+</ol>
+
+<h2>4. Usecase oái oăm</h2>
+<h3>(a) Logistics: DELIVERED đến trước PICKED_UP</h3>
+<p>Team giao hàng đặt <code>acks: "1"</code> cho nhanh. Idempotence tắt âm thầm (điều kiện 1 bị vi phạm). Một ngày broker chập chờn, batch PICKED_UP lỗi tạm thời, batch DELIVERED đi trước, PICKED_UP được retry sau. Consumer thấy đơn "đã giao" rồi mới "đã lấy hàng". Không ai đổi cấu hình idempotence, không có lỗi nào trong log. Xử lý: <code>acks=all</code> và ghi tường minh <code>enable.idempotence=true</code>.</p>
+<h3>(b) Đặt vé: restart rồi gửi lại</h3>
+<p>Service đặt vé gửi <code>BookingCreated</code>, bị deploy lại trước khi nhận kết quả. Lúc khởi động nó gửi lại các booking "chưa chắc đã gửi". Producer mới, PID mới: hai bản ghi, idempotence không giúp được. Xử lý: <code>eventId</code> sinh một lần cho mỗi booking, consumer chống trùng theo nó (Bài 7), hoặc outbox để chỉ một tiến trình chịu trách nhiệm gửi.</p>
+<h3>(c) "Ta tăng max.in.flight lên 10 cho throughput"</h3>
+<p>Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo. Một dòng cấu hình "tối ưu hiệu năng" lấy đi hai bảo đảm. Đây là ví dụ tốt cho lý do review cấu hình producer cũng quan trọng như review code.</p>
+
+<h2>5. Tự nói thành lời</h2>
+<p>Trong 45 giây: <i>"Idempotent producer chặn trùng bằng ... Nó giữ được thứ tự vì ... Nó không chặn được ... vì ... Để không ai tắt nó vô tình, mình cấu hình ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0010-idempotent-producer.md">tóm tắt Bài 4b</a> (đọc sau khi đã tự nói).</p>
+
+<h2>6. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> phần mở đầu của <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">KafkaProducer javadoc</a> (đoạn "idempotent producer", khoảng 10 phút), và mục <code>enable.idempotence</code>, <code>max.in.flight.requests.per.connection</code> trong <a href="https://kafka.apache.org/44/configuration/producer-configs/">Producer configs</a>.<br>
+<b>Bổ trợ:</b> mục "Message Delivery Semantics" trong <a href="https://kafka.apache.org/44/design/design/">Design</a>.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0005-consumer-offset-commit.html">Bài 5: consumer, offset, commit</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "vì sao giới hạn là 5?", "idempotence có tốn hiệu năng không?". Dán dòng kết quả quiz.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/idempotence-sim.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+IdempotenceSim.mount(document.getElementById('isim'));
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Broker dùng gì để nhận ra một batch gửi lại là bản trùng?',
+    options: ['Nội dung message so với bản ghi trước', 'Producer ID cùng sequence number của batch', 'Offset mà producer tự gán cho message', 'Key của message và thời điểm gửi đi'],
+    answer: 1, why: 'Docs: broker cấp cho mỗi producer một ID và lọc trùng bằng sequence number gửi kèm mỗi message. Nội dung giống nhau không phải là căn cứ.' },
+  { q: 'Service restart rồi gửi lại một đơn hàng nó không chắc đã gửi. Idempotence đang bật. Kết quả?',
+    options: ['Broker bỏ qua vì cùng nội dung đơn', 'Producer tự nhận ra và không gửi lại', 'Log có hai bản ghi của cùng một đơn', 'Broker ném lỗi OutOfOrderSequenceException'],
+    answer: 2, why: 'Producer mới là session mới, PID mới; idempotence chỉ đảm bảo trong một session và không lọc được gửi lại ở tầng ứng dụng.' },
+  { q: 'Không ai đặt enable.idempotence; một bạn đổi acks thành 1. Client 4.x làm gì?',
+    options: ['Âm thầm tắt idempotence và chạy tiếp', 'Ném ConfigException khi tạo producer', 'Tự đổi acks về all rồi chạy tiếp', 'Giữ idempotence và chạy với acks=1'],
+    answer: 0, why: 'Không đặt tường minh thì cấu hình xung đột làm idempotence bị tắt mà không báo. Ghi tường minh enable.idempotence=true biến việc này thành ConfigException.' },
+  { q: 'Idempotence bật, max.in.flight=5. Batch 1 lỗi tạm thời, batch 2 tới broker trước. Điều gì xảy ra?',
+    options: ['Batch 2 được ghi trước, thứ tự bị đảo', 'Cả hai batch bị mất do lỗi tạm thời', 'Batch 1 bị bỏ qua vì đã quá hạn gửi', 'Batch 2 bị từ chối, thứ tự được giữ'],
+    answer: 3, why: 'Sequence của batch 2 nhảy cóc nên broker từ chối; producer gửi lại theo đúng thứ tự. Docs: idempotence bật thì thứ tự được giữ với in-flight tới 5.' },
+  { q: 'Vì sao nên ghi tường minh enable.idempotence=true dù mặc định đã là true?',
+    options: ['Để producer gửi nhanh hơn mặc định', 'Để cấu hình xung đột thành lỗi khởi động', 'Để idempotence phủ qua nhiều session', 'Để consumer không cần chống trùng nữa'],
+    answer: 1, why: 'Tường minh thì acks=1 hay in-flight > 5 sẽ ném ConfigException ngay khi tạo producer, thay vì âm thầm tắt idempotence. Nó không mở rộng phạm vi qua session.' }
+]);
+</script>
+</body>
+</html>

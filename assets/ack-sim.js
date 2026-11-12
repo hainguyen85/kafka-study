@@ -5,7 +5,8 @@
  *  - Nếu ISR nhỏ hơn min.insync.replicas lúc nhận, broker từ chối (NotEnoughReplicasException).
  *  - Follower chết vẫn nằm trong ISR cho tới khi tụt quá replica.lag.time.max.ms (nút "Chờ 30 giây").
  *  - Leader mới chỉ được bầu từ ISR; unclean.leader.election.enable=true cho phép bầu replica ngoài ISR (mất dữ liệu).
- *  - Việc sao chép follower là thủ công (nút "Cho follower sao chép") để bạn thấy cửa sổ "đã ack nhưng chưa sao chép".
+ *  - Kafka thật: follower TỰ fetch liên tục từ leader. Ở đây gom lại thành một nút ("Follower fetch từ leader")
+ *    để bạn dừng thời gian ở cửa sổ "leader đã ghi, follower chưa kịp fetch" (ngoài đời thường rất ngắn).
  *
  * Dùng:
  *   <div id="sim"></div>
@@ -32,7 +33,7 @@
     [acks, min, uLabel].forEach(function (x) { row.appendChild(x); });
     var row2 = el('div', 'row');
     var bSend = btn('Gửi message', send);
-    var bRep = btn('Cho follower sao chép', replicate);
+    var bRep = btn('Follower fetch từ leader', replicate);
     var bWait = btn('Chờ 30 giây', shrink);
     var bReset = btn('Làm lại', function () { fresh(); draw(); });
     [bSend, bRep, bWait, bReset].forEach(function (x) { row2.appendChild(x); });
@@ -83,7 +84,7 @@
       if (!S.leader) { ev('Không có leader để sao chép từ.'); return; }
       var L = leaderLog();
       S.b.forEach(function (b) { if (b.alive && b.id !== S.leader && S.isr.indexOf(b.id) >= 0) b.log = L.slice(); });
-      ev('Follower còn sống trong ISR đã sao chép tới cuối log của leader.');
+      ev('Follower còn sống trong ISR fetch từ leader, bắt kịp cuối log (Kafka thật làm việc này tự động, liên tục).');
       settle();
     }
 

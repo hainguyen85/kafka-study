@@ -13,7 +13,7 @@ Với yêu cầu "không mất", hành vi mặc định của lúc xử lý lỗ
 ## 1. Kiến thức tối thiểu (có nguồn)
 
 1. **Docs Apache không định nghĩa DLQ cho consumer thường.** DLQ chính thức chỉ có ở Kafka Connect (`errors.tolerance`, `errors.deadletterqueue.topic.name`) và Share Groups. Retry topic và DLT trong consumer là *pattern ứng dụng*; Spring Kafka hiện thực nó cho bạn. [[Connect guide]](https://kafka.apache.org/44/kafka-connect/user-guide/) [[research/0001, mục 1.1]](../research/0001-curriculum-coverage.md)
-2. **Mặc định của `DefaultErrorHandler`:** `FixedBackOff(0L, 9)`, tức thử tối đa 10 lần giao, không chờ. Hết lần thử: recoverer mặc định *chỉ log ở mức ERROR* và offset của record được commit, nghĩa là **record bị bỏ qua**. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
+2. **Mặc định của `DefaultErrorHandler`:** `FixedBackOff(0L, 9)`, tức thử tối đa 10 lần giao, không chờ (tham số đầu là khoảng chờ giữa các lần, tham số sau là số lần *thử lại* sau lần giao đầu: 1 + 9 = 10). Hết lần thử: recoverer mặc định *chỉ log ở mức ERROR* và offset của record được commit, nghĩa là **record bị bỏ qua**. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
 3. **Một số lỗi "fatal" không retry** mà đi thẳng tới recoverer: `DeserializationException`, `MessageConversionException`, `ConversionException`, `MethodArgumentResolutionException`, `NoSuchMethodException`, `ClassCastException`. Tuỳ biến bằng `addNotRetryableExceptions`. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
 4. **Blocking retry:** thread consumer ngủ theo back-off giữa các lần thử, nghĩa là cả partition đứng. Back-off dài hơn `max.poll.interval.ms` thì phải dùng `ContainerPausingBackOffHandler`, nếu không bạn tự gây ra Bài 5(b). [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
 5. **`DeadLetterPublishingRecoverer`:** mặc định gửi tới `<topic gốc>-dlt` (tutorial cũ ghi `.DLT`, đã lỗi thời), **cùng số partition** với record gốc, nên DLT phải có ít nhất bằng số partition của topic gốc. Nó giữ mọi header gốc và thêm header `DLT_EXCEPTION_*`, `DLT_ORIGINAL_TOPIC/PARTITION/OFFSET`. Nó *không tự tạo* topic DLT. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html) [[mã nguồn v4.1.2]](https://github.com/spring-projects/spring-kafka/blob/v4.1.2/spring-kafka/src/main/java/org/springframework/kafka/listener/DeadLetterPublishingRecoverer.java)
@@ -92,6 +92,8 @@ Mặc định "10 lần rồi bỏ" là không thể chấp nhận cho sự ki�
 ## 5. Tự nói thành lời
 
 Trong 45 giây: *"Message lỗi vào consumer Spring Kafka mặc định thì ... Mình cấu hình ... để ... Đánh đổi của retry blocking so với retry topic là ..."* Dùng: poison pill, DLT, back-off, thứ tự, `max.poll.interval.ms`.
+
+**Ôn nhanh:** [tóm tắt Bài 6](../summaries/0006-error-handling-dlt.md) (đọc sau khi đã tự nói).
 
 ## 6. Kiểm tra
 

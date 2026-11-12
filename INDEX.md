@@ -13,6 +13,20 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Bài 7: Idempotent consumer, outbox, transaction](lessons/0007-idempotent-consumer-transactions.md) · [html](lessons/0007-idempotent-consumer-transactions.html)
 - [Bài 8: Thiết kế topic](lessons/0008-topic-design.md) · [html](lessons/0008-topic-design.html)
 - [Bài 9: Bài kiểm tra cuối](lessons/0009-final-design-test.md) · [html](lessons/0009-final-design-test.html)
+- [Bài 4b: Idempotent producer](lessons/0010-idempotent-producer.md) · [html](lessons/0010-idempotent-producer.html)
+
+## Tóm tắt từng bài (ôn nhanh)
+
+- [Tóm tắt Bài 1: Bức tranh tổng thể về Kafka](summaries/0001-kafka-big-picture.md)
+- [Tóm tắt Bài 2: Key, partition, offset](summaries/0002-key-partition-offset.md)
+- [Tóm tắt Bài 3: Dựng cụm 3 broker](summaries/0003-build-cluster.md)
+- [Tóm tắt Bài 4: Producer và độ bền](summaries/0004-producer-durability.md)
+- [Tóm tắt Bài 5: Consumer, offset, commit, rebalance](summaries/0005-consumer-offset-commit.md)
+- [Tóm tắt Bài 6: Poison pill, retry, DLT](summaries/0006-error-handling-dlt.md)
+- [Tóm tắt Bài 7: Idempotent consumer, outbox, transaction](summaries/0007-idempotent-consumer-transactions.md)
+- [Tóm tắt Bài 8: Thiết kế topic](summaries/0008-topic-design.md)
+- [Tóm tắt Bài 9: Bài kiểm tra cuối](summaries/0009-final-design-test.md)
+- [Tóm tắt Bài 4b: Idempotent producer](summaries/0010-idempotent-producer.md)
 
 ## Bảng tra
 
