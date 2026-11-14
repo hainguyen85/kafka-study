@@ -50,12 +50,18 @@ Phần lớn lỗi "lạ" khi dùng Kafka (dữ liệu lộn thứ tự, một p
 <figcaption>Cùng key <code>DRV-001</code> luôn rơi vào cùng một partition; trong partition, message xếp theo offset tăng dần.</figcaption>
 </figure>
 
-<h2>2. Bốn ý cần nhớ</h2>
+<h2>2. Năm ý cần nhớ</h2>
 <ol class="steps">
 <li><b>Topic được chia thành partition</b>, nằm rải trên các broker khác nhau. <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
 <li><b>Cùng key thì cùng partition.</b> Tài liệu viết: "Events with the same event key (e.g., a customer or vehicle ID) are written to the same partition." <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
 <li><b>Thứ tự chỉ được đảm bảo trong một partition</b>, không phải cả topic: Kafka "will always read that partition's events in exactly the same order as they were written." <a href="https://kafka.apache.org/intro">[Kafka intro]</a></li>
 <li><b>Offset</b> là số thứ tự của message trong <em>một partition</em>. Vị trí của consumer ở mỗi partition chỉ là một số nguyên: offset của message kế tiếp sẽ đọc. <a href="https://kafka.apache.org/44/design/design/">[Kafka design: consumer position]</a></li>
+<li><b>Một message (record) gồm key, value, timestamp và header tuỳ chọn:</b> "Conceptually, an event has a key, value, timestamp, and optional metadata headers." <a href="https://kafka.apache.org/intro">[Kafka intro]</a> Ba hệ quả thiết kế:
+  <ul class="tight">
+  <li><b>Broker chỉ lưu byte.</b> Key và value được lưu dưới dạng <code>byte[]</code>; broker không hiểu JSON hay Avro. <a href="https://kafka.apache.org/44/implementation/message-format/">[Message format]</a></li>
+  <li><b>Chuyển đổi nằm ở client:</b> producer bắt buộc có <code>key.serializer</code>/<code>value.serializer</code>, consumer bắt buộc có <code>key.deserializer</code>/<code>value.deserializer</code>. Hai đầu phải dùng <em>cùng định dạng</em>; lệch là consumer lỗi giải mã (poison pill, Bài 6). <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
+  <li><b>Header</b> là cặp khoá-giá trị đi kèm record, thứ tự được giữ khi gửi và đọc. Chỗ tự nhiên cho <code>eventId</code> (chống trùng, Bài 7) hay trace id mà không phải sửa value. <a href="https://kafka.apache.org/44/implementation/message-format/">[Message format]</a></li>
+  </ul></li>
 </ol>
 <p>Hệ quả cho thiết kế: muốn giữ thứ tự các sự kiện của một đối tượng (tài xế, đơn hàng, khách hàng, thiết bị), dùng <em>mã của đối tượng đó</em> làm key. Không có key thì bạn không kiểm soát được partition nào nhận message.</p>
 
@@ -74,8 +80,52 @@ Phần lớn lỗi "lạ" khi dùng Kafka (dữ liệu lộn thứ tự, một p
 <h3>(a) Gọi xe: tài xế "nhảy lùi" trên bản đồ</h3>
 <p>Mỗi vài giây, app tài xế gửi <code>DriverLocationUpdated</code> vào topic <code>driver-locations</code> (3 partition). Team làm bản đồ muốn hiển thị vị trí mới nhất của từng tài xế, nhưng lại dùng <b>mã cuốc xe</b> làm key (và giữa hai cuốc, key trống). Toạ độ của cùng một tài xế rơi vào nhiều partition; consumer đọc các partition với tốc độ khác nhau nên một toạ độ cũ có thể được xử lý <em>sau</em> toạ độ mới. Trên bản đồ, xe nhảy lùi. Không có exception nào, mọi thứ "chạy bình thường".</p>
 <p>Sửa: key = <b>mã tài xế</b>. Toạ độ của một tài xế luôn cùng partition, theo thứ tự offset.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant App as App tài xế DRV-001
+participant P0 as Partition P0
+participant P2 as Partition P2
+participant Map as Consumer bản đồ
+App->>P0: 10:00:00 toạ độ X1 (key = mã cuốc A)
+App->>P2: 10:00:05 toạ độ X2 (key trống giữa hai cuốc)
+Note over P0,Map: Consumer đọc P2 nhanh hơn P0
+P2->>Map: X2 (mới)
+P0->>Map: X1 (cũ)
+Note over Map: Vẽ X1 sau X2: xe nhảy lùi, không có lỗi nào
+Note over App,Map: Sửa: key = DRV-001. Mọi toạ độ của tài xế vào một partition, đọc đúng thứ tự offset
+</script>
+<figcaption>Sequence: key theo mã cuốc làm toạ độ của một tài xế rải trên nhiều partition, nên thứ tự đọc không còn theo thời gian.</figcaption>
+</figure>
 <h3>(b) Flash sale: một shop làm nghẽn một partition</h3>
 <p>Topic <code>orders</code> dùng <b>mã shop</b> làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa <em>thứ tự</em> và <em>phân tải</em>: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart LR
+subgraph prod ["Đơn ngày flash sale (key = mã shop)"]
+A["shop-A: 70% đơn"]
+B["các shop khác: 30% đơn"]
+end
+A --> P0["P0: dồn 70%"]
+B --> P1["P1"]
+B --> P2["P2"]
+subgraph grp ["Consumer group"]
+C1["C1 quá tải"]
+C2["C2 rảnh"]
+C3["C3 rảnh"]
+C4["C4 thêm vào: ngồi chờ<br/>không còn partition"]
+end
+P0 --> C1
+P1 --> C2
+P2 --> C3
+class P0,C1 bad
+class C4 warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: một key "to" dồn 70% tải vào một partition; consumer thêm vào không có partition để nhận.</figcaption>
+</figure>
 
 <h2>Tự nói thành lời (60 giây)</h2>
 <p>Không nhìn tài liệu, nói to: <i>"Một message có key đi vào partition nào, thứ tự được giữ tới đâu, offset là gì, và vì sao tăng số partition là chuyện lớn."</i></p>
@@ -95,6 +145,7 @@ Phần lớn lỗi "lạ" khi dùng Kafka (dữ liệu lộn thứ tự, một p
 
 <script src="../assets/partition-sim.js"></script>
 <script>PartitionSim.mount(document.getElementById('sim'), { keys: ['DRV-001', 'DRV-002', 'DRV-004'], partitions: [3, 6] });</script>
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 Quiz.mount(document.getElementById('quiz'), [
@@ -112,7 +163,10 @@ Quiz.mount(document.getElementById('quiz'), [
     answer: 1, why: 'Position là offset của message kế tiếp sẽ đọc. Nó chỉ là một số nguyên, nên rất rẻ để lưu (checkpoint).' },
   { q: 'Bạn tăng topic từ 3 lên 6 partition, key vẫn là mã tài xế. Điều gì có thể xảy ra?',
     options: ['Mọi message cũ tự động chuyển sang partition mới', 'Không có gì, key luôn gắn chặt với partition', 'Key cũ có thể đổi partition, vỡ thứ tự', 'Kafka khoá topic tới khi consumer xử lý xong'],
-    answer: 2, why: 'Vị trí của key phụ thuộc số partition. Message mới của cùng tài xế có thể sang partition khác, thứ tự với message cũ không còn được đảm bảo.' }
+    answer: 2, why: 'Vị trí của key phụ thuộc số partition. Message mới của cùng tài xế có thể sang partition khác, thứ tự với message cũ không còn được đảm bảo.' },
+  { q: 'Service A gửi đơn hàng dạng JSON, service B đọc bằng deserializer Avro. Broker xử lý chuyện này thế nào?',
+    options: ['Broker tự chuyển JSON sang Avro cho B', 'Broker từ chối message vì sai định dạng', 'Broker chỉ lưu byte, B sẽ lỗi giải mã', 'Broker gửi kèm schema để B tự đổi lại'],
+    answer: 2, why: 'Broker lưu key/value dạng byte và không hiểu định dạng. Serializer ở producer và deserializer ở consumer phải khớp; lệch thì consumer lỗi giải mã.' }
 ]);
 </script>
 </body>

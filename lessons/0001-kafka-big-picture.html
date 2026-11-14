@@ -166,7 +166,7 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
 <li><b>Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc</b>, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là <em>consumer instance</em>, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.</li>
 <li>Chiều ngược lại không bị cấm: một consumer có thể đọc <em>nhiều</em> partition (C1 giữ P0 và P1).</li>
 <li>Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy <b>số partition là trần song song hoá của một group</b> (Bài 8).</li>
-<li>Việc chia này <em>không cố định</em>: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là <b>rebalance</b> (Bài 5). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.</li>
+<li>Việc chia này <em>không cố định</em>: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là <b>rebalance</b> (<a href="0011-rebalance.html">Bài 5b</a>). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.</li>
 <li><b>Vì sao thiết kế vậy?</b> Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.</li>
 <li><b>Hai group khác nhau không tranh nhau:</b> Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.</li>
 <li>Ngoại lệ về sau: <b>Share Groups</b> (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka">[KIP-932]</a></li>

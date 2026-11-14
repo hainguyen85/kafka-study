@@ -10,6 +10,9 @@ Bẫy hay gặp: `acks=all` mà `min.insync.replicas=1` thì khi ISR co còn lea
 
 Đánh đổi: minISR=2 nghĩa là mất 2 trên 3 broker thì ngừng ghi, producer treo tới hết timeout: đổi sẵn sàng lấy bền. Cuối cùng, phía Spring: `KafkaTemplate.send` trả future; không đọc future thì lỗi chỉ nằm trong log và ứng dụng vẫn báo thành công cho người dùng.
 
+Một bẫy vận hành: `send()` có thể chặn thread tới `max.block.ms` (60 giây) khi chờ metadata hoặc khi bộ đệm `buffer.memory` đầy; gọi `send()` trên thread HTTP thì cụm sự cố là API treo. Hạ `max.block.ms` và quyết định trước API làm gì khi Kafka không nhận.
+
+
 ## Hỏi nhanh, đáp gọn
 
 - **Idempotence có chống được trùng khi service restart rồi gửi lại không?** Không. Nó chỉ phủ retry trong một session của producer; gửi lại ở tầng ứng dụng là record mới, phải chống trùng ở consumer (Bài 7).

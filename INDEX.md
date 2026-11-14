@@ -14,6 +14,8 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Bài 8: Thiết kế topic](lessons/0008-topic-design.md) · [html](lessons/0008-topic-design.html)
 - [Bài 9: Bài kiểm tra cuối](lessons/0009-final-design-test.md) · [html](lessons/0009-final-design-test.html)
 - [Bài 4b: Idempotent producer](lessons/0010-idempotent-producer.md) · [html](lessons/0010-idempotent-producer.html)
+- [Bài 5b: Rebalance](lessons/0011-rebalance.md) · [html](lessons/0011-rebalance.html)
+- [Bài 5c: At-most-once, at-least-once, exactly-once](lessons/0012-delivery-semantics.md) · [html](lessons/0012-delivery-semantics.html)
 
 ## Tóm tắt từng bài (ôn nhanh)
 
@@ -27,6 +29,8 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Tóm tắt Bài 8: Thiết kế topic](summaries/0008-topic-design.md)
 - [Tóm tắt Bài 9: Bài kiểm tra cuối](summaries/0009-final-design-test.md)
 - [Tóm tắt Bài 4b: Idempotent producer](summaries/0010-idempotent-producer.md)
+- [Tóm tắt Bài 5b: Rebalance](summaries/0011-rebalance.md)
+- [Tóm tắt Bài 5c: At-most-once, at-least-once, exactly-once](summaries/0012-delivery-semantics.md)
 
 ## Bảng tra
 
@@ -37,6 +41,7 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 
 ## Khác
 
+- [Learning portal (mở trong trình duyệt)](portal/index.html): dựng lại bằng `node scripts/build_portal.mjs`
 - [Mission](MISSION.md)
 - [Tài nguyên](RESOURCES.md)
 - [Ghi chú và lộ trình](NOTES.md)

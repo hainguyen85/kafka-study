@@ -20,7 +20,8 @@ Sắp onboarding ở một ngân hàng dùng Kafka trong kiến trúc microservi
 - Học bằng usecase "oái oăm" kèm code chạy thật, không học lý thuyết khô. Usecase đa dạng nhiều lĩnh vực, không bắt buộc gắn với ngân hàng (có thể ánh xạ sang banking khi cần).
 
 ## Out of scope
-- Schema Registry: học một bài (ảnh hưởng thiết kế event). Kafka Connect và Kafka Streams: chỉ tổng quan.
+- Schema Registry: học một bài (ảnh hưởng thiết kế event); chưa có nguồn chính, phải research trước khi viết.
+- Kafka Connect và Kafka Streams: bỏ hẳn (người học xác nhận 2026-11-12: nơi mới không dùng Connect).
 - Bảo mật (SASL/SSL/mTLS/ACL) ở giai đoạn study này, theo yêu cầu của người học; nơi mới có thể dùng SSL/mTLS theo topic (chưa chắc). Quay lại khi cần.
 - Hạ tầng và vận hành cụm (devops lo): dựng cụm chỉ ở mức sandbox thực hành, không đi sâu KRaft/quorum/capacity.
 - Đọc source code Kafka.

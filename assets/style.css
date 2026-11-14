@@ -15,7 +15,7 @@
   --node: #efe7d2;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #17161a;
     --fg: #ebe8e1;
     --muted: #a09b90;
@@ -29,7 +29,24 @@
     --card: #1f1d24;
     --ctrl: #1f2f45;
     --node: #33301f;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #17161a;
+    --fg: #ebe8e1;
+    --muted: #a09b90;
+    --rule: #3a3841;
+    --accent: #7fb2ee;
+    --ok: #6fd18c;
+    --ok-bg: #1d3325;
+    --bad: #ff8f86;
+    --bad-bg: #3a1f1d;
+    --code-bg: #25232b;
+    --card: #1f1d24;
+    --ctrl: #1f2f45;
+    --node: #33301f;
+    color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { font-size: 18px; }
@@ -68,6 +85,17 @@ th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--
 th { font-family: system-ui, sans-serif; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 figure { margin: 1.5rem 0; }
 figcaption { font-size: .8rem; color: var(--muted); font-family: system-ui, sans-serif; margin-top: .3rem; }
+/* Sơ đồ Mermaid (assets/diagram.js) */
+.mermaid-out { overflow-x: auto; text-align: center; min-height: 2rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); padding: .8rem; }
+.mermaid-out svg { max-width: 100%; height: auto; }
+.mermaid-out.can-zoom { cursor: zoom-in; }
+.mermaid-out.zoom { cursor: zoom-out; text-align: left; }
+/* Sơ đồ được rộng hơn cột chữ (tối đa 60rem) khi màn hình đủ chỗ, kiểu hình toàn khổ của Tufte */
+main figure.diagram:has(.mermaid-out) { margin-left: calc(50% - min(50vw - 1rem, 30rem)); margin-right: calc(50% - min(50vw - 1rem, 30rem)); }
+.mermaid-out:empty::before { content: "Đang vẽ sơ đồ…"; color: var(--muted); font: .8rem system-ui, sans-serif; }
+.mermaid-err { text-align: left; }
+.mermaid-err p { color: var(--bad); font: .8rem system-ui, sans-serif; }
+@media print { .mermaid-out { break-inside: avoid; } }
 ol.steps li, ul.tight li { margin: .25rem 0; }
 
 /* Quiz widget (xem quiz.js) */

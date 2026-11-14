@@ -10,6 +10,9 @@ Kafka chỉ đảm bảo **thứ tự trong một partition**, không phải c�
 
 Hai bẫy khi chọn key và số partition. Một: số partition chỉ tăng, không giảm, và tăng thì key có thể sang partition khác trong khi dữ liệu cũ không được chia lại, nên thứ tự bị vỡ qua điểm tăng; phải tính số partition từ đầu. Hai: key quá "to" (như mã shop trong flash sale) dồn tải vào một partition, và thêm consumer không giúp vì mỗi partition chỉ một consumer trong group đọc.
 
+Một message gồm key, value, timestamp và header. Broker chỉ lưu byte: serializer ở producer và deserializer ở consumer phải khớp định dạng, lệch là consumer lỗi giải mã. Header là chỗ đặt `eventId` hay trace id mà không phải sửa value.
+
+
 ## Hỏi nhanh, đáp gọn
 
 - **Dùng một partition cho chắc thứ tự được không?** Được thứ tự toàn topic nhưng mất song song: một group chỉ có một consumer làm việc. Thường chỉ cần thứ tự theo đối tượng, nên chọn key đúng là đủ.

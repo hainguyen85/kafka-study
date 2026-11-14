@@ -1,6 +1,6 @@
 # Tóm tắt Bài 6: Poison pill, retry, DLT
 
-[← Tóm tắt Bài 5](0005-consumer-offset-commit.md) · [Bài học](../lessons/0006-error-handling-dlt.html) · [Tóm tắt Bài 7 →](0007-idempotent-consumer-transactions.md)
+[← Tóm tắt Bài 5c](0012-delivery-semantics.md) · [Bài học](../lessons/0006-error-handling-dlt.html) · [Tóm tắt Bài 7 →](0007-idempotent-consumer-transactions.md)
 
 *Tóm tắt cả bài bằng lời, khoảng 60 giây. Dùng để ôn nhanh và tra cứu.*
 

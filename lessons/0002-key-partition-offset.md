@@ -14,12 +14,16 @@ Key, partition và offset: ba thứ quyết định thứ tự và vị trí c�
 
 *Cùng key `DRV-001` luôn rơi vào cùng một partition; trong partition, message xếp theo offset tăng dần.*
 
-## 2. Bốn ý cần nhớ
+## 2. Năm ý cần nhớ
 
 1. **Topic được chia thành partition**, nằm rải trên các broker khác nhau. [[Kafka intro]](https://kafka.apache.org/intro)
 2. **Cùng key thì cùng partition.** Tài liệu viết: "Events with the same event key (e.g., a customer or vehicle ID) are written to the same partition." [[Kafka intro]](https://kafka.apache.org/intro)
 3. **Thứ tự chỉ được đảm bảo trong một partition**, không phải cả topic: Kafka "will always read that partition's events in exactly the same order as they were written." [[Kafka intro]](https://kafka.apache.org/intro)
 4. **Offset** là số thứ tự của message trong *một partition*. Vị trí của consumer ở mỗi partition chỉ là một số nguyên: offset của message kế tiếp sẽ đọc. [[Kafka design: consumer position]](https://kafka.apache.org/44/design/design/)
+5. **Một message (record) gồm key, value, timestamp và header tuỳ chọn:** "Conceptually, an event has a key, value, timestamp, and optional metadata headers." [[Kafka intro]](https://kafka.apache.org/intro) Ba hệ quả thiết kế:
+   - **Broker chỉ lưu byte.** Key và value được lưu dưới dạng `byte[]`; broker không hiểu JSON hay Avro. [[Message format]](https://kafka.apache.org/44/implementation/message-format/)
+   - **Chuyển đổi nằm ở client:** producer bắt buộc có `key.serializer`/`value.serializer`, consumer bắt buộc có `key.deserializer`/`value.deserializer`. Hai đầu phải dùng *cùng định dạng*; lệch là consumer lỗi giải mã (poison pill, Bài 6). [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+   - **Header** là cặp khoá-giá trị đi kèm record, thứ tự được giữ khi gửi và đọc. Chỗ tự nhiên cho `eventId` (chống trùng, Bài 7) hay trace id mà không phải sửa value. [[Message format]](https://kafka.apache.org/44/implementation/message-format/)
 
 Hệ quả cho thiết kế: muốn giữ thứ tự các sự kiện của một đối tượng (tài xế, đơn hàng, khách hàng, thiết bị), dùng *mã của đối tượng đó* làm key. Không có key thì bạn không kiểm soát được partition nào nhận message.
 
@@ -42,9 +46,53 @@ Mỗi vài giây, app tài xế gửi `DriverLocationUpdated` vào topic `driver
 
 Sửa: key = **mã tài xế**. Toạ độ của một tài xế luôn cùng partition, theo thứ tự offset.
 
+```mermaid
+sequenceDiagram
+participant App as App tài xế DRV-001
+participant P0 as Partition P0
+participant P2 as Partition P2
+participant Map as Consumer bản đồ
+App->>P0: 10:00:00 toạ độ X1 (key = mã cuốc A)
+App->>P2: 10:00:05 toạ độ X2 (key trống giữa hai cuốc)
+Note over P0,Map: Consumer đọc P2 nhanh hơn P0
+P2->>Map: X2 (mới)
+P0->>Map: X1 (cũ)
+Note over Map: Vẽ X1 sau X2: xe nhảy lùi, không có lỗi nào
+Note over App,Map: Sửa: key = DRV-001. Mọi toạ độ của tài xế vào một partition, đọc đúng thứ tự offset
+```
+
+*Sequence: key theo mã cuốc làm toạ độ của một tài xế rải trên nhiều partition, nên thứ tự đọc không còn theo thời gian.*
+
 ### (b) Flash sale: một shop làm nghẽn một partition
 
 Topic `orders` dùng **mã shop** làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa *thứ tự* và *phân tải*: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.
+
+```mermaid
+flowchart LR
+subgraph prod ["Đơn ngày flash sale (key = mã shop)"]
+A["shop-A: 70% đơn"]
+B["các shop khác: 30% đơn"]
+end
+A --> P0["P0: dồn 70%"]
+B --> P1["P1"]
+B --> P2["P2"]
+subgraph grp ["Consumer group"]
+C1["C1 quá tải"]
+C2["C2 rảnh"]
+C3["C3 rảnh"]
+C4["C4 thêm vào: ngồi chờ<br/>không còn partition"]
+end
+P0 --> C1
+P1 --> C2
+P2 --> C3
+class P0,C1 bad
+class C4 warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Flow: một key "to" dồn 70% tải vào một partition; consumer thêm vào không có partition để nhận.*
 
 ## Tự nói thành lời (60 giây)
 
@@ -53,6 +101,8 @@ Không nhìn tài liệu, nói to: *"Một message có key đi vào partition n�
 **Ôn nhanh:** [tóm tắt Bài 2](../summaries/0002-key-partition-offset.md) (đọc sau khi đã tự nói).
 
 ## 5. Kiểm tra (truy hồi từ trí nhớ)
+
+<!-- quiz:quiz -->
 
 **1. Bản đồ cần vị trí mới nhất của từng tài xế, kể cả qua nhiều cuốc xe, theo đúng thứ tự gửi. Bạn chọn key nào?**
 
@@ -128,6 +178,23 @@ Position là offset của message kế tiếp sẽ đọc. Nó chỉ là một s
 Vị trí của key phụ thuộc số partition. Message mới của cùng tài xế có thể sang partition khác, thứ tự với message cũ không còn được đảm bảo.
 
 </details>
+
+**6. Service A gửi đơn hàng dạng JSON, service B đọc bằng deserializer Avro. Broker xử lý chuyện này thế nào?**
+
+- **A.** Broker tự chuyển JSON sang Avro cho B
+- **B.** Broker từ chối message vì sai định dạng
+- **C.** Broker chỉ lưu byte, B sẽ lỗi giải mã
+- **D.** Broker gửi kèm schema để B tự đổi lại
+
+<details><summary>Đáp án</summary>
+
+**C. Broker chỉ lưu byte, B sẽ lỗi giải mã**
+
+Broker lưu key/value dạng byte và không hiểu định dạng. Serializer ở producer và deserializer ở consumer phải khớp; lệch thì consumer lỗi giải mã.
+
+</details>
+
+<!-- /quiz -->
 
 ## Nguồn nên đọc
 

@@ -20,7 +20,8 @@
 
 <h2>1. Kiến thức tối thiểu (có nguồn)</h2>
 <ol class="steps">
-<li><b>Ba ngữ nghĩa giao hàng:</b> at-most-once, at-least-once, exactly-once. Docs nói Kafka hỗ trợ exactly-once cho luồng đọc Kafka → ghi Kafka (như trong Kafka Streams); khi ghi sang hệ thống ngoài, cần phối hợp giữa offset và đầu ra. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<li><b>Ba ngữ nghĩa giao hàng</b> theo docs: at-most-once (có thể mất, không bao giờ gửi lại), at-least-once (không mất, có thể trùng), exactly-once (mỗi message có tác dụng đúng một lần). Docs nói cách đạt at-most-once là tắt retry ở producer và commit offset <em>trước</em> khi xử lý; exactly-once của Kafka dùng transaction cho luồng đọc Kafka → ghi Kafka; khi ghi sang hệ thống ngoài, cần phối hợp giữa offset và đầu ra. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+
 <li><b>Cách docs mô tả cho hệ thống ngoài:</b> lưu offset <em>cùng</em> kết quả trong một giao dịch ở hệ thống đích, và khi khởi động lại thì <code>seek()</code> tới offset đã lưu. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc: storing offsets outside Kafka]</a></li>
 <li><b>Idempotent producer chỉ phủ "một session"</b>; resend ở tầng ứng dụng "cannot be de-duplicated" (Bài 4). <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a></li>
 <li><b>Idempotent consumer và outbox là pattern ứng dụng.</b> Cả Apache lẫn Spring Kafka đều không có tài liệu chính thức cho chúng (<a href="../research/0002-spring-kafka.md">research/0002, mục 2.4</a>). Bài này dạy chúng như thiết kế, không như tính năng.</li>
@@ -28,6 +29,8 @@
 <li><b>Phía đọc:</b> consumer cần <code>isolation.level=read_committed</code> (mặc định <code>read_uncommitted</code>) và <code>enable.auto.commit=false</code>. <code>read_committed</code> chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. <code>transaction.timeout.ms</code> mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense">[KIP-890]</a></li>
 <li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
 </ol>
+
+<p><b>Chọn ngữ nghĩa nào cho luồng nào, và cấu hình Spring Boot cho từng loại:</b> xem <a href="0012-delivery-semantics.html">Bài 5c</a>. Bài này đi sâu vào hai công cụ của dòng cuối bảng đó: idempotent consumer với outbox, và transaction.</p>
 
 <h2>2. Dự đoán, rồi chạy</h2>
 <p>Đọc <code>S9IdempotentConsumer.java</code>: 5 sự kiện, user <code>u1..u5</code> được cộng <code>10 × n</code> điểm, <em>mỗi sự kiện được gửi 2 lần</em> với cùng <code>eventId</code> (mô phỏng ứng dụng gửi lại sau restart), producer idempotent bật. Trả lời trước khi chạy:</p>
@@ -77,14 +80,115 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <h2>4. Usecase oái oăm</h2>
 <h3>(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
 <p>Dịch vụ lưu đơn vào DB rồi <code>send</code> sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. <b>Outbox</b>: ghi sự kiện vào bảng <code>outbox</code> <em>cùng transaction DB</em> với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart LR
+subgraph dw ["Dual write: không có transaction chung"]
+direction TB
+S1["Service đặt vé"] -->|"1. lưu đơn"| DB1[("DB")]
+S1 -->|"2. send sự kiện"| K1["Kafka"]
+S1 -.- X["Crash giữa 1 và 2:<br/>DB có đơn, Kafka không có sự kiện"]
+end
+subgraph ob ["Outbox"]
+direction TB
+S2["Service đặt vé"] -->|"một transaction DB"| DB2[("bảng đơn + bảng outbox")]
+RL["Relay: polling hoặc CDC"] -->|"đọc outbox"| DB2
+RL -->|"gửi, rồi đánh dấu đã gửi"| K2["Kafka"]
+K2 --> C2["Consumer idempotent<br/>relay có thể gửi hai lần"]
+end
+class X bad
+class C2 ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: dual write có khe hở giữa DB và Kafka; outbox gộp hai việc ghi vào một transaction DB.</figcaption>
+</figure>
 <h3>(b) Kho + đơn hàng: transaction chỉ phủ trong Kafka</h3>
 <p>Consume "đơn mới" → produce "đã giữ hàng" trong một transaction Kafka là exactly-once <em>trong Kafka</em>. Nhưng bước "trừ tồn kho trong DB" ở giữa nằm ngoài. Nếu bạn nói trong họp "bên mình có exactly-once", câu hỏi kế tiếp sẽ là "với DB thì sao?". Câu trả lời trung thực: at-least-once + idempotent consumer cho DB; transaction Kafka dùng khi cả đầu vào và đầu ra đều là topic.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+I["Topic: đơn mới"] --> C["Consumer"]
+subgraph tx ["Transaction Kafka: exactly-once trong Kafka"]
+C
+O["Topic: đã giữ hàng"]
+OF["Offset của đầu vào"]
+end
+C --> O
+C --> OF
+C -->|"trừ tồn kho"| DB[("DB kho")]
+DB -.- N["Nằm ngoài transaction<br/>cần idempotent consumer"]
+class DB,N bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: transaction Kafka phủ topic đầu ra và offset đầu vào, không phủ bước ghi DB ở giữa.</figcaption>
+</figure>
 <h3>(c) Producer chết giữa transaction: consumer đứng yên</h3>
 <p>Producer transactional bị kill -9 khi transaction đang mở. Consumer <code>read_committed</code> không đọc qua LSO cho tới khi coordinator đóng transaction (sau <code>transaction.timeout.ms</code>, mặc định 60 giây). Tức là một sự cố nhỏ ở producer biến thành độ trễ cho mọi consumer <code>read_committed</code> của partition đó. Hạ <code>transaction.timeout.ms</code> nếu nghiệp vụ không cho phép chờ lâu; transaction chưa tới 60 giây thì đừng hạ quá thấp. (Chưa có lab cho tình huống này.)</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P as Producer transactional
+participant TC as Transaction coordinator
+participant T as Partition
+participant C as Consumer read_committed
+P->>TC: thêm partition vào transaction (lần gửi đầu)
+P->>T: m1, m2 (chưa commit)
+Note over P: kill -9
+C->>T: fetch
+T-->>C: dừng ở LSO, không đọc qua m1
+Note over C: đứng yên, lag tăng
+Note over TC: hết transaction.timeout.ms (mặc định 60 giây)
+TC->>T: abort transaction
+T-->>C: đọc tiếp, bỏ qua m1, m2
+</script>
+<figcaption>Sequence: transaction mở dở chặn consumer read_committed ở LSO cho tới khi coordinator abort.</figcaption>
+</figure>
 <h3>(d) <code>transactional.id</code> trùng giữa hai instance</h3>
 <p>Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trước (<code>ProducerFencedException</code>, lỗi fatal chỉ còn <code>close()</code>). Hệ quả vận hành: prefix cần khác nhau mỗi instance, nhưng ổn định qua restart nếu muốn giữ tính chống trùng qua restart. Điều này xung đột với autoscaling kiểu "pod tên ngẫu nhiên": cần một cách đặt tên ổn định (ví dụ StatefulSet). Ghi vào danh sách câu hỏi cho platform team.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant A as Pod A (transactional.id tx-0)
+participant TC as Transaction coordinator
+participant B as Pod B (cùng tx-0)
+A->>TC: initTransactions
+TC-->>A: epoch 5
+B->>TC: initTransactions
+TC-->>B: epoch 6, epoch 5 bị fence
+A->>TC: gửi tiếp trong transaction
+TC-->>A: ProducerFencedException
+Note over A: lỗi fatal, chỉ còn close()
+Note over A,B: Sửa: prefix khác nhau mỗi instance, ổn định qua restart (ví dụ tên StatefulSet)
+</script>
+<figcaption>Sequence: hai instance cùng transactional.id; producer khởi tạo sau fence producer trước.</figcaption>
+</figure>
 <h3>(e) Nếu là ngân hàng</h3>
 <p>"At-least-once + idempotent consumer với <code>UNIQUE(eventId)</code> trong cùng transaction DB, kèm outbox ở phía phát" là thiết kế mặc định cho sự kiện tiền. Transaction Kafka chỉ thêm khi có luồng topic → topic thật sự.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+subgraph pub ["Service phát"]
+API["API"] --> TX1[("Một transaction DB:<br/>nghiệp vụ + outbox")]
+RL["Relay"] -->|"đọc outbox"| TX1
+end
+RL -->|"acks=all, idempotence"| T["Topic sự kiện tiền<br/>RF=3, minISR=2"]
+T -->|"at-least-once"| L["Listener<br/>ack sau COMMIT"]
+subgraph sub ["Service nhận"]
+L --> TX2[("Một transaction DB:<br/>UNIQUE(eventId) + nghiệp vụ")]
+end
+L -.->|"lỗi sau retry"| D["DLT + cảnh báo<br/>Bài 6"]
+class TX1,TX2 ok
+class T warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc mặc định cho sự kiện tiền: outbox ở phía phát, at-least-once qua Kafka, dedup trong transaction DB ở phía nhận.</figcaption>
+</figure>
 
 <h2>5. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."</i> Dùng: at-least-once, idempotent, outbox, <code>read_committed</code>, LSO.</p>
@@ -104,6 +208,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 Quiz.mount(document.getElementById('predict'), [

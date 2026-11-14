@@ -1,0 +1,23 @@
+lab:
+  topic: lab-orders
+spring:
+  application:
+    name: lab-spring-clients
+  main:
+    web-application-type: none
+  kafka:
+    # Cổng quảng bá cho máy host (advertised.listeners PLAINTEXT_HOST trong labs/03-cluster). Bootstrap chỉ là cửa vào:
+    # client hỏi một broker để biết cả cụm, rồi nói chuyện thẳng với leader của từng partition (Bài 3).
+    bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
+    producer:
+      acks: all                       # mặc định của client 4.x, ghi tường minh cho rõ (Bài 4)
+      properties:
+        "[enable.idempotence]": true  # tường minh: cấu hình xung đột sẽ ném ConfigException (Bài 4b)
+    consumer:
+      auto-offset-reset: earliest     # group mới đọc từ đầu (mặc định Kafka là latest)
+      # enable-auto-commit: không đặt => Spring ép false và container tự commit theo ack-mode (Bài 5)
+    listener:
+      ack-mode: batch                 # mặc định; ghi ra để thấy. Đổi thành record / manual_immediate để so sánh
+logging:
+  level:
+    org.apache.kafka: WARN

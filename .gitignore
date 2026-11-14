@@ -3,3 +3,6 @@
 # labs
 target/
 out/
+
+# bản đóng gói portal để publish artifact
+dist/

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 5c: At-most-once, at-least-once, exactly-once</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0011-rebalance.html">Bài 5b</a> / Bài 5c · <a href="0006-error-handling-dlt.html">Bài 6</a> · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a></nav>
+
+<h1>Bài 5c: At-most-once, at-least-once, exactly-once: chọn cái nào, cấu hình ra sao</h1>
+<p class="lede">Bài 4 lo phía ghi, Bài 5 lo phía đọc. Ngữ nghĩa giao hàng là kết quả của cả hai cộng lại, và là câu đầu tiên cần chốt khi thiết kế một luồng sự kiện.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Trong họp thiết kế, "luồng này at-least-once hay exactly-once?" là câu hỏi mở đầu. Trả lời sai thì cả thiết kế sai: hứa exactly-once cho một luồng ghi DB là hứa điều Kafka không làm được. Sau bài này bạn chọn đúng ngữ nghĩa cho từng loại dữ liệu và viết được cấu hình Spring Boot tương ứng.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> với một luồng dữ liệu bất kỳ, bạn chọn ngữ nghĩa giao hàng, chỉ ra producer và consumer phải cấu hình gì để đạt nó, và chỉ ra chỗ ngữ nghĩa đó có thể bị phá.</p>
+
+<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<ol class="steps">
+<li><b>Ba ngữ nghĩa</b> theo docs: <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a>
+  <ul class="tight">
+  <li><b>At most once</b>: "Messages may be lost but are never redelivered."</li>
+  <li><b>At least once</b>: "Messages are never lost but may be redelivered."</li>
+  <li><b>Exactly once</b>: "Each message is processed once and only once."</li>
+  </ul></li>
+<li><b>Ngữ nghĩa là của cả chuỗi, có hai nửa.</b> Nửa ghi (producer → broker) và nửa đọc (broker → consumer → tác dụng phụ). Chuỗi yếu ở nửa nào thì yếu cả chuỗi: producer hoàn hảo mà consumer commit trước khi xử lý thì vẫn mất. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+<li><b>Nửa ghi.</b> Producer không retry thì có thể mất (at-most-once). Có retry thì không mất nhưng có thể ghi trùng (at-least-once). Retry cộng idempotence thì không trùng do retry trong một session (<a href="0010-idempotent-producer.html">Bài 4b</a>). Độ bền phía broker (<code>acks=all</code>, <code>min.insync.replicas</code>) quyết định message đã ack có còn hay không (<a href="0004-producer-durability.html">Bài 4</a>).</li>
+<li><b>Nửa đọc: thứ tự giữa "xử lý" và "lưu vị trí".</b> Docs: đọc, <em>lưu vị trí</em>, rồi mới xử lý thì "corresponds to at-most-once" vì consumer chết giữa chừng thì message chưa được xử lý; đọc, xử lý, rồi <em>lưu vị trí</em> thì "corresponds to the at-least-once semantics". <a href="https://kafka.apache.org/44/design/design/">[Design]</a> Trong Spring, "lưu vị trí" là thời điểm commit offset (<a href="0005-consumer-offset-commit.html">Bài 5</a>, mục "Commit offset xảy ra lúc nào").</li>
+<li><b>Mặc định Kafka là at-least-once:</b> "Kafka guarantees at-least-once delivery by default". At-most-once phải tự chọn: tắt retry ở producer và commit offset trước khi xử lý. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+<li><b>Exactly-once có hai phạm vi khác nhau.</b>
+  <ul class="tight">
+  <li><b>Kafka → Kafka:</b> đọc topic, ghi topic khác, và "write the offset to Kafka in the same transaction as the output topics". Kafka làm được bằng transaction + consumer <code>read_committed</code> (<a href="0007-idempotent-consumer-transactions.html">Bài 7</a>).</li>
+  <li><b>Kafka → hệ thống ngoài (DB, API):</b> "generally requires cooperation with such systems". Hai cách docs nêu: two-phase commit (nhiều hệ thống không hỗ trợ), hoặc "letting the consumer store its offset in the same place as its output". Cách thực tế phổ biến: at-least-once + consumer idempotent, để tác dụng phụ chỉ xảy ra một lần dù message tới nhiều lần.</li>
+  </ul>
+  <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+</ol>
+
+<h2>2. Chọn ngữ nghĩa theo loại dữ liệu</h2>
+<table>
+<tr><th>Ngữ nghĩa</th><th>Đánh đổi</th><th>Hợp với (phân tích, không phải quy định)</th></tr>
+<tr><td><b>At-most-once</b></td><td>Nhanh, đơn giản; chấp nhận mất</td><td>Dữ liệu "mới nhất là đủ": giá chứng khoán hiển thị theo thời gian thực, vị trí xe, telemetry, metric. Tick mất thì tick sau thay ngay; xử lý lại tick cũ còn có hại</td></tr>
+<tr><td><b>At-least-once</b></td><td>Không mất; phải chịu hoặc chống trùng</td><td>Phần lớn sự kiện nghiệp vụ: đơn hàng, thông báo, đồng bộ dữ liệu, audit log. Kèm consumer idempotent nếu tác dụng phụ không được lặp</td></tr>
+<tr><td><b>Exactly-once trong Kafka</b></td><td>Chậm hơn, phức tạp hơn; chỉ phủ Kafka → Kafka</td><td>Bước xử lý luồng có đầu vào và đầu ra đều là topic: tính vị thế, tổng hợp giao dịch theo phút, làm giàu và chuyển đổi định dạng</td></tr>
+<tr><td><b>Hiệu quả đúng một lần với DB</b> (at-least-once + idempotent consumer + outbox)</td><td>Thêm bảng dedup, outbox; consumer phức tạp hơn</td><td>Tiền và lệnh: chuyển khoản, ghi sổ cái, trừ tiền, đặt lệnh, phát hành thẻ. Tác dụng phụ nằm ở DB hoặc hệ thống ngoài</td></tr>
+</table>
+<p><b>Tài chính, ngân hàng, chứng khoán:</b> dòng tiền và lệnh gần như luôn ở dòng cuối; exactly-once của Kafka chỉ dùng cho các bước xử lý luồng giữa các topic; at-most-once chỉ cho dữ liệu hiển thị kiểu giá thời gian thực. Đây là lập luận từ phạm vi bảo đảm trong docs, không phải quy định của ngành; hệ thống cụ thể có thể chọn khác.</p>
+
+<h2>3. Cấu hình Spring Boot cho từng ngữ nghĩa</h2>
+<p>Các đoạn dưới ghép từ docs Kafka và Spring Kafka (<a href="../research/0002-spring-kafka.md">research/0002</a>). Đoạn có trong lab ghi rõ lab; đoạn không có trong lab là mẫu, chưa chạy thử.</p>
+
+<h3>At-most-once</h3>
+<pre><code># application.yml
+spring:
+  kafka:
+    producer:
+      acks: "1"
+      retries: 0
+      properties:
+        "[enable.idempotence]": false    # idempotence cần retries &gt; 0 và acks=all (Bài 4b)
+    consumer:
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate</code></pre>
+<pre><code>// Lưu vị trí TRƯỚC, xử lý SAU: chết giữa chừng thì message này mất, không bao giờ xử lý lại
+@KafkaListener(topics = "price-ticks", groupId = "price-board")
+void on(ConsumerRecord&lt;String, String&gt; rec, Acknowledgment ack) {
+    ack.acknowledge();      // commit ngay
+    board.update(rec.key(), rec.value());
+}</code></pre>
+
+<h3>At-least-once</h3>
+<pre><code>spring:
+  kafka:
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+    consumer:
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate         # hoặc để mặc định batch nếu chịu được xử lý lại cả lô</code></pre>
+<pre><code>// Xử lý TRƯỚC, lưu vị trí SAU: chết giữa chừng thì record được giao lại (trùng, không mất)
+@KafkaListener(topics = "orders", groupId = "order-service")
+void on(ConsumerRecord&lt;String, String&gt; rec, Acknowledgment ack) {
+    process(rec);
+    ack.acknowledge();
+}</code></pre>
+<p>Đây chính là profile <code>s6fix</code> của <code>labs/05-scenarios</code> (Bài 5); producer là profile <code>safe</code> của lab 04 (Bài 4).</p>
+
+<h3>Hiệu quả đúng một lần với DB (at-least-once + idempotent consumer)</h3>
+<pre><code>// Mẫu, chưa chạy thử: dedup và tác dụng phụ trong CÙNG một transaction DB, ack SAU khi commit DB
+@KafkaListener(topics = "payments", groupId = "ledger")
+void on(ConsumerRecord&lt;String, String&gt; rec, Acknowledgment ack) {
+    ledger.applyOnce(eventIdOf(rec), rec.value());   // @Transactional bên trong
+    ack.acknowledge();
+}
+
+@Transactional
+public void applyOnce(String eventId, String payload) {
+    try {
+        jdbc.update("INSERT INTO processed_event(event_id) VALUES (?)", eventId);  // PRIMARY KEY(event_id)
+    } catch (DuplicateKeyException alreadyDone) {
+        return;                                  // đã xử lý rồi: bỏ qua, vẫn ack
+    }
+    jdbc.update("INSERT INTO ledger_entry ...", ...);
+}</code></pre>
+<p>Profile <code>s9dedup</code> của lab 05 minh hoạ ý này với tập "đã xử lý" trong RAM (chỉ để thấy, không đúng khi restart); <a href="0007-idempotent-consumer-transactions.html">Bài 7</a> giải thích vì sao phải nằm trong DB.</p>
+
+<h3>Exactly-once trong Kafka (Kafka → Kafka)</h3>
+<pre><code>spring:
+  kafka:
+    producer:
+      transaction-id-prefix: tx-pos-     # Boot tự dựng KafkaTransactionManager; prefix khác nhau mỗi instance
+    consumer:
+      isolation-level: read-committed    # consumer phía sau chỉ thấy dữ liệu đã commit
+      enable-auto-commit: false</code></pre>
+<pre><code>// Container mở transaction: gửi output và commit offset đầu vào cùng một transaction
+@KafkaListener(topics = "trades", groupId = "position-calc")
+void on(ConsumerRecord&lt;String, String&gt; rec) {
+    template.send("positions", rec.key(), recalc(rec.value()));
+}   // ném exception thì transaction abort và record được giao lại</code></pre>
+<p>Đây là profile <code>s10</code> của lab 05 (đã sửa lỗi, chưa chạy lại). Cấu hình đầy đủ và giới hạn: <a href="0007-idempotent-consumer-transactions.html">Bài 7</a>.</p>
+
+<h2>4. Thực hành: chọn ngữ nghĩa cho 4 luồng</h2>
+<p>Với mỗi luồng, viết ra: ngữ nghĩa, cấu hình producer, cấu hình consumer, chỗ có thể bị phá. Rồi mở đáp án.</p>
+<ol class="tight">
+<li>Bảng giá cổ phiếu trên app môi giới, cập nhật nhiều lần mỗi giây.</li>
+<li>Gửi email xác nhận đơn hàng.</li>
+<li>Trừ tiền tài khoản khi nhận sự kiện "thanh toán đã duyệt".</li>
+<li>Gộp các giao dịch khớp lệnh trong topic <code>trades</code> thành vị thế theo tài khoản, ghi ra topic <code>positions</code>.</li>
+</ol>
+<details><summary>Mở đáp án gợi ý</summary>
+<ol>
+<li><b>At-most-once.</b> Producer <code>acks=1</code>, không retry; consumer ack trước rồi cập nhật bảng. Bị phá: không có gì cần giữ, nhưng nếu ai đó dùng chính luồng này để tính tiền thì sai.</li>
+<li><b>At-least-once</b>, dedup theo <code>orderId</code> nếu muốn tránh gửi hai email. Chỗ phá: gọi dịch vụ email rồi crash trước khi ack thì email đi hai lần; chấp nhận được hoặc dedup.</li>
+<li><b>At-least-once + idempotent consumer</b> (khoá duy nhất theo mã sự kiện trong cùng transaction DB với bút toán), phía phát dùng outbox. Chỗ phá: dedup trong RAM, ack trước khi commit DB, hoặc khoá dedup là offset thay vì mã sự kiện.</li>
+<li><b>Exactly-once trong Kafka</b>: transaction + <code>read_committed</code> ở consumer của <code>positions</code>. Chỗ phá: listener vừa ghi topic vừa gọi API ngoài (API không nằm trong transaction); consumer phía sau quên <code>read_committed</code> nên thấy cả dữ liệu đã abort.</li>
+</ol>
+</details>
+
+<h2>5. Usecase oái oăm</h2>
+<h3>(a) "Exactly-once" mà khách nhận hai SMS</h3>
+<p>Listener chạy trong transaction Kafka, gửi SMS rồi ghi sự kiện ra topic. Lần đầu ghi topic lỗi, transaction abort, record được giao lại, SMS đi lần hai. Transaction Kafka không rút lại được một cuộc gọi ra ngoài. Xử lý: tách việc gửi SMS sang consumer riêng đọc topic đã commit, và cho nó chống trùng.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant K as Topic đầu vào
+participant L as Listener (trong transaction Kafka)
+participant SMS as Cổng SMS
+participant O as Topic đầu ra
+K->>L: record R
+L->>SMS: gửi SMS (lần 1)
+L--xO: ghi sự kiện: lỗi
+Note over L: transaction abort, offset của R chưa commit
+K->>L: R được giao lại
+L->>SMS: gửi SMS (lần 2)
+L->>O: ghi sự kiện, commit transaction
+Note over K,O: Sửa: tách việc gửi SMS sang consumer riêng đọc topic đã commit, và chống trùng
+</script>
+<figcaption>Sequence: transaction Kafka abort và giao lại record, nhưng không rút lại được SMS đã gửi.</figcaption>
+</figure>
+<h3>(b) At-most-once ngoài ý muốn</h3>
+<p>Team nghĩ mình đang at-least-once vì cấu hình producer chuẩn, nhưng listener giao việc cho thread pool rồi return (chế độ B ở Bài 5). Offset đi trước việc xử lý; crash là mất. Ngữ nghĩa của chuỗi do nửa yếu nhất quyết định.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+P["Producer: acks=all, idempotence<br/>nửa ghi: at-least-once"] --> T["Kafka"]
+T --> L["Listener giao việc cho thread pool rồi return<br/>offset đi trước xử lý"]
+L --> R["Nửa đọc: at-most-once"]
+R --> X["Cả chuỗi: at-most-once<br/>crash là mất"]
+class P ok
+class R,X bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: ngữ nghĩa của cả chuỗi do nửa yếu nhất quyết định.</figcaption>
+</figure>
+<h3>(c) At-least-once với consumer không idempotent</h3>
+<p>Rebalance (Bài 5b) giao lại 300 record đã xử lý chưa commit; consumer cộng tiền lần nữa. Không có lỗi nào trong log. At-least-once không sai; thiếu là nửa "chịu được trùng".</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant K as Kafka
+participant C1 as Consumer 1
+participant C2 as Consumer 2
+participant DB as Số dư
+K->>C1: 300 record
+C1->>DB: cộng tiền 300 lần
+Note over C1: rebalance trước khi commit offset
+K->>C2: giao lại 300 record đó
+C2->>DB: cộng tiền lần nữa
+Note over K,DB: Không lỗi nào trong log. Thiếu nửa chịu được trùng: dedup theo eventId (Bài 7)
+</script>
+<figcaption>Sequence: at-least-once giao lại đúng như hứa; consumer không chống trùng nên cộng tiền hai lần.</figcaption>
+</figure>
+
+<h2>6. Tự nói thành lời</h2>
+<p>Trong 60 giây: <i>"Ba ngữ nghĩa là ... Ngữ nghĩa của cả chuỗi phụ thuộc vào ... Với tiền thì mình chọn ... vì exactly-once của Kafka chỉ phủ ... Giá hiển thị thì ... vì ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0012-delivery-semantics.md">tóm tắt Bài 5c</a> (đọc sau khi đã tự nói).</p>
+
+<h2>7. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> mục "Message Delivery Semantics" trong <a href="https://kafka.apache.org/44/design/design/">Design</a> (khoảng 15 phút): cả ba định nghĩa, hai nửa của chuỗi và phạm vi exactly-once đều ở đây.<br>
+<b>Spring:</b> <a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html">Exactly Once Semantics</a>.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0006-error-handling-dlt.html">Bài 6: poison pill, retry, DLT</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "two-phase commit với Kafka có làm được không?", "audit log nên chọn ngữ nghĩa nào?". Dán dòng kết quả quiz và đáp án bài tập mục 4.</div>
+</main>
+
+<script src="../assets/diagram.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Consumer đọc message, commit offset ngay, rồi mới xử lý. Nó chết giữa lúc xử lý. Ngữ nghĩa của nửa đọc là gì?',
+    options: ['At-least-once, vì sẽ được giao lại', 'At-most-once, message này bị mất', 'Exactly-once, nhờ offset đã lưu', 'Không xác định, tuỳ cấu hình acks'],
+    answer: 1, why: 'Docs: lưu vị trí trước khi xử lý tương ứng at-most-once; consumer chết thì message chưa được xử lý và không được giao lại.' },
+  { q: 'Không cấu hình gì đặc biệt, Kafka bảo đảm ngữ nghĩa nào?',
+    options: ['At-most-once theo mặc định', 'Exactly-once theo mặc định', 'Không bảo đảm ngữ nghĩa nào', 'At-least-once theo mặc định'],
+    answer: 3, why: 'Docs: "Kafka guarantees at-least-once delivery by default". At-most-once và exactly-once phải tự cấu hình.' },
+  { q: 'Luồng đọc topic payments rồi ghi bút toán vào PostgreSQL. Cách thực tế để mỗi thanh toán có tác dụng đúng một lần?',
+    options: ['Bật transaction-id-prefix cho producer', 'Đặt isolation-level là read-committed', 'At-least-once cộng khoá dedup trong DB', 'Tắt retry để không bao giờ gửi lại'],
+    answer: 2, why: 'Transaction Kafka không bao DB. Docs: hệ thống ngoài cần phối hợp, ví dụ lưu offset cùng chỗ với output; thực tế phổ biến là at-least-once + consumer idempotent trong cùng transaction DB.' },
+  { q: 'Bảng giá cổ phiếu thời gian thực trên app. Ngữ nghĩa nào hợp lý nhất?',
+    options: ['At-most-once, tick mới thay tick cũ', 'Exactly-once, giá là dữ liệu tiền tệ', 'At-least-once cộng dedup theo mã giá', 'Exactly-once cộng outbox ở phía phát'],
+    answer: 0, why: 'Giá hiển thị chỉ cần giá mới nhất; mất một tick thì tick sau thay ngay, xử lý lại tick cũ còn làm bảng giá lùi. Đây là phân tích, không phải quy định.' },
+  { q: 'Producer cấu hình chuẩn (acks=all, idempotence). Listener giao việc cho thread pool rồi return, auto-commit bật. Ngữ nghĩa thực tế của cả chuỗi?',
+    options: ['Exactly-once nhờ producer idempotent', 'At-least-once nhờ producer ghi bền', 'Có thể mất do nửa đọc commit sớm', 'Không mất vì broker giữ message lại'],
+    answer: 2, why: 'Ngữ nghĩa của chuỗi do nửa yếu nhất quyết định. Offset được commit trước khi việc xong, crash là mất dù message vẫn nằm trong topic.' }
+]);
+</script>
+</body>
+</html>

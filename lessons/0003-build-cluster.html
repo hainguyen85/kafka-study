@@ -36,6 +36,12 @@ Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu nh�
   <li><code>min.insync.replicas=3</code>: mất 1 broker là ISR còn 2 &lt; 3, mọi ghi bị từ chối. Bền hơn không đáng kể mà mất sẵn sàng.</li>
   <li><code>min.insync.replicas=1</code>: luôn ghi được, nhưng một ghi có thể chỉ nằm ở một bản sao. Bài 4 đi sâu vào cái bẫy này.</li>
   </ul></li>
+<li><b>Bootstrap chỉ là cửa vào.</b> <code>bootstrap.servers</code> dùng cho kết nối đầu tiên: client hỏi một broker trong danh sách để biết toàn bộ cụm ("discover the full set of Kafka brokers"), nên danh sách không cần đủ mọi broker, nhưng nên có hơn một để vẫn vào được khi một broker chết. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> Sau đó client nói chuyện thẳng với broker giữ leader của từng partition, theo địa chỉ mà broker đó <b>quảng bá</b> trong <code>advertised.listeners</code>; cấu hình này dùng khi địa chỉ broker lắng nghe không phải địa chỉ client nên dùng (ví dụ môi trường cloud). <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a>
+  <ul class="tight">
+  <li>Ví dụ ngay trong lab: <code>kafka-1</code> quảng bá hai địa chỉ, <code>kafka-1:19092</code> cho các container trong mạng Docker và <code>localhost:29092</code> cho máy của bạn (xem <code>labs/03-cluster/docker-compose.yml</code>). Vì vậy lệnh CLI chạy <em>trong</em> container dùng <code>kafka-1:19092</code>, còn ứng dụng Spring chạy trên Windows dùng <code>localhost:29092,39092,49092</code>.</li>
+  <li>Hệ quả khi gỡ rối (suy ra): "kết nối được bootstrap nhưng gửi không được" thường là client không tới được địa chỉ được quảng bá. Ở nơi mới, chuỗi bootstrap do devops đưa: MSK là danh sách vài broker, Confluent Cloud là một endpoint.</li>
+  </ul></li>
+<li><b>Sửa cấu hình của topic đã tạo, không cần xoá topic:</b> <code>kafka-configs.sh --entity-type topics --entity-name &lt;topic&gt; --alter --add-config &lt;key&gt;=&lt;value&gt;</code>; <code>--delete-config &lt;key&gt;</code> để quay về mặc định của broker; <code>--describe</code> để xem các giá trị đang ghi đè. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations: modifying topics]</a></li>
 </ol>
 
 <h2>2. Thực hành (mỗi bước có kết quả mong đợi)</h2>
@@ -46,6 +52,7 @@ Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu nh�
 <p>Mở Ubuntu (WSL), vào thư mục repo (đường dẫn dạng <code>/mnt/d/Workspace/study/kafka</code>) và chạy:</p>
 <pre><code>bash scripts/wizard-03-docker-kafka.sh</code></pre>
 <p>Wizard dẫn 6 stage: kiểm tra systemd, cài Docker Engine, chạy docker không cần sudo, chạy cụm, tạo topic và kiểm tra, kết nối từ Windows. Nó hỏi mật khẩu sudo và xác nhận ở từng bước.</p>
+<p><b>Máy đã có Docker</b> (máy bạn: Docker 29.9.3, Compose v5.7.0 trong <code>Ubuntu-24.04</code>, user đã ở nhóm <code>docker</code>): stage 2 thấy lệnh <code>docker</code> thì bỏ qua phần cài, chỉ chạy <code>hello-world</code> để kiểm tra; stage 3 chỉ bật lại dịch vụ và nhóm, chạy lại cũng không sao. Chạy wizard từ terminal Ubuntu, đứng ở thư mục repo (<code>cd /mnt/d/Workspace/study/kafka</code>). Cụm gồm 3 node, mỗi node dùng heap mặc định 1 GB (<code>KAFKA_HEAP_OPTS="-Xmx1G -Xms1G"</code> trong <code>/opt/kafka/bin/kafka-server-start.sh</code> của image <code>apache/kafka:4.4.0</code>, đã kiểm tra), nên WSL cần còn trống khoảng 3 GB.</p>
 <div class="expect">Mong đợi: cuối cùng wizard báo "Setup complete" và liệt kê những việc còn lại phải làm tay (nếu có).</div>
 <div class="warn">Nếu wizard yêu cầu <code>wsl.exe --shutdown</code> (bật systemd lần đầu), làm theo rồi chạy lại. Script mới được kiểm tra cú pháp, chưa chạy thật trên máy bạn: nếu nó lỗi ở đâu, dán lỗi cho giáo viên.</div>
 <label class="tick"><input type="checkbox" data-step="1"> Tôi đã chạy xong wizard</label>
@@ -60,14 +67,60 @@ Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu nh�
 </div>
 
 <div class="step">
-<h3>Bước 3. Gửi và nhận message bằng dòng lệnh</h3>
-<p>Terminal A (consumer), terminal B (producer):</p>
-<pre><code># A
-docker exec -it kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-1:19092 --topic lab-orders --from-beginning
-# B (gõ vài dòng, mỗi dòng một message, Ctrl-C để thoát)
-docker exec -it kafka-1 /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-1:19092 --topic lab-orders</code></pre>
-<div class="expect">Mong đợi: dòng gõ ở B xuất hiện ở A. Dừng A rồi chạy lại với <code>--from-beginning</code>: các dòng cũ vẫn còn (event không bị xoá khi đã đọc, như Bài 1).</div>
+<h3>Bước 3. Gửi và nhận message bằng Spring Boot</h3>
+<p>Ứng dụng thật ở nơi mới là Spring Kafka, nên từ đây mọi producer/consumer trong lab là ứng dụng Spring Boot. Lab <code>labs/03-spring-clients</code> có một producer và một consumer, bật bằng profile. Build một lần:</p>
+<pre><code>cd labs/03-spring-clients
+mvn -q -DskipTests package          # Maven chạy bằng JDK 17+ (đặt JAVA_HOME như README của lab)
+J="java -jar target/spring-clients-0.0.1-SNAPSHOT.jar"</code></pre>
+<p>Terminal A chạy consumer, terminal B chạy producer:</p>
+<pre><code># A: consumer, group g1, in mỗi record nhận được và mỗi lần group chia lại partition
+$J --spring.profiles.active=consumer --lab.instance=c1
+# B: producer gửi 9 message xoay vòng 3 key, in partition và offset broker trả về
+$J --spring.profiles.active=producer --lab.count=9</code></pre>
+<p>Ba đoạn code và cấu hình cần đọc:</p>
+<pre><code>// labs/03-spring-clients/.../ProducerRunner.java (rút gọn)
+CompletableFuture&lt;SendResult&lt;String, String&gt;&gt; future = template.send(topic, key, value);
+future.whenComplete((result, ex) -&gt; {
+    if (ex == null) {
+        var md = result.getRecordMetadata();   // broker trả về partition và offset thật
+        System.out.printf("key=%s -&gt; partition=%d offset=%d%n", key, md.partition(), md.offset());
+    } else {
+        System.out.printf("GỬI LỖI key=%s: %s%n", key, ex);
+    }
+});</code></pre>
+<pre><code>// labs/03-spring-clients/.../ConsumerListener.java (rút gọn)
+@KafkaListener(topics = "${lab.topic}", groupId = "${lab.group:g1}")
+void onMessage(ConsumerRecord&lt;String, String&gt; rec) {
+    System.out.printf("[%s] partition=%d offset=%d key=%s%n",
+            instance, rec.partition(), rec.offset(), rec.key());
+}</code></pre>
+<pre><code># labs/03-spring-clients/src/main/resources/application.yml (phần Kafka)
+spring:
+  kafka:
+    bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+    consumer:
+      auto-offset-reset: earliest   # group mới đọc từ đầu (mặc định Kafka: latest)
+    listener:
+      ack-mode: batch               # mặc định của Spring: commit sau khi xử lý xong lô poll</code></pre>
+<div class="expect">Mong đợi (code đã biên dịch và khởi động được, chưa chạy với cụm): B in 9 dòng <code>key=... -&gt; partition=... offset=...</code>; cùng key luôn cùng partition, offset tăng dần trong từng partition (Bài 2). A in đúng các record đó. Dừng A (Ctrl-C), chạy lại với <code>--lab.group=g2</code>: group mới đọc lại từ đầu vì message không bị xoá khi đã đọc (Bài 1) và <code>auto-offset-reset: earliest</code>.</div>
 <label class="tick"><input type="checkbox" data-step="3"> Tôi đã thấy message đi qua cụm</label>
+</div>
+
+<div class="step">
+<h3>Bước 3b. Sửa cấu hình topic đã có</h3>
+<p>Giả sử ai đó đã tạo topic với <code>min.insync.replicas=1</code>. Bạn sửa mà không xoá topic (chạy trong Ubuntu):</p>
+<pre><code>K="docker exec kafka-1 /opt/kafka/bin"
+$K/kafka-topics.sh --bootstrap-server kafka-1:19092 --create --topic lab-weak --partitions 3 --replication-factor 3 --config min.insync.replicas=1
+$K/kafka-configs.sh --bootstrap-server kafka-1:19092 --entity-type topics --entity-name lab-weak --describe
+$K/kafka-configs.sh --bootstrap-server kafka-1:19092 --entity-type topics --entity-name lab-weak --alter --add-config min.insync.replicas=2
+$K/kafka-configs.sh --bootstrap-server kafka-1:19092 --entity-type topics --entity-name lab-weak --describe
+$K/kafka-configs.sh --bootstrap-server kafka-1:19092 --entity-type topics --entity-name lab-weak --alter --delete-config min.insync.replicas</code></pre>
+<div class="expect">Mong đợi (theo docs, chưa chạy thử trên cụm này): lần <code>--describe</code> đầu thấy <code>min.insync.replicas=1</code>; sau <code>--alter</code> thấy <code>2</code>; sau <code>--delete-config</code> giá trị ghi đè biến mất và topic dùng mặc định của broker. Đây cũng là cách đặt <code>unclean.leader.election.enable=false</code> cho từng topic (Bài 4).</div>
+<label class="tick"><input type="checkbox" data-step="31"> Tôi đã sửa rồi trả lại config của topic</label>
 </div>
 
 <div class="step">
@@ -100,8 +153,45 @@ docker start kafka-2 kafka-3</code></pre>
 <h2>3. Usecase oái oăm</h2>
 <h3>(a) Kho lạnh mất điện cả giá đỡ (IoT)</h3>
 <p>Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt. Còn đúng một node "sống", nhưng dashboard trống và không cảm biến nào ghi được. Lý do: mất đa số controller thì cụm không đổi được metadata, không bầu được leader. Sống một node không có nghĩa là cụm còn dùng được. Cách giảm đau (khái niệm): đặt các node ở các khu vực mất điện khác nhau, và tách controller khỏi broker ở môi trường quan trọng (tài liệu khuyến nghị tránh combined mode).</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+subgraph o1 ["Ổ điện 1: mất điện"]
+N1["node 1<br/>broker + controller"]
+N2["node 2<br/>broker + controller"]
+end
+subgraph o2 ["Ổ điện 2"]
+N3["node 3<br/>broker + controller<br/>còn sống"]
+end
+N3 --> Q{"Quorum controller:<br/>còn 1 trên 3, cần ít nhất 2"}
+Q -->|"mất đa số"| X["Không bầu được leader<br/>không đổi được metadata"]
+X --> S["Cảm biến không ghi được<br/>dashboard trống"]
+S -.-> F["Giảm đau: mỗi node một khu vực điện<br/>tách controller khỏi broker"]
+class N1,N2,X,S bad
+class N3 warn
+class F ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: còn một node sống nhưng quorum controller mất đa số, nên cụm không dùng được.</figcaption>
+</figure>
 <h3>(b) Topic "ma" do gõ sai tên (microservices dùng chung cụm)</h3>
 <p>Service A gửi vào <code>order-evnts</code> (gõ nhầm), service B đọc <code>order-events</code>. Không ai báo lỗi vì broker tự tạo <code>order-evnts</code> với 1 partition và RF=1 (giá trị mặc định ở mục 1). Message không mất, nhưng không ai đọc, và topic đó không chịu nổi việc broker chết. Cách xử lý: tắt <code>auto.create.topics.enable</code> và tạo topic có chủ đích (lab của bạn đã làm đúng việc này; Stage 5 của wizard có kiểm tra).</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+A["Service A"] -->|"gửi vào order-evnts (gõ nhầm)"| T1["order-evnts<br/>broker tự tạo: 1 partition, RF=1<br/>không ai đọc"]
+T2["order-events<br/>topic thật"] --> B["Service B<br/>không thấy message nào"]
+F["Sửa: auto.create.topics.enable=false<br/>tạo topic có chủ đích"] -.->|"A nhận lỗi, không có topic ma"| A
+class T1,B bad
+class F ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: gõ sai tên topic thì broker tự tạo topic "ma"; tắt auto-create để lỗi lộ ra ở bên gửi.</figcaption>
+</figure>
 
 <h2>4. Tự nói thành lời</h2>
 <p>Không nhìn tài liệu, giải thích trong 30 giây: <i>"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."</i> Dùng đúng các từ: leader, follower, ISR, controller, quorum.</p>
@@ -121,6 +211,7 @@ docker start kafka-2 kafka-3</code></pre>
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 Quiz.mount(document.getElementById('quiz'), [
@@ -138,7 +229,10 @@ Quiz.mount(document.getElementById('quiz'), [
     answer: 3, why: 'Tự tạo topic bật sẵn; topic mới lấy num.partitions=1 và default.replication.factor=1 mặc định, nên lỗi gõ tên không ai thấy.' },
   { q: 'Vì sao topic lab-orders (RF=3) đặt min.insync.replicas=2 chứ không đặt 3?',
     options: ['Vì Kafka không cho đặt giá trị bằng ba', 'Để mất một broker vẫn ghi được an toàn', 'Để mỗi message được ghi nhanh gần gấp đôi', 'Vì controller cần đúng hai bản sao dữ liệu'],
-    answer: 1, why: 'Với acks=all, ghi bị từ chối khi ISR nhỏ hơn giá trị này. Đặt 2 cho phép mất 1 broker mà vẫn ghi được; đặt 3 thì mất 1 broker là ngừng ghi.' }
+    answer: 1, why: 'Với acks=all, ghi bị từ chối khi ISR nhỏ hơn giá trị này. Đặt 2 cho phép mất 1 broker mà vẫn ghi được; đặt 3 thì mất 1 broker là ngừng ghi.' },
+  { q: 'Ứng dụng trên Windows đặt bootstrap.servers=localhost:29092 (chỉ một broker). Điều nào đúng?',
+    options: ['Ứng dụng chỉ ghi được vào broker kafka-1', 'Ứng dụng tìm ra cả cụm qua broker đó', 'Ứng dụng phải liệt kê đủ ba broker', 'Ứng dụng gửi mọi message qua kafka-1'],
+    answer: 1, why: 'Bootstrap chỉ dùng để khám phá cụm; sau đó client nói chuyện thẳng với leader của từng partition theo advertised.listeners. Vẫn nên ghi hơn một broker để còn vào được khi kafka-1 chết.' }
 ]);
 </script>
 </body>

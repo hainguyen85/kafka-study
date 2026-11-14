@@ -16,7 +16,7 @@
 <div class="mission"><b>Liên quan tới mission</b>
 Câu hỏi bạn sẽ nghe nhiều nhất trong buổi họp thiết kế: "topic này cấu hình thế nào để không mất?". Sau bài này bạn trả lời được bằng bốn giá trị cụ thể, nói được từng giá trị đổi lấy gì, và biết chỗ nào Spring Kafka có thể làm bạn mất message mà không báo lỗi.</div>
 
-<p class="win"><b>Thắng lợi của bài này:</b> với một cấu hình producer + topic bất kỳ, bạn dự đoán đúng "kill leader lúc này thì message nào mất" (bằng mô phỏng ở mục 2), và có sẵn lab chạy trên cụm 3 broker để kiểm chứng (mục 3).</div>
+<p class="win"><b>Thắng lợi của bài này:</b> với một cấu hình producer + topic bất kỳ, bạn dự đoán đúng "kill leader lúc này thì message nào mất" (bằng mô phỏng ở mục 2), và có sẵn lab chạy trên cụm 3 broker để kiểm chứng (mục 3).</p>
 
 <h2>1. Kiến thức tối thiểu (có nguồn)</h2>
 <ol class="steps">
@@ -55,6 +55,7 @@ Câu hỏi bạn sẽ nghe nhiều nhất trong buổi họp thiết kế: "topi
   <li>Bạn <b>không ghi</b> gì về idempotence (dùng mặc định) mà đặt <code>acks=1</code>: client <b>âm thầm tắt idempotence</b> và chạy tiếp, không báo gì.</li>
   <li>Hệ quả: hạ <code>acks</code> là tắt luôn idempotence. Lab 04 profile <code>risky</code> ghi tường minh cả <code>acks=1</code> và <code>enable.idempotence=false</code> để rõ ý.</li>
   </ul></li>
+<li><b><code>send()</code> có thể chặn thread gọi nó.</b> Bình thường <code>send()</code> trả ngay, nhưng nó phải chờ metadata của topic và chờ chỗ trống trong bộ đệm (<code>buffer.memory</code>, mặc định 33554432 byte, khoảng 32 MB). Thời gian chờ tối đa là <code>max.block.ms</code>, mặc định 60000 (60 giây); quá hạn thì ném lỗi. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
 <li><b>Spring Kafka:</b> <code>KafkaTemplate.send</code> trả <code>CompletableFuture</code>; nếu bạn bỏ qua future, lỗi chỉ nằm trong log (mặc định <code>LoggingProducerListener</code>). <code>TopicBuilder</code> <em>không có</em> <code>minInsyncReplicas()</code>, dùng <code>.config("min.insync.replicas","2")</code>. Topic đã tồn tại thì config không bị sửa trừ khi <code>spring.kafka.admin.modify-topic-configs=true</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html">[Sending messages]</a> <a href="../research/0002-spring-kafka.md">[research/0002, mục 2.1 và 2.6]</a></li>
 </ol>
 
@@ -92,6 +93,35 @@ Câu hỏi bạn sẽ nghe nhiều nhất trong buổi họp thiết kế: "topi
 
 <h2>3. Lab thật trên cụm 3 broker</h2>
 <p>Mô phỏng cho bạn trực giác; cụm thật cho bạn bằng chứng. Mã ở <code>labs/04-producer-durability</code> (Spring Boot 4.1.2 + Spring Kafka 4.1.2); README có lệnh đầy đủ. Ba topic cùng RF=3 chỉ khác <code>min.insync.replicas</code> (1, 2, 3); profile <code>risky</code> hạ <code>acks=1</code> và tắt idempotence; <code>safe</code> dùng <code>acks=all</code>; <code>verify</code> đọc lại toàn bộ topic và đối chiếu với danh sách seq đã được ack, nên "mất" là con số đo được, không phải cảm giác.</p>
+<p>Code và cấu hình chính (đọc trước khi chạy):</p>
+<pre><code># labs/04-producer-durability/.../application-risky.yml  ("dễ mất")
+spring:
+  kafka:
+    producer:
+      acks: "1"
+      properties:
+        "[enable.idempotence]": false
+
+# labs/04-producer-durability/.../application-safe.yml  (hướng "không mất")
+spring:
+  kafka:
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+        "[request.timeout.ms]": 10000
+        "[delivery.timeout.ms]": 20000   # &gt;= request.timeout.ms + linger.ms; rút ngắn để thấy lỗi nhanh</code></pre>
+<pre><code>// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): bạn là người tạo topic
+@Bean NewTopic safe() {
+    return TopicBuilder.name("lab-orders-safe").partitions(3).replicas(3)
+            .config("min.insync.replicas", "2")   // TopicBuilder không có minInsyncReplicas()
+            .build();
+}</code></pre>
+<pre><code>// labs/04-producer-durability/.../SenderRunner.java (rút gọn): đọc kết quả gửi, không fire-and-forget
+template.send(topic, key, Integer.toString(seq)).whenComplete((result, ex) -&gt; {
+    if (ex == null) acked.add(seq);          // broker đã ack: đối chiếu với topic ở profile verify
+    else record(failed, failuresByType, ex); // đếm lỗi theo loại (NotEnoughReplicasException...)
+});</code></pre>
 <div class="warn"><b>Trạng thái trung thực:</b> lab 04 đã biên dịch và đã chạy thử nạp cấu hình, nhưng <b>chưa được chạy với cụm 3 broker</b> (máy chưa có Docker). Các "mong đợi" dưới đây suy ra từ tài liệu. Mất message do kill leader <em>không tất định</em>: có thể phải chạy vài lần hoặc tăng <code>--lab.per-second</code>. Ghi lại điều bạn thật sự thấy; nếu khác mong đợi, đó là thông tin quý, hãy báo cho giáo viên.</div>
 
 <div class="step">
@@ -122,6 +152,27 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=verify -Dspring-boot.run.argum
 <h2>4. Usecase oái oăm (mỗi cái một miền)</h2>
 <h3>(a) Flash sale: "đơn đã nhận" rồi biến mất</h3>
 <p>Giao diện báo đặt hàng thành công vì producer nhận ack. Sau sự cố một broker, kho đếm thiếu đơn. Nguyên nhân thường gặp: <code>acks=1</code>, hoặc <code>acks=all</code> nhưng topic <code>min.insync.replicas=1</code> và ISR đã co còn leader (Thử 3). Cách xử lý: <code>acks=all</code> + RF=3 + minISR=2 <em>ở cấp topic</em>, kiểm bằng <code>--describe</code>. Từ Kafka 4.1 docs nói giá trị đặt ở cấp broker "sẽ bị gỡ" và ELR đổi nghĩa của config này, nên đừng dựa vào default broker. <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant UI as Giao diện
+participant P as Producer (acks=1)
+participant L as Leader B1
+participant F as Follower B2
+participant K as Kho (consumer)
+UI->>P: đặt đơn 5
+P->>L: gửi đơn 5
+L-->>P: ack (mới ghi ở leader)
+P-->>UI: Đặt hàng thành công
+Note over L,F: B2 chưa kịp fetch đơn 5
+Note over L: B1 chết
+F->>F: B2 lên làm leader, log không có đơn 5
+K->>F: đọc đơn
+F-->>K: thiếu đơn 5
+Note over UI,K: Sửa: acks=all + RF=3 + minISR=2 ở cấp topic. Ack chỉ về khi ít nhất 2 bản sao có đơn 5
+</script>
+<figcaption>Sequence: với acks=1, ack về khi mới có một bản sao; leader chết trước khi follower fetch thì đơn biến mất.</figcaption>
+</figure>
 <h3>(b) Telemetry kho lạnh: cụm sống mà không ghi được</h3>
 <p>Topic cảm biến RF=3, minISR=2, <code>acks=all</code>. Hai broker giữ partition đó chết (giả sử cụm có controller riêng nên vẫn bầu được leader). Diễn biến:</p>
 <ol class="tight">
@@ -135,10 +186,97 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=verify -Dspring-boot.run.argum
 <li>Sổ cái, thanh toán: giữ minISR=2; thà ngừng ghi và báo lỗi cho người dùng còn hơn báo thành công rồi mất.</li>
 </ul>
 <p>Trong họp bạn sẽ phải nói được lựa chọn này, kèm hệ quả cho người dùng cuối (lỗi gì, trong bao lâu).</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P as Producer (acks=all)
+participant L as Leader
+participant F1 as Follower 1
+participant F2 as Follower 2
+Note over F1,F2: t = 0: hai follower chết
+P->>L: ghi
+Note over L: ISR vẫn ghi đủ 3 tên, leader chờ hai follower: ghi treo
+Note over L: khoảng 30 giây sau: ISR chỉ còn leader, ít hơn minISR=2
+loop tới hết delivery.timeout.ms (mặc định 2 phút)
+P->>L: thử lại
+L-->>P: NotEnoughReplicasException
+end
+P->>P: báo lỗi cho ứng dụng
+Note over P,F2: minISR=2 (sổ cái): ngừng ghi, báo lỗi. minISR=1 (telemetry): vẫn ghi, mỗi bản ghi chỉ 1 bản sao
+</script>
+<figcaption>Sequence: hai follower chết; ghi treo tới khi ISR co lại, rồi bị từ chối và producer thử lại tới hết delivery.timeout.ms.</figcaption>
+</figure>
 <h3>(c) Spring: lỗi gửi nằm im trong log</h3>
 <p>Service gọi <code>template.send(...)</code> không đọc future. Topic bị từ chối (ISR thấp), ứng dụng vẫn trả 200 cho người dùng. Đây là mất message <em>phía ứng dụng</em>, không phải phía Kafka. Xử lý: <code>whenComplete</code> hoặc <code>.get(timeout)</code> khi cần chắc chắn, và quyết định ứng dụng làm gì khi lỗi (trả lỗi cho người dùng, hoặc ghi outbox, Bài 7). Xem cách <code>SenderRunner</code> làm.</p>
-<h3>(d) Nếu là ngân hàng</h3>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant U as Người dùng
+participant S as Service Spring
+participant T as KafkaTemplate
+participant K as Cụm Kafka
+U->>S: POST /orders
+S->>T: send(...), không đọc future
+S-->>U: 200 OK
+T->>K: gửi
+K-->>T: từ chối (ISR thấp)
+T->>T: future lỗi, chỉ có một dòng log
+Note over U,K: Người dùng tưởng đã xong, message không tới Kafka
+Note over S,T: Sửa: whenComplete hoặc .get(timeout), quyết định trả lỗi hay ghi outbox
+</script>
+<figcaption>Sequence: không đọc future thì người dùng nhận 200 trong khi message không tới Kafka.</figcaption>
+</figure>
+<h3>(d) API thanh toán treo 60 giây khi cụm có sự cố</h3>
+<p>Controller REST nhận yêu cầu, gọi <code>template.send(...)</code> rồi trả 202. Một sáng, mạng tới cụm Kafka đứt. Không có exception nào ngay; mọi request treo khoảng 60 giây rồi mới lỗi, thread pool của web server cạn, cả service ngừng trả lời, kể cả các API không dính tới Kafka. Nguyên nhân: <code>send()</code> chờ metadata tới hết <code>max.block.ms</code>. Tương tự khi producer gửi nhanh hơn khả năng giao: bộ đệm <code>buffer.memory</code> đầy và <code>send()</code> chờ. Cách xử lý:</p>
+<ul class="tight">
+<li>Hạ <code>max.block.ms</code> xuống mức API chịu được (vài giây) để lỗi nhanh thay vì treo lâu.</li>
+<li>Quyết định trước API làm gì khi Kafka không nhận: trả lỗi 503, hoặc ghi outbox trong DB rồi gửi sau (Bài 7).</li>
+<li>Theo dõi bộ đệm; nếu thường xuyên đầy thì vấn đề là thông lượng, không phải timeout.</li>
+</ul>
+<p>Lưu ý: "API treo 60 giây" là suy ra từ mô tả <code>max.block.ms</code>; chưa kiểm trong docs Spring xem <code>KafkaTemplate.send</code> có chặn giống hệt hay không. Tự kiểm: tắt cả 3 broker rồi chạy profile <code>safe</code> của lab 04, đo thời gian tới lỗi đầu tiên.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant U as Nhiều request
+participant W as Thread pool web
+participant T as KafkaTemplate.send
+participant K as Cụm Kafka (mạng đứt)
+U->>W: POST /payments
+W->>T: send(...)
+T--xK: lấy metadata
+Note over T: chờ tới max.block.ms (60 giây)
+U->>W: request khác, kể cả API không dùng Kafka
+Note over W: mọi thread đang chờ send(): pool cạn, service ngừng trả lời
+T-->>W: lỗi sau khoảng 60 giây
+Note over U,K: Sửa: max.block.ms vài giây, khi lỗi trả 503 hoặc ghi outbox
+</script>
+<figcaption>Sequence: send() chờ metadata tới hết max.block.ms, làm cạn thread pool của cả service.</figcaption>
+</figure>
+<h3>(e) Nếu là ngân hàng</h3>
 <p>Một dòng cho buổi họp: "Topic giao dịch: RF=3, minISR=2, <code>acks=all</code>, idempotence bật, <code>unclean.leader.election.enable=false</code>, và producer đọc kết quả gửi". Đó là câu trả lời chuẩn cho "không mất"; phần còn lại (trùng) giải ở consumer.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+subgraph p ["Producer"]
+P1["acks=all"]
+P2["enable.idempotence=true"]
+P3["đọc kết quả gửi"]
+end
+subgraph t ["Topic giao dịch"]
+T1["RF=3"]
+T2["min.insync.replicas=2"]
+T3["unclean.leader.election.enable=false"]
+end
+p -->|"không mất"| t
+t -->|"vẫn có thể trùng"| c["Consumer chống trùng<br/>Bài 5, Bài 7"]
+class P1,P2,P3,T1,T2,T3 ok
+class c warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: bốn núm vặn ở producer và topic cho "không mất"; phần trùng để consumer xử lý.</figcaption>
+</figure>
 
 <h2>5. Tự nói thành lời</h2>
 <p>Không nhìn tài liệu, trong 45 giây: <i>"Để một message đã báo thành công không mất khi một broker chết, mình cần ... vì ...; cái giá phải trả là ..."</i> Dùng đủ các từ: ISR, <code>acks=all</code>, <code>min.insync.replicas</code>, leader, retry.</p>
@@ -159,6 +297,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=verify -Dspring-boot.run.argum
 
 <script src="../assets/checklist.js"></script>
 <script src="../assets/ack-sim.js"></script>
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 AckSim.mount(document.getElementById('sim'));

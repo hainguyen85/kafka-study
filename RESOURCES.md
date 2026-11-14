@@ -34,6 +34,7 @@
 - [Kafka Connect user guide (4.4)](https://kafka.apache.org/44/kafka-connect/user-guide/)
   `errors.tolerance`, dead letter queue của Connect. Use for: phân biệt DLQ có trong docs (Connect, Share Groups) với pattern tự dựng.
 - Báo cáo nội bộ (2026-11-11): `research/0003-msk.md` (Amazon MSK) và `research/0004-confluent-cloud.md` (Confluent Cloud): khác biệt so với Apache Kafka, mặc định, giới hạn, 8 câu hỏi cho platform team. Tóm tắt ở `reference/0004-managed-kafka-msk-vs-confluent.html`. Nguồn gốc: docs.aws.amazon.com/msk, docs.confluent.io/cloud.
+- Báo cáo nội bộ (2026-11-12): `research/0005-udemy-kafka-theory-comparison.md`: so mục "Kafka Theory" của khoá Udemy "Learn Apache Kafka for Beginners" (Stéphane Maarek; curriculum lấy từ trang khoá, chỉ dùng làm bản đồ chủ đề, không làm nguồn kỹ thuật) với bài 1-9; liệt kê khái niệm còn thiếu kèm nguồn chính.
 - Báo cáo nội bộ: `research/0001-curriculum-coverage.md` (2026-11-10) — 16 tình huống oái oăm có nguồn, khoảng trống lộ trình, đối chiếu thay đổi 4.0-4.4. WebFetch trả bản tóm tắt, nên đối chiếu lại câu trích nguyên văn trên trang gốc trước khi đưa vào lesson.
 - [Docker Engine: install on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) và [post-install (Linux)](https://docs.docker.com/engine/install/linux-postinstall/)
   Lệnh cài Docker Engine bằng apt repo (Ubuntu 24.04 được hỗ trợ), nhóm `docker`, bật cùng systemd. Use for: wizard bài 3. Trang cài đặt không nhắc WSL.
@@ -43,6 +44,11 @@
   16 module ngắn (topics, partitions, brokers, replication, producers, consumers, Schema Registry, Connect...). Trang không nêu giá, chân trang có mục "Free Courses". Use for: xem/nghe bổ trợ sau mỗi bài.
 - [Book: _Kafka: The Definitive Guide_, 2nd ed. (Shapira, Palino, Sivaram, Petty; O'Reilly, 2021)](https://www.oreilly.com/library/view/kafka-the-definitive/9781492043072/)
   Sách tham chiếu chính, mức beginner-intermediate. Use for: đào sâu sau mỗi chặng (producer, consumer, reliability, exactly-once).
+
+- [kafka-clients 4.2.0 source: ConsumerCoordinator, ApplicationEventProcessor, CommitRequestManager, AsyncKafkaConsumer](https://github.com/apache/kafka/tree/4.2.0/clients/src/main/java/org/apache/kafka/clients/consumer/internals)
+  Source code (primary). Auto-commit chỉ được xét trong `poll()` (classic: `ConsumerCoordinator.poll` → `maybeAutoCommitOffsetsAsync`; consumer/KIP-848: sự kiện poll → `updateTimerAndMaybeCommit`) và khi đổi assignment; giá trị là `subscriptions.allConsumed()`. `close()` commit đồng bộ chỉ khi auto-commit bật. Use for: câu hỏi "commit lúc nào" mà javadoc không nói thẳng. Đọc ngày 2026-11-13.
+- [Spring Kafka 4.1.2 source: KafkaMessageListenerContainer](https://github.com/spring-projects/spring-kafka/blob/v4.1.2/spring-kafka/src/main/java/org/springframework/kafka/listener/KafkaMessageListenerContainer.java)
+  Source code (primary). `ackCurrent` ghi nhận offset sau khi xử lý từng record (BATCH); `wrapUp` gọi `commitPendingAcks()` trước `consumer.close()` khi dừng bình thường, không có khi lỗi fatal hoặc có `KafkaTransactionManager`. Use for: Spring có commit khi tắt ứng dụng không. Đọc ngày 2026-11-13.
 
 ## Wisdom (Communities)
 

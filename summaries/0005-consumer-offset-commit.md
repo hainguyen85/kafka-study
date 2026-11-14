@@ -1,6 +1,6 @@
 # Tóm tắt Bài 5: Consumer, offset, commit, rebalance
 
-[← Tóm tắt Bài 4b](0010-idempotent-producer.md) · [Bài học](../lessons/0005-consumer-offset-commit.html) · [Tóm tắt Bài 6 →](0006-error-handling-dlt.md)
+[← Tóm tắt Bài 4b](0010-idempotent-producer.md) · [Bài học](../lessons/0005-consumer-offset-commit.html) · [Tóm tắt Bài 5b →](0011-rebalance.md)
 
 *Tóm tắt cả bài bằng lời, khoảng 60-90 giây. Dùng để ôn nhanh và tra cứu.*
 
@@ -14,3 +14,5 @@ Consumer còn bị coi là chết nếu không gọi `poll` trong `max.poll.inte
 
 - **Tại sao không commit sau mỗi record cho chắc?** Được, đổi lại nhiều lần commit hơn nên chậm hơn; và vẫn có thể trùng một record nếu crash giữa xử lý và commit.
 - **Muốn xử lý lại message cũ thì làm sao?** Dừng group rồi dùng `kafka-consumer-groups.sh --reset-offsets` (xem trước, rồi `--execute`).
+- **Hết `auto.commit.interval.ms` giữa lúc đang xử lý thì có commit không?** Không. Bộ đếm chỉ được xét trong `poll()`; commit đi ở lần `poll()` sau, với vị trí đã trả cho ứng dụng. Xử lý cùng thread thì đó là at-least-once.
+- **Tắt auto-commit thì `close()` có commit không?** Kafka client: không. Spring: container dừng bình thường vẫn commit offset của record đã xử lý (`commitPendingAcks`) trước khi đóng; crash thì không.

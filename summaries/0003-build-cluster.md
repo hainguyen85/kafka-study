@@ -10,6 +10,9 @@ Mỗi partition có một **leader** nhận ghi và các **follower** sao chép.
 
 Mặc định phía broker rất mỏng: `default.replication.factor=1`, `min.insync.replicas=1`, `num.partitions=1`, tự tạo topic bật sẵn. Vì vậy mình tạo topic có chủ đích, RF=3 và `min.insync.replicas=2`, và tắt auto-create để gõ sai tên không đẻ ra topic RF=1.
 
+`bootstrap.servers` chỉ là cửa vào: client hỏi một broker để biết cả cụm, rồi nói chuyện thẳng với leader của từng partition theo địa chỉ broker quảng bá (`advertised.listeners`); vì vậy trong container dùng `kafka-1:19092`, từ Windows dùng `localhost:29092`. Topic đã tạo thì sửa cấu hình bằng `kafka-configs.sh --alter --add-config`, không cần xoá tạo lại.
+
+
 ## Hỏi nhanh, đáp gọn
 
 - **Vì sao min.insync.replicas=2 mà không phải 3?** Đặt 2 thì mất một broker vẫn ghi được an toàn; đặt 3 thì mất một broker là ngừng ghi (thấy ở Bài 4).

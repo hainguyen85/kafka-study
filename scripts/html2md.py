@@ -27,16 +27,22 @@ QUOTE_CLASSES = {"mission", "win", "ask", "source"}
 SKIP_TAGS = {"head", "script", "style", "svg"}
 
 
-def quiz_to_md(html):
-    m = re.search(r"Quiz\.mount\([^,]+,\s*(\[.*?\])\s*\);", html, re.S)
-    if not m:
-        return ""
+def quizzes_of(html):
+    """{id của div: [câu hỏi]} cho mọi Quiz.mount(document.getElementById('id'), [...]) trong trang."""
+    found = re.findall(r"Quiz\.mount\(document\.getElementById\('([^']+)'\),\s*(\[.*?\])\s*\);", html, re.S)
+    if not found:
+        return {}
     # Mảng JS do chính ta viết; để node đọc hộ thay vì tự parse.
+    js = "[" + ",".join(arr for _, arr in found) + "]"
     out = subprocess.run(
-        ["node", "-e", "console.log(JSON.stringify(eval(process.argv[1])))", m.group(1)],
+        ["node", "-e", "console.log(JSON.stringify(eval(process.argv[1])))", js],
         capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
-    items = json.loads(out)
+    arrays = json.loads(out)
+    return {qid: items for (qid, _), items in zip(found, arrays)}
+
+
+def quiz_to_md(qid, items):
     blocks = []
     for i, it in enumerate(items, 1):
         opts = "\n".join(f"- **{chr(65 + j)}.** {o}" for j, o in enumerate(it["options"]))
@@ -45,13 +51,14 @@ def quiz_to_md(html):
             f"**{i}. {it['q']}**\n\n{opts}\n\n"
             f"<details><summary>Đáp án</summary>\n\n**{ans}**\n\n{it['why']}\n\n</details>"
         )
-    return "\n\n".join(blocks)
+    # Đánh dấu để portal thay bằng quiz tương tác (comment không hiện khi đọc .md).
+    return f"<!-- quiz:{qid} -->\n\n" + "\n\n".join(blocks) + "\n\n<!-- /quiz -->"
 
 
 class Converter(HTMLParser):
-    def __init__(self, quiz_md):
+    def __init__(self, quizzes):
         super().__init__(convert_charrefs=True)
-        self.quiz_md = quiz_md
+        self.quizzes = quizzes
         self.ctx = [{"blocks": [], "inline": "", "kind": "root"}]
         self.skip = 0
         self.div_kinds = []
@@ -124,9 +131,9 @@ class Converter(HTMLParser):
             if cls & QUOTE_CLASSES:
                 self.push_quote()
                 self.div_kinds.append("quote")
-            elif a.get("id") == "quiz":
+            elif a.get("id") in self.quizzes:
                 self.flush()
-                self.cur["blocks"].append(self.quiz_md)
+                self.cur["blocks"].append(quiz_to_md(a["id"], self.quizzes[a["id"]]))
                 self.div_kinds.append("plain")
             else:
                 self.flush()
@@ -136,10 +143,17 @@ class Converter(HTMLParser):
         elif tag == "cite":
             self.flush()
         elif tag in ("ul", "ol"):
-            self.flush()
+            if self.lists and self.lists[-1].get("in_li"):
+                # list lồng trong <li>: giữ phần chữ đã có của mục cha, list con sẽ thụt lề dưới nó
+                parent = self.lists[-1]
+                parent["pending"] = (parent["pending"] + " " + self.cur["inline"]).strip()
+                self.cur["inline"] = ""
+            else:
+                self.flush()
             self.lists.append({"ordered": tag == "ol", "items": []})
         elif tag == "li":
             self.flush()
+            self.lists[-1].update(in_li=True, pending="", sub=[])
         elif tag == "table":
             self.flush()
             self.table = {"rows": [], "row": None, "pending": {}, "has_th": False}
@@ -192,14 +206,22 @@ class Converter(HTMLParser):
         elif tag == "blockquote":
             self.pop_quote()
         elif tag == "li":
-            text = self.cur["inline"].strip()
-            self.cur["inline"] = ""
             lst = self.lists[-1]
+            text = (lst.get("pending", "") + " " + self.cur["inline"]).strip()
+            self.cur["inline"] = ""
             prefix = f"{len(lst['items']) + 1}. " if lst["ordered"] else "- "
-            lst["items"].append(prefix + text)
+            item = prefix + text
+            if lst.get("sub"):
+                item += "\n" + "\n".join(lst["sub"])
+            lst["items"].append(item)
+            lst.update(in_li=False, pending="", sub=[])
         elif tag in ("ul", "ol"):
             lst = self.lists.pop()
-            self.cur["blocks"].append("\n".join(lst["items"]))
+            if self.lists and self.lists[-1].get("in_li"):
+                # list con: thụt lề dưới mục cha
+                self.lists[-1]["sub"].extend("   " + line for item in lst["items"] for line in item.split("\n"))
+            else:
+                self.cur["blocks"].append("\n".join(lst["items"]))
         elif tag in ("td", "th"):
             t = re.sub(r"\s+", " ", self.cell["text"]).strip().replace("|", "\\|")
             self.table["row"].append((t, self.cell["span"]))
@@ -282,7 +304,7 @@ def title_of(html):
 
 def convert(path):
     html = path.read_text(encoding="utf-8")
-    conv = Converter(quiz_to_md(html))
+    conv = Converter(quizzes_of(html))
     conv.feed(html)
     body = conv.result()
     note = f"<!-- Tự sinh từ {path.name} bằng scripts/html2md.py. Đừng sửa tay. -->"
@@ -305,7 +327,7 @@ def main():
                 first = m.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
                 index.append(f"- [{first}](summaries/{m.name})")
             index.append("")
-    index += ["## Khác", "", "- [Mission](MISSION.md)", "- [Tài nguyên](RESOURCES.md)", "- [Ghi chú và lộ trình](NOTES.md)", ""]
+    index += ["## Khác", "", "- [Learning portal (mở trong trình duyệt)](portal/index.html): dựng lại bằng `node scripts/build_portal.mjs`", "- [Mission](MISSION.md)", "- [Tài nguyên](RESOURCES.md)", "- [Ghi chú và lộ trình](NOTES.md)", ""]
     (ROOT / "INDEX.md").write_text("\n".join(index), encoding="utf-8", newline="\n")
 
 

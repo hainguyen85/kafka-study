@@ -12,22 +12,16 @@ Bài 4 lo "không mất". Cái giá của không mất là gửi lại; bài nà
 
 ## 1. Kiến thức tối thiểu (có nguồn)
 
-**Cơ chế:** "the broker assigns each producer an ID and deduplicates messages using a sequence number that is sent by the producer along with every message." Diễn ra như sau:
-
-- Mỗi producer có một **producer ID (PID)** do broker cấp. Mỗi batch gửi vào một partition mang một **sequence number** tăng dần.
-- Broker nhớ sequence cuối của từng PID. Retry mang lại đúng sequence cũ, nên broker nhận ra "đã có" và không ghi thêm.
-
-**Mặc định bật, nhưng có thể bị tắt âm thầm.** `enable.idempotence` mặc định `true` từ Kafka 3.0. "Idempotence is enabled by default if no conflicting configurations are set." Nếu cấu hình xung đột (ví dụ `acks=1`):
-
-- bạn **không ghi** `enable.idempotence`: client tắt nó và chạy tiếp, không báo gì;
-- bạn **ghi tường minh** `enable.idempotence=true`: client ném `ConfigException`.
-
 1. **Vấn đề gốc: không nhận được ack thì phải gửi lại.** Producer không biết lần gửi trước đã ghi hay chưa, nên gửi lại; nếu lần trước thật ra đã ghi thì log có hai bản. Docs gọi đó là at-least-once: "the message may be written to the log again during resending if the original request had in fact succeeded." [[Design: Message Delivery Semantics]](https://kafka.apache.org/44/design/design/)
-2. [[Design]](https://kafka.apache.org/44/design/design/)
+2. **Cơ chế:** "the broker assigns each producer an ID and deduplicates messages using a sequence number that is sent by the producer along with every message." Diễn ra như sau:   [[Design]](https://kafka.apache.org/44/design/design/)
+   - Mỗi producer có một **producer ID (PID)** do broker cấp. Mỗi batch gửi vào một partition mang một **sequence number** tăng dần.
+   - Broker nhớ sequence cuối của từng PID. Retry mang lại đúng sequence cũ, nên broker nhận ra "đã có" và không ghi thêm.
 3. **Hai thứ bạn được:** "producer retries will no longer introduce duplicates" [[KafkaProducer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html), và **thứ tự được giữ** kể cả khi có nhiều request đang bay: docs của `max.in.flight.requests.per.connection` nói giá trị > 1 cộng retry có thể đảo thứ tự khi idempotence tắt, còn khi idempotence bật thì thứ tự được giữ. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
 4. **Thứ bạn không được: trùng do ứng dụng gửi lại.** Javadoc: "it is imperative to avoid application level re-sends since these cannot be de-duplicated", và "the producer can only guarantee idempotence for messages sent within a single session." Restart producer là session mới, PID mới; gửi lại cùng nội dung là bản ghi mới với broker. [[KafkaProducer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html) Chống trùng loại này phải làm ở consumer (Bài 7).
 5. **Ba điều kiện bắt buộc:** `acks=all`, `retries` > 0, `max.in.flight.requests.per.connection` ≤ 5 (mô tả config nói broker chỉ giữ thông tin 5 batch gần nhất của mỗi producer). Mặc định của client đã thoả cả ba. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
-6. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html)
+6. **Mặc định bật, nhưng có thể bị tắt âm thầm.** `enable.idempotence` mặc định `true` từ Kafka 3.0. "Idempotence is enabled by default if no conflicting configurations are set." Nếu cấu hình xung đột (ví dụ `acks=1`):   [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html)
+   - bạn **không ghi** `enable.idempotence`: client tắt nó và chạy tiếp, không báo gì;
+   - bạn **ghi tường minh** `enable.idempotence=true`: client ném `ConfigException`.
 7. **Khi lỗi vẫn lọt qua:** nếu `send` vẫn báo lỗi dù retry vô hạn (ví dụ message hết hạn trong buffer trước khi gửi), javadoc khuyên đóng producer và kiểm tra message cuối để chắc nó không bị trùng. Gặp `OutOfOrderSequenceException` thì vẫn gửi tiếp được nhưng có thể sai thứ tự; muốn giữ thứ tự, đóng producer và tạo mới. [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html)
 8. **Nối sang Bài 7:** đặt `transactional.id` thì idempotence được bật kèm ("enable.idempotence is implied"), và ID này có ý nghĩa qua nhiều session của producer. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
 
@@ -78,13 +72,63 @@ Một partition, xem log broker ghi gì. Mô phỏng theo mô hình ở mục 1,
 
 Team giao hàng đặt `acks: "1"` cho nhanh. Idempotence tắt âm thầm (điều kiện 1 bị vi phạm). Một ngày broker chập chờn, batch PICKED_UP lỗi tạm thời, batch DELIVERED đi trước, PICKED_UP được retry sau. Consumer thấy đơn "đã giao" rồi mới "đã lấy hàng". Không ai đổi cấu hình idempotence, không có lỗi nào trong log. Xử lý: `acks=all` và ghi tường minh `enable.idempotence=true`.
 
+```mermaid
+sequenceDiagram
+participant P as Producer (acks=1, idempotence tắt)
+participant B as Leader partition của đơn D-7
+participant C as Consumer
+P->>B: batch 1: PICKED_UP
+B--xP: lỗi tạm thời
+P->>B: batch 2: DELIVERED
+B-->>P: ok, offset 10
+P->>B: retry batch 1: PICKED_UP
+B-->>P: ok, offset 11
+B->>C: DELIVERED (10), rồi PICKED_UP (11)
+Note over C: đã giao trước đã lấy hàng, log không có lỗi
+Note over P,C: Sửa: acks=all + enable.idempotence=true tường minh. Broker giữ thứ tự theo sequence number
+```
+
+*Sequence: idempotence tắt âm thầm; một batch retry đi sau batch kế tiếp nên thứ tự trong log bị đảo.*
+
 ### (b) Đặt vé: restart rồi gửi lại
 
 Service đặt vé gửi `BookingCreated`, bị deploy lại trước khi nhận kết quả. Lúc khởi động nó gửi lại các booking "chưa chắc đã gửi". Producer mới, PID mới: hai bản ghi, idempotence không giúp được. Xử lý: `eventId` sinh một lần cho mỗi booking, consumer chống trùng theo nó (Bài 7), hoặc outbox để chỉ một tiến trình chịu trách nhiệm gửi.
 
+```mermaid
+sequenceDiagram
+participant P1 as Producer cũ (PID 7)
+participant B as Broker
+participant P2 as Producer mới sau deploy (PID 8)
+participant C as Consumer
+P1->>B: BookingCreated B-1 (PID 7, seq 0)
+B--xP1: ack không tới, service bị deploy lại
+P2->>B: gửi lại B-1 (PID 8, seq 0)
+Note over B: PID khác: broker coi là bản ghi mới
+B->>C: B-1 hai lần
+Note over P1,C: Sửa: eventId sinh một lần cho mỗi booking, consumer chống trùng theo eventId (Bài 7), hoặc outbox
+```
+
+*Sequence: producer mới có PID mới, nên broker không nhận ra bản gửi lại là trùng.*
+
 ### (c) "Ta tăng max.in.flight lên 10 cho throughput"
 
 Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo. Một dòng cấu hình "tối ưu hiệu năng" lấy đi hai bảo đảm. Đây là ví dụ tốt cho lý do review cấu hình producer cũng quan trọng như review code.
+
+```mermaid
+flowchart TB
+A["max.in.flight.requests.per.connection = 10"] --> Q{"enable.idempotence<br/>ghi tường minh?"}
+Q -->|"có: true"| E["ConfigException<br/>ứng dụng không khởi động"]
+Q -->|"không ghi"| S["Idempotence tắt âm thầm"]
+S --> L1["Retry có thể tạo bản trùng"]
+S --> L2["Retry có thể đảo thứ tự"]
+class E warn
+class S,L1,L2 bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Flow: một dòng "tối ưu hiệu năng" cho hai kết cục, tuỳ có ghi tường minh enable.idempotence hay không.*
 
 ## 5. Tự nói thành lời
 
@@ -93,6 +137,8 @@ Trong 45 giây: *"Idempotent producer chặn trùng bằng ... Nó giữ đượ
 **Ôn nhanh:** [tóm tắt Bài 4b](../summaries/0010-idempotent-producer.md) (đọc sau khi đã tự nói).
 
 ## 6. Kiểm tra
+
+<!-- quiz:quiz -->
 
 **1. Broker dùng gì để nhận ra một batch gửi lại là bản trùng?**
 
@@ -168,6 +214,8 @@ Sequence của batch 2 nhảy cóc nên broker từ chối; producer gửi lại
 Tường minh thì acks=1 hay in-flight > 5 sẽ ném ConfigException ngay khi tạo producer, thay vì âm thầm tắt idempotence. Nó không mở rộng phạm vi qua session.
 
 </details>
+
+<!-- /quiz -->
 
 ## Nguồn nên đọc
 

@@ -103,6 +103,8 @@ Trong 60 giây, cho "bảng giá sản phẩm": *"Mình tạo topic với key ..
 
 ## 7. Kiểm tra
 
+<!-- quiz:quiz -->
+
 **1. Topic 3 partition cần tăng lên 6 vì lượng tải tăng. Điều nào đúng về dữ liệu và key?**
 
 - **A.** Dữ liệu cũ được chia lại theo partition mới
@@ -177,6 +179,8 @@ RF=3, minISR=2 cho phép mất một broker mà vẫn ghi an toàn; minISR=3 là
 Theo bảng managed: MSK Standard mặc định unclean.leader.election.enable=true (non-tiered), trong khi Apache là false. Bật nghĩa là chấp nhận mất dữ liệu để partition sống lại.
 
 </details>
+
+<!-- /quiz -->
 
 ## Nguồn nên đọc
 

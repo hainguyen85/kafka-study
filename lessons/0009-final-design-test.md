@@ -14,6 +14,8 @@
 
 Tám câu trộn lẫn các bài 1-8 (xen kẽ chủ đề, cố ý). Câu nào sai thì quay lại bài tương ứng sau khi làm xong phần B.
 
+<!-- quiz:quiz -->
+
 **1. Một message được ghi vào partition 2 với offset 7. Điều nào đúng về thứ tự?**
 
 - **A.** Nó đứng sau mọi message cũ hơn trong topic
@@ -134,6 +136,8 @@ Transaction Kafka chỉ phủ Kafka→Kafka; với DB cần at-least-once + idem
 
 </details>
 
+<!-- /quiz -->
+
 ## 2. Phần B: bài toán lạ (30 phút)
 
 **Cách làm:** đặt đồng hồ, điền thẻ bên dưới *không nhìn tài liệu*, rồi nói to 2 phút "như trong họp". Sau đó mới mở thang chấm và đáp án mẫu. Nếu bạn muốn một đề chưa từng thấy, bảo giáo viên "ra đề cho tôi" và dùng cùng thẻ.
@@ -168,6 +172,30 @@ Xoá thẻ Thẻ được lưu trong trình duyệt của bạn (nếu trình du
 Mở đáp án mẫu cho đề bán vé
 
 **Topic (gợi ý):** `seat-commands` (yêu cầu giữ ghế), `seat-events` (kết quả: đã giữ, từ chối, đã thả), `payment-events` (kết quả thanh toán, gồm webhook), `notifications` (gửi email). Mỗi topic có DLT riêng.
+
+```mermaid
+flowchart TB
+U["Người dùng"] --> API["API giữ ghế"]
+API -->|"key = seatId"| SC["seat-commands"]
+SC --> SS["Seat service<br/>UNIQUE(commandId), ack sau COMMIT"]
+SS -->|"UPDATE ... WHERE status='FREE'"| SDB[("DB ghế: trọng tài")]
+SS -->|"key = seatId"| SE["seat-events<br/>đã giữ, từ chối, đã thả"]
+JOB["Job quét hạn giữ 10 phút"] --> SDB
+JOB -->|"SeatReleased"| SE
+PSP["Bên thanh toán<br/>webhook gọi lại nhiều lần"] --> PAY["Payment service<br/>dedup theo mã giao dịch của họ<br/>outbox"]
+PAY -->|"key = orderId"| PE["payment-events"]
+SE --> NS["Dịch vụ thông báo"]
+PE --> NS
+NS -->|"key = notificationId"| NT["notifications"]
+NT --> EM["Email worker<br/>dedup theo notificationId"]
+class SC,SE,PE,NT warn
+class SDB ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Kiến trúc minh hoạ cho đáp án mẫu. Mỗi topic có DLT riêng (không vẽ). Ai ghi notifications là lựa chọn của bạn.*
 
 **Key:** `seatId` cho `seat-commands` và `seat-events`: mọi yêu cầu cho cùng một ghế đi vào cùng một partition, được xử lý tuần tự bởi một consumer, nên "ai thắng ghế" là quyết định có thứ tự. Đánh đổi: key theo `eventId` (sự kiện) sẽ dồn mọi yêu cầu vào một partition: tải nóng và không song song. `orderId` cho `payment-events`. `userId` hoặc `notificationId` cho `notifications`.
 

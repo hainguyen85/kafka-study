@@ -1,0 +1,10 @@
+# Bật thêm profile này cùng "consumer" (--spring.profiles.active=consumer,static) để thử Bài 5b:
+#  - static membership: mỗi bản phải có lab.instance khác nhau và giữ nguyên khi restart
+#  - cooperative: chỉ partition đổi chủ mới bị thu hồi. Phải đặt cho MỌI consumer trong group.
+# Boot không có property riêng cho hai cấu hình này nên đi qua properties[...] (research/0002 mục 2.2).
+spring:
+  kafka:
+    consumer:
+      properties:
+        "[group.instance.id]": ${lab.instance}
+        "[partition.assignment.strategy]": org.apache.kafka.clients.consumer.CooperativeStickyAssignor

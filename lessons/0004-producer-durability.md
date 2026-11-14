@@ -12,47 +12,33 @@ Yêu cầu chính của bạn là *không mất message*. Bài này tách yêu c
 
 ## 1. Kiến thức tối thiểu (có nguồn)
 
-**"Committed" nghĩa là mọi replica trong ISR đã nhận, và `acks=all` chỉ chờ đúng tập đó.** Một message đã committed không mất "as long as there is at least one in sync replica alive". [[Design: replication]](https://kafka.apache.org/44/design/design/) Chữ then chốt là *ISR*, không phải *mọi replica*, vì ISR co giãn (Bài 3: follower chết bị loại khỏi ISR sau 30 giây):
-
-- ISR = {B1, B2, B3}: `acks=all` chờ cả 3 bản sao.
-- B2, B3 chết và đã bị loại, ISR = {B1}: `acks=all` chỉ còn chờ B1, tức là **ack khi mới có 1 bản sao**. "all" nghĩa là "mọi thành viên ISR *hiện tại*", không phải "cả 3 replica".
-
-**Sẵn sàng (availability) và bền (durability) kéo về hai phía.** *Sẵn sàng* = lúc này còn ghi được không. *Bền* = message đã báo thành công có còn sau sự cố không. Khi thiếu replica, Kafka phải chọn một:
-
-- minISR=2 với RF=3: còn 1 broker thì **ngừng nhận ghi** (mất sẵn sàng), đổi lại không có message nào được ack khi chỉ có 1 bản sao (giữ bền).
-- minISR=1: còn 1 broker vẫn **nhận ghi** (giữ sẵn sàng), đổi lại các message đó chỉ có 1 bản sao; broker đó hỏng ổ đĩa là mất (mất bền).
-
-**`unclean.leader.election.enable`: khi mọi replica trong ISR đều chết, có cho replica "tụt hậu" làm leader không?** Replica ngoài ISR là replica đã bị loại vì không bám kịp, nên có thể thiếu các message mới nhất, kể cả message đã ack. Docs mô tả hai lựa chọn: chờ một replica trong ISR sống lại, hoặc chọn replica đầu tiên sống lại dù không thuộc ISR. [[Design: Unclean leader election]](https://kafka.apache.org/44/design/design/)
-
-- `false` (mặc định Apache): **chờ**. Partition offline (không đọc, không ghi) cho tới khi một replica trong ISR quay lại. Không mất dữ liệu; mất sẵn sàng.
-- `true`: **không chờ**. Replica tụt hậu lên làm leader ngay, partition chạy lại, nhưng các message nó thiếu **mất vĩnh viễn**; khi replica cũ quay lại, nó phải cắt log theo leader mới. Giữ sẵn sàng; mất bền.
-- Ví dụ: B1 là leader, ISR = {B1}. B2 bị loại khỏi ISR từ trước nên thiếu message #4, #5 (đã ack). B1 chết. `false`: chờ B1. `true`: B2 lên leader, #4 và #5 mất. Thử 3 ở mục 2 diễn đúng kịch bản này.
-- Bẫy thực tế: trên MSK Standard giá trị mặc định là `true` (xem [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)). Với dữ liệu không được mất, đặt `false` ở topic. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/)
-
-**Biến thể gây trùng: `NotEnoughReplicasAfterAppendException`.** Khác lỗi ở ý trên ở *thời điểm* phát hiện. [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/common/errors/NotEnoughReplicasAfterAppendException.html)
-
-- `NotEnoughReplicasException`: broker kiểm tra ISR *trước* khi ghi, thấy thiếu nên không ghi. Producer thử lại: an toàn, không trùng.
-- `NotEnoughReplicasAfterAppendException`: lúc nhận, ISR còn đủ, nên leader đã *ghi (append) bản ghi vào log*; trong lúc chờ follower, ISR co lại dưới `min.insync.replicas`, nên leader trả lỗi. Bản ghi **đã nằm trong log** nhưng producer nhận về lỗi.
-- Producer thử lại thì leader ghi thêm một bản nữa: **trùng**. Javadoc ghi đúng ý này: "Producer retries will cause duplicates".
-- Idempotence chặn được loại trùng này *trong cùng một session*: lần gửi lại mang cùng số thứ tự (sequence number), broker nhận ra đã có và không ghi thêm. [[Design: idempotent producer]](https://kafka.apache.org/44/design/design/) Đó là một lý do nữa để không tắt idempotence. Thử 4 ở mục 2 diễn đúng kịch bản này.
-
-**Idempotence đòi ba điều kiện: `acks=all`, `retries` > 0, `max.in.flight.requests.per.connection` ≤ 5.** Nếu cấu hình vi phạm một điều kiện, kết quả phụ thuộc bạn có *tự đặt* `enable.idempotence` hay không: [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
-
-- Bạn **tự ghi** `enable.idempotence=true` cùng `acks=1`: client hiểu là bạn đòi hai thứ mâu thuẫn, nên **ném `ConfigException`** ngay khi tạo producer.
-- Bạn **không ghi** gì về idempotence (dùng mặc định) mà đặt `acks=1`: client **âm thầm tắt idempotence** và chạy tiếp, không báo gì.
-- Hệ quả: hạ `acks` là tắt luôn idempotence. Lab 04 profile `risky` ghi tường minh cả `acks=1` và `enable.idempotence=false` để rõ ý.
-
 1. **Client 4.x đã mặc định an toàn.** `acks=all`, `enable.idempotence=true`, `retries=2147483647`, `delivery.timeout.ms=120000`, `request.timeout.ms=30000`, `linger.ms=5` (đổi từ 0 ở 4.0), `max.in.flight.requests.per.connection=5`. Muốn thấy mất message, bạn phải *tự hạ* cấu hình. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[Upgrade notes]](https://kafka.apache.org/44/getting-started/upgrade/)
 2. **Thứ nguy hiểm là mặc định phía topic/broker.** `min.insync.replicas=1`, `default.replication.factor=1`, `num.partitions=1`. Vì bạn là người tạo topic, hai giá trị đầu là việc của bạn. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/) [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
-3. 
+3. **"Committed" nghĩa là mọi replica trong ISR đã nhận, và `acks=all` chỉ chờ đúng tập đó.** Một message đã committed không mất "as long as there is at least one in sync replica alive". [[Design: replication]](https://kafka.apache.org/44/design/design/) Chữ then chốt là *ISR*, không phải *mọi replica*, vì ISR co giãn (Bài 3: follower chết bị loại khỏi ISR sau 30 giây):
+   - ISR = {B1, B2, B3}: `acks=all` chờ cả 3 bản sao.
+   - B2, B3 chết và đã bị loại, ISR = {B1}: `acks=all` chỉ còn chờ B1, tức là **ack khi mới có 1 bản sao**. "all" nghĩa là "mọi thành viên ISR *hiện tại*", không phải "cả 3 replica".
 4. **`min.insync.replicas` là cái sàn chặn trường hợp trên, và chỉ có tác dụng với `acks=all`.** ISR nhỏ hơn giá trị này thì broker *từ chối ghi* bằng `NotEnoughReplicasException` thay vì ghi vào ít bản sao rồi báo thành công. Lỗi này loại *retriable* nên producer thử lại tới hết `delivery.timeout.ms`. [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/common/errors/NotEnoughReplicasException.html) Với ISR = {B1} ở ví dụ trên: minISR=2 thì ghi bị từ chối; minISR=1 (mặc định) thì vẫn ghi và vẫn ack, một bản sao duy nhất.
-5. 
-6. 
-7. 
+5. **Sẵn sàng (availability) và bền (durability) kéo về hai phía.** *Sẵn sàng* = lúc này còn ghi được không. *Bền* = message đã báo thành công có còn sau sự cố không. Khi thiếu replica, Kafka phải chọn một:
+   - minISR=2 với RF=3: còn 1 broker thì **ngừng nhận ghi** (mất sẵn sàng), đổi lại không có message nào được ack khi chỉ có 1 bản sao (giữ bền).
+   - minISR=1: còn 1 broker vẫn **nhận ghi** (giữ sẵn sàng), đổi lại các message đó chỉ có 1 bản sao; broker đó hỏng ổ đĩa là mất (mất bền).
+6. **`unclean.leader.election.enable`: khi mọi replica trong ISR đều chết, có cho replica "tụt hậu" làm leader không?** Replica ngoài ISR là replica đã bị loại vì không bám kịp, nên có thể thiếu các message mới nhất, kể cả message đã ack. Docs mô tả hai lựa chọn: chờ một replica trong ISR sống lại, hoặc chọn replica đầu tiên sống lại dù không thuộc ISR. [[Design: Unclean leader election]](https://kafka.apache.org/44/design/design/)
+   - `false` (mặc định Apache): **chờ**. Partition offline (không đọc, không ghi) cho tới khi một replica trong ISR quay lại. Không mất dữ liệu; mất sẵn sàng.
+   - `true`: **không chờ**. Replica tụt hậu lên làm leader ngay, partition chạy lại, nhưng các message nó thiếu **mất vĩnh viễn**; khi replica cũ quay lại, nó phải cắt log theo leader mới. Giữ sẵn sàng; mất bền.
+   - Ví dụ: B1 là leader, ISR = {B1}. B2 bị loại khỏi ISR từ trước nên thiếu message #4, #5 (đã ack). B1 chết. `false`: chờ B1. `true`: B2 lên leader, #4 và #5 mất. Thử 3 ở mục 2 diễn đúng kịch bản này.
+   - Bẫy thực tế: trên MSK Standard giá trị mặc định là `true` (xem [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)). Với dữ liệu không được mất, đặt `false` ở topic. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/)
+7. **Biến thể gây trùng: `NotEnoughReplicasAfterAppendException`.** Khác lỗi ở ý trên ở *thời điểm* phát hiện. [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/common/errors/NotEnoughReplicasAfterAppendException.html)
+   - `NotEnoughReplicasException`: broker kiểm tra ISR *trước* khi ghi, thấy thiếu nên không ghi. Producer thử lại: an toàn, không trùng.
+   - `NotEnoughReplicasAfterAppendException`: lúc nhận, ISR còn đủ, nên leader đã *ghi (append) bản ghi vào log*; trong lúc chờ follower, ISR co lại dưới `min.insync.replicas`, nên leader trả lỗi. Bản ghi **đã nằm trong log** nhưng producer nhận về lỗi.
+   - Producer thử lại thì leader ghi thêm một bản nữa: **trùng**. Javadoc ghi đúng ý này: "Producer retries will cause duplicates".
+   - Idempotence chặn được loại trùng này *trong cùng một session*: lần gửi lại mang cùng số thứ tự (sequence number), broker nhận ra đã có và không ghi thêm. [[Design: idempotent producer]](https://kafka.apache.org/44/design/design/) Đó là một lý do nữa để không tắt idempotence. Thử 4 ở mục 2 diễn đúng kịch bản này.
 8. **Idempotence có phạm vi hẹp:** chống trùng do retry trong *một session* của producer. Ứng dụng của bạn tự gửi lại sau khi restart thì broker thấy hai bản ghi khác nhau. [[KafkaProducer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html) (xử lý bằng consumer ở Bài 7). Cơ chế và cách cấu hình chi tiết: [Bài 4b](0010-idempotent-producer.md).
 9. **Quan hệ timeout:** `delivery.timeout.ms` phải ≥ `request.timeout.ms + linger.ms`. Docs khuyên dùng `delivery.timeout.ms` để giới hạn thời gian thử lại thay vì chỉnh `retries`. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
-10. 
-11. **Spring Kafka:** `KafkaTemplate.send` trả `CompletableFuture`; nếu bạn bỏ qua future, lỗi chỉ nằm trong log (mặc định `LoggingProducerListener`). `TopicBuilder` *không có* `minInsyncReplicas()`, dùng `.config("min.insync.replicas","2")`. Topic đã tồn tại thì config không bị sửa trừ khi `spring.kafka.admin.modify-topic-configs=true`. [[Sending messages]](https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html) [[research/0002, mục 2.1 và 2.6]](../research/0002-spring-kafka.md)
+10. **Idempotence đòi ba điều kiện: `acks=all`, `retries` > 0, `max.in.flight.requests.per.connection` ≤ 5.** Nếu cấu hình vi phạm một điều kiện, kết quả phụ thuộc bạn có *tự đặt* `enable.idempotence` hay không: [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
+   - Bạn **tự ghi** `enable.idempotence=true` cùng `acks=1`: client hiểu là bạn đòi hai thứ mâu thuẫn, nên **ném `ConfigException`** ngay khi tạo producer.
+   - Bạn **không ghi** gì về idempotence (dùng mặc định) mà đặt `acks=1`: client **âm thầm tắt idempotence** và chạy tiếp, không báo gì.
+   - Hệ quả: hạ `acks` là tắt luôn idempotence. Lab 04 profile `risky` ghi tường minh cả `acks=1` và `enable.idempotence=false` để rõ ý.
+11. **`send()` có thể chặn thread gọi nó.** Bình thường `send()` trả ngay, nhưng nó phải chờ metadata của topic và chờ chỗ trống trong bộ đệm (`buffer.memory`, mặc định 33554432 byte, khoảng 32 MB). Thời gian chờ tối đa là `max.block.ms`, mặc định 60000 (60 giây); quá hạn thì ném lỗi. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/)
+12. **Spring Kafka:** `KafkaTemplate.send` trả `CompletableFuture`; nếu bạn bỏ qua future, lỗi chỉ nằm trong log (mặc định `LoggingProducerListener`). `TopicBuilder` *không có* `minInsyncReplicas()`, dùng `.config("min.insync.replicas","2")`. Topic đã tồn tại thì config không bị sửa trừ khi `spring.kafka.admin.modify-topic-configs=true`. [[Sending messages]](https://docs.spring.io/spring-kafka/reference/kafka/sending-messages.html) [[research/0002, mục 2.1 và 2.6]](../research/0002-spring-kafka.md)
 
 ## 2. Mô phỏng: tự làm mất message
 
@@ -92,6 +78,45 @@ Mong đợi: sau khi ISR co còn 2 < 3, message chờ ack chuyển thành `NotEn
 ## 3. Lab thật trên cụm 3 broker
 
 Mô phỏng cho bạn trực giác; cụm thật cho bạn bằng chứng. Mã ở `labs/04-producer-durability` (Spring Boot 4.1.2 + Spring Kafka 4.1.2); README có lệnh đầy đủ. Ba topic cùng RF=3 chỉ khác `min.insync.replicas` (1, 2, 3); profile `risky` hạ `acks=1` và tắt idempotence; `safe` dùng `acks=all`; `verify` đọc lại toàn bộ topic và đối chiếu với danh sách seq đã được ack, nên "mất" là con số đo được, không phải cảm giác.
+
+Code và cấu hình chính (đọc trước khi chạy):
+
+```
+# labs/04-producer-durability/.../application-risky.yml  ("dễ mất")
+spring:
+  kafka:
+    producer:
+      acks: "1"
+      properties:
+        "[enable.idempotence]": false
+
+# labs/04-producer-durability/.../application-safe.yml  (hướng "không mất")
+spring:
+  kafka:
+    producer:
+      acks: all
+      properties:
+        "[enable.idempotence]": true
+        "[request.timeout.ms]": 10000
+        "[delivery.timeout.ms]": 20000   # >= request.timeout.ms + linger.ms; rút ngắn để thấy lỗi nhanh
+```
+
+```
+// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): bạn là người tạo topic
+@Bean NewTopic safe() {
+    return TopicBuilder.name("lab-orders-safe").partitions(3).replicas(3)
+            .config("min.insync.replicas", "2")   // TopicBuilder không có minInsyncReplicas()
+            .build();
+}
+```
+
+```
+// labs/04-producer-durability/.../SenderRunner.java (rút gọn): đọc kết quả gửi, không fire-and-forget
+template.send(topic, key, Integer.toString(seq)).whenComplete((result, ex) -> {
+    if (ex == null) acked.add(seq);          // broker đã ack: đối chiếu với topic ở profile verify
+    else record(failed, failuresByType, ex); // đếm lỗi theo loại (NotEnoughReplicasException...)
+});
+```
 
 **Trạng thái trung thực:** lab 04 đã biên dịch và đã chạy thử nạp cấu hình, nhưng **chưa được chạy với cụm 3 broker** (máy chưa có Docker). Các "mong đợi" dưới đây suy ra từ tài liệu. Mất message do kill leader *không tất định*: có thể phải chạy vài lần hoặc tăng `--lab.per-second`. Ghi lại điều bạn thật sự thấy; nếu khác mong đợi, đó là thông tin quý, hãy báo cho giáo viên.
 
@@ -133,6 +158,27 @@ Tôi đã chạy strict và ghi lại các loại lỗi
 
 Giao diện báo đặt hàng thành công vì producer nhận ack. Sau sự cố một broker, kho đếm thiếu đơn. Nguyên nhân thường gặp: `acks=1`, hoặc `acks=all` nhưng topic `min.insync.replicas=1` và ISR đã co còn leader (Thử 3). Cách xử lý: `acks=all` + RF=3 + minISR=2 *ở cấp topic*, kiểm bằng `--describe`. Từ Kafka 4.1 docs nói giá trị đặt ở cấp broker "sẽ bị gỡ" và ELR đổi nghĩa của config này, nên đừng dựa vào default broker. [[Upgrade notes]](https://kafka.apache.org/44/getting-started/upgrade/)
 
+```mermaid
+sequenceDiagram
+participant UI as Giao diện
+participant P as Producer (acks=1)
+participant L as Leader B1
+participant F as Follower B2
+participant K as Kho (consumer)
+UI->>P: đặt đơn 5
+P->>L: gửi đơn 5
+L-->>P: ack (mới ghi ở leader)
+P-->>UI: Đặt hàng thành công
+Note over L,F: B2 chưa kịp fetch đơn 5
+Note over L: B1 chết
+F->>F: B2 lên làm leader, log không có đơn 5
+K->>F: đọc đơn
+F-->>K: thiếu đơn 5
+Note over UI,K: Sửa: acks=all + RF=3 + minISR=2 ở cấp topic. Ack chỉ về khi ít nhất 2 bản sao có đơn 5
+```
+
+*Sequence: với acks=1, ack về khi mới có một bản sao; leader chết trước khi follower fetch thì đơn biến mất.*
+
 ### (b) Telemetry kho lạnh: cụm sống mà không ghi được
 
 Topic cảm biến RF=3, minISR=2, `acks=all`. Hai broker giữ partition đó chết (giả sử cụm có controller riêng nên vẫn bầu được leader). Diễn biến:
@@ -148,13 +194,102 @@ Topic cảm biến RF=3, minISR=2, `acks=all`. Hai broker giữ partition đó c
 
 Trong họp bạn sẽ phải nói được lựa chọn này, kèm hệ quả cho người dùng cuối (lỗi gì, trong bao lâu).
 
+```mermaid
+sequenceDiagram
+participant P as Producer (acks=all)
+participant L as Leader
+participant F1 as Follower 1
+participant F2 as Follower 2
+Note over F1,F2: t = 0: hai follower chết
+P->>L: ghi
+Note over L: ISR vẫn ghi đủ 3 tên, leader chờ hai follower: ghi treo
+Note over L: khoảng 30 giây sau: ISR chỉ còn leader, ít hơn minISR=2
+loop tới hết delivery.timeout.ms (mặc định 2 phút)
+P->>L: thử lại
+L-->>P: NotEnoughReplicasException
+end
+P->>P: báo lỗi cho ứng dụng
+Note over P,F2: minISR=2 (sổ cái): ngừng ghi, báo lỗi. minISR=1 (telemetry): vẫn ghi, mỗi bản ghi chỉ 1 bản sao
+```
+
+*Sequence: hai follower chết; ghi treo tới khi ISR co lại, rồi bị từ chối và producer thử lại tới hết delivery.timeout.ms.*
+
 ### (c) Spring: lỗi gửi nằm im trong log
 
 Service gọi `template.send(...)` không đọc future. Topic bị từ chối (ISR thấp), ứng dụng vẫn trả 200 cho người dùng. Đây là mất message *phía ứng dụng*, không phải phía Kafka. Xử lý: `whenComplete` hoặc `.get(timeout)` khi cần chắc chắn, và quyết định ứng dụng làm gì khi lỗi (trả lỗi cho người dùng, hoặc ghi outbox, Bài 7). Xem cách `SenderRunner` làm.
 
-### (d) Nếu là ngân hàng
+```mermaid
+sequenceDiagram
+participant U as Người dùng
+participant S as Service Spring
+participant T as KafkaTemplate
+participant K as Cụm Kafka
+U->>S: POST /orders
+S->>T: send(...), không đọc future
+S-->>U: 200 OK
+T->>K: gửi
+K-->>T: từ chối (ISR thấp)
+T->>T: future lỗi, chỉ có một dòng log
+Note over U,K: Người dùng tưởng đã xong, message không tới Kafka
+Note over S,T: Sửa: whenComplete hoặc .get(timeout), quyết định trả lỗi hay ghi outbox
+```
+
+*Sequence: không đọc future thì người dùng nhận 200 trong khi message không tới Kafka.*
+
+### (d) API thanh toán treo 60 giây khi cụm có sự cố
+
+Controller REST nhận yêu cầu, gọi `template.send(...)` rồi trả 202. Một sáng, mạng tới cụm Kafka đứt. Không có exception nào ngay; mọi request treo khoảng 60 giây rồi mới lỗi, thread pool của web server cạn, cả service ngừng trả lời, kể cả các API không dính tới Kafka. Nguyên nhân: `send()` chờ metadata tới hết `max.block.ms`. Tương tự khi producer gửi nhanh hơn khả năng giao: bộ đệm `buffer.memory` đầy và `send()` chờ. Cách xử lý:
+
+- Hạ `max.block.ms` xuống mức API chịu được (vài giây) để lỗi nhanh thay vì treo lâu.
+- Quyết định trước API làm gì khi Kafka không nhận: trả lỗi 503, hoặc ghi outbox trong DB rồi gửi sau (Bài 7).
+- Theo dõi bộ đệm; nếu thường xuyên đầy thì vấn đề là thông lượng, không phải timeout.
+
+Lưu ý: "API treo 60 giây" là suy ra từ mô tả `max.block.ms`; chưa kiểm trong docs Spring xem `KafkaTemplate.send` có chặn giống hệt hay không. Tự kiểm: tắt cả 3 broker rồi chạy profile `safe` của lab 04, đo thời gian tới lỗi đầu tiên.
+
+```mermaid
+sequenceDiagram
+participant U as Nhiều request
+participant W as Thread pool web
+participant T as KafkaTemplate.send
+participant K as Cụm Kafka (mạng đứt)
+U->>W: POST /payments
+W->>T: send(...)
+T--xK: lấy metadata
+Note over T: chờ tới max.block.ms (60 giây)
+U->>W: request khác, kể cả API không dùng Kafka
+Note over W: mọi thread đang chờ send(): pool cạn, service ngừng trả lời
+T-->>W: lỗi sau khoảng 60 giây
+Note over U,K: Sửa: max.block.ms vài giây, khi lỗi trả 503 hoặc ghi outbox
+```
+
+*Sequence: send() chờ metadata tới hết max.block.ms, làm cạn thread pool của cả service.*
+
+### (e) Nếu là ngân hàng
 
 Một dòng cho buổi họp: "Topic giao dịch: RF=3, minISR=2, `acks=all`, idempotence bật, `unclean.leader.election.enable=false`, và producer đọc kết quả gửi". Đó là câu trả lời chuẩn cho "không mất"; phần còn lại (trùng) giải ở consumer.
+
+```mermaid
+flowchart TB
+subgraph p ["Producer"]
+P1["acks=all"]
+P2["enable.idempotence=true"]
+P3["đọc kết quả gửi"]
+end
+subgraph t ["Topic giao dịch"]
+T1["RF=3"]
+T2["min.insync.replicas=2"]
+T3["unclean.leader.election.enable=false"]
+end
+p -->|"không mất"| t
+t -->|"vẫn có thể trùng"| c["Consumer chống trùng<br/>Bài 5, Bài 7"]
+class P1,P2,P3,T1,T2,T3 ok
+class c warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Kiến trúc: bốn núm vặn ở producer và topic cho "không mất"; phần trùng để consumer xử lý.*
 
 ## 5. Tự nói thành lời
 
@@ -163,6 +298,8 @@ Không nhìn tài liệu, trong 45 giây: *"Để một message đã báo thành
 **Ôn nhanh:** [tóm tắt Bài 4](../summaries/0004-producer-durability.md) (đọc sau khi đã tự nói).
 
 ## 6. Kiểm tra
+
+<!-- quiz:quiz -->
 
 **1. Topic RF=3, min.insync.replicas=1, producer acks=all. ISR đã co còn mình leader, leader chết. Điều nào đúng?**
 
@@ -238,6 +375,8 @@ send trả CompletableFuture; nếu không đọc, mặc định chỉ LoggingPr
 Docs: đặt tường minh enable.idempotence=true cùng cấu hình xung đột thì ném ConfigException; chỉ khi không đặt tường minh thì idempotence mới bị tắt âm thầm.
 
 </details>
+
+<!-- /quiz -->
 
 ## Nguồn nên đọc
 

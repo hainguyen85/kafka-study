@@ -69,6 +69,30 @@ Một sàn bán vé mở bán 5.000 ghế cho 50.000 người cùng giành, đ�
 <details>
 <summary>Mở đáp án mẫu cho đề bán vé</summary>
 <p><b>Topic (gợi ý):</b> <code>seat-commands</code> (yêu cầu giữ ghế), <code>seat-events</code> (kết quả: đã giữ, từ chối, đã thả), <code>payment-events</code> (kết quả thanh toán, gồm webhook), <code>notifications</code> (gửi email). Mỗi topic có DLT riêng.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+U["Người dùng"] --> API["API giữ ghế"]
+API -->|"key = seatId"| SC["seat-commands"]
+SC --> SS["Seat service<br/>UNIQUE(commandId), ack sau COMMIT"]
+SS -->|"UPDATE ... WHERE status='FREE'"| SDB[("DB ghế: trọng tài")]
+SS -->|"key = seatId"| SE["seat-events<br/>đã giữ, từ chối, đã thả"]
+JOB["Job quét hạn giữ 10 phút"] --> SDB
+JOB -->|"SeatReleased"| SE
+PSP["Bên thanh toán<br/>webhook gọi lại nhiều lần"] --> PAY["Payment service<br/>dedup theo mã giao dịch của họ<br/>outbox"]
+PAY -->|"key = orderId"| PE["payment-events"]
+SE --> NS["Dịch vụ thông báo"]
+PE --> NS
+NS -->|"key = notificationId"| NT["notifications"]
+NT --> EM["Email worker<br/>dedup theo notificationId"]
+class SC,SE,PE,NT warn
+class SDB ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc minh hoạ cho đáp án mẫu. Mỗi topic có DLT riêng (không vẽ). Ai ghi notifications là lựa chọn của bạn.</figcaption>
+</figure>
 <p><b>Key:</b> <code>seatId</code> cho <code>seat-commands</code> và <code>seat-events</code>: mọi yêu cầu cho cùng một ghế đi vào cùng một partition, được xử lý tuần tự bởi một consumer, nên "ai thắng ghế" là quyết định có thứ tự. Đánh đổi: key theo <code>eventId</code> (sự kiện) sẽ dồn mọi yêu cầu vào một partition: tải nóng và không song song. <code>orderId</code> cho <code>payment-events</code>. <code>userId</code> hoặc <code>notificationId</code> cho <code>notifications</code>.</p>
 <p><b>Partition:</b> tính từ đỉnh 20.000 yêu cầu/giây và số consumer cần chạy song song, cộng dư địa vì không giảm được và tăng làm đổi mapping; kiểm quota partition của dịch vụ managed. Con số cụ thể cần đo, không đoán.</p>
 <p><b>Độ bền:</b> <code>seat-commands</code> và <code>payment-events</code>: RF=3, minISR=2, <code>acks=all</code>, idempotence, đọc kết quả gửi bằng <code>whenComplete</code>/<code>get</code>; nếu gửi lỗi thì API trả lỗi cho người dùng chứ không âm thầm nuốt. Hỏi platform team về <code>unclean.leader.election.enable</code>.</p>
@@ -95,6 +119,7 @@ Một sàn bán vé mở bán 5.000 ghế cho 50.000 người cùng giành, đ�
 <div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên. Một yêu cầu rất hữu ích: "ra cho tôi một đề khác" (domain bất kỳ), hoặc "đóng vai người phản biện thiết kế của tôi".</div>
 </main>
 
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 Quiz.mount(document.getElementById('quiz'), [

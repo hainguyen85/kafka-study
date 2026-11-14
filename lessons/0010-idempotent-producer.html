@@ -76,10 +76,60 @@ java -jar target/producer-durability-0.0.1-SNAPSHOT.jar --spring.profiles.active
 <h2>4. Usecase oái oăm</h2>
 <h3>(a) Logistics: DELIVERED đến trước PICKED_UP</h3>
 <p>Team giao hàng đặt <code>acks: "1"</code> cho nhanh. Idempotence tắt âm thầm (điều kiện 1 bị vi phạm). Một ngày broker chập chờn, batch PICKED_UP lỗi tạm thời, batch DELIVERED đi trước, PICKED_UP được retry sau. Consumer thấy đơn "đã giao" rồi mới "đã lấy hàng". Không ai đổi cấu hình idempotence, không có lỗi nào trong log. Xử lý: <code>acks=all</code> và ghi tường minh <code>enable.idempotence=true</code>.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P as Producer (acks=1, idempotence tắt)
+participant B as Leader partition của đơn D-7
+participant C as Consumer
+P->>B: batch 1: PICKED_UP
+B--xP: lỗi tạm thời
+P->>B: batch 2: DELIVERED
+B-->>P: ok, offset 10
+P->>B: retry batch 1: PICKED_UP
+B-->>P: ok, offset 11
+B->>C: DELIVERED (10), rồi PICKED_UP (11)
+Note over C: đã giao trước đã lấy hàng, log không có lỗi
+Note over P,C: Sửa: acks=all + enable.idempotence=true tường minh. Broker giữ thứ tự theo sequence number
+</script>
+<figcaption>Sequence: idempotence tắt âm thầm; một batch retry đi sau batch kế tiếp nên thứ tự trong log bị đảo.</figcaption>
+</figure>
 <h3>(b) Đặt vé: restart rồi gửi lại</h3>
 <p>Service đặt vé gửi <code>BookingCreated</code>, bị deploy lại trước khi nhận kết quả. Lúc khởi động nó gửi lại các booking "chưa chắc đã gửi". Producer mới, PID mới: hai bản ghi, idempotence không giúp được. Xử lý: <code>eventId</code> sinh một lần cho mỗi booking, consumer chống trùng theo nó (Bài 7), hoặc outbox để chỉ một tiến trình chịu trách nhiệm gửi.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P1 as Producer cũ (PID 7)
+participant B as Broker
+participant P2 as Producer mới sau deploy (PID 8)
+participant C as Consumer
+P1->>B: BookingCreated B-1 (PID 7, seq 0)
+B--xP1: ack không tới, service bị deploy lại
+P2->>B: gửi lại B-1 (PID 8, seq 0)
+Note over B: PID khác: broker coi là bản ghi mới
+B->>C: B-1 hai lần
+Note over P1,C: Sửa: eventId sinh một lần cho mỗi booking, consumer chống trùng theo eventId (Bài 7), hoặc outbox
+</script>
+<figcaption>Sequence: producer mới có PID mới, nên broker không nhận ra bản gửi lại là trùng.</figcaption>
+</figure>
 <h3>(c) "Ta tăng max.in.flight lên 10 cho throughput"</h3>
 <p>Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo. Một dòng cấu hình "tối ưu hiệu năng" lấy đi hai bảo đảm. Đây là ví dụ tốt cho lý do review cấu hình producer cũng quan trọng như review code.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+A["max.in.flight.requests.per.connection = 10"] --> Q{"enable.idempotence<br/>ghi tường minh?"}
+Q -->|"có: true"| E["ConfigException<br/>ứng dụng không khởi động"]
+Q -->|"không ghi"| S["Idempotence tắt âm thầm"]
+S --> L1["Retry có thể tạo bản trùng"]
+S --> L2["Retry có thể đảo thứ tự"]
+class E warn
+class S,L1,L2 bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: một dòng "tối ưu hiệu năng" cho hai kết cục, tuỳ có ghi tường minh enable.idempotence hay không.</figcaption>
+</figure>
 
 <h2>5. Tự nói thành lời</h2>
 <p>Trong 45 giây: <i>"Idempotent producer chặn trùng bằng ... Nó giữ được thứ tự vì ... Nó không chặn được ... vì ... Để không ai tắt nó vô tình, mình cấu hình ..."</i></p>
@@ -99,6 +149,7 @@ java -jar target/producer-durability-0.0.1-SNAPSHOT.jar --spring.profiles.active
 
 <script src="../assets/checklist.js"></script>
 <script src="../assets/idempotence-sim.js"></script>
+<script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>
 IdempotenceSim.mount(document.getElementById('isim'));

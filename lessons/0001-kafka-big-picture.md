@@ -61,7 +61,7 @@ Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các
 - **Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc**, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là *consumer instance*, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.
 - Chiều ngược lại không bị cấm: một consumer có thể đọc *nhiều* partition (C1 giữ P0 và P1).
 - Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy **số partition là trần song song hoá của một group** (Bài 8).
-- Việc chia này *không cố định*: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là **rebalance** (Bài 5). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.
+- Việc chia này *không cố định*: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là **rebalance** ([Bài 5b](0011-rebalance.md)). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.
 - **Vì sao thiết kế vậy?** Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.
 - **Hai group khác nhau không tranh nhau:** Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.
 - Ngoại lệ về sau: **Share Groups** (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)
@@ -92,6 +92,8 @@ Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): *
 **Ôn nhanh:** [tóm tắt Bài 1](../summaries/0001-kafka-big-picture.md) (đọc sau khi đã tự nói).
 
 ## 7. Kiểm tra
+
+<!-- quiz:quiz -->
 
 **1. Service Order vừa ghi event OrderPlaced vào Kafka. Nó cần làm gì tiếp theo với Notification?**
 
@@ -212,6 +214,8 @@ Producer chỉ ghi vào leader; follower sao chép từ leader.
 Controller tạo quorum để giữ metadata cụm. Nội dung message nằm ở các broker.
 
 </details>
+
+<!-- /quiz -->
 
 ## Nguồn nên đọc
 
