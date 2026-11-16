@@ -2,15 +2,10 @@
 
 [← Tóm tắt Bài 6](0006-error-handling-dlt.md) · [Bài học](../lessons/0007-idempotent-consumer-transactions.html) · [Tóm tắt Bài 8 →](0008-topic-design.md)
 
-*Tóm tắt cả bài bằng lời, khoảng 60-90 giây. Dùng để ôn nhanh và tra cứu.*
+*Bài nói 1-2 phút để giải thích cho người khác. Cấu hình chi tiết và câu hỏi hay gặp nằm trong bài học.*
 
-Không mất nghĩa là at-least-once, tức là có thể trùng. Idempotent producer chỉ chống trùng do retry trong một session; ứng dụng gửi lại sau restart là record mới với offset mới. Nên chống trùng phải nằm ở **consumer**, bằng **mã nghiệp vụ** của sự kiện, không bằng offset.
+Không mất nghĩa là có thể trùng, nên consumer phải chịu được trùng. Cách làm chuẩn: mỗi sự kiện có một mã riêng. Trong cùng một transaction DB, ghi mã đó vào bảng có khoá duy nhất rồi mới cập nhật nghiệp vụ; gặp lại mã cũ thì bỏ qua. DB commit xong mới commit offset. Nhớ trong RAM là sai, vì crash là mất trí nhớ.
 
-Cách làm: trong cùng một transaction DB, insert `eventId` vào bảng có khoá duy nhất rồi mới thực hiện tác dụng phụ; trùng khoá thì bỏ qua; commit DB xong mới ack offset. Dedup trong RAM là sai vì crash là mất trí nhớ. Phía phát, ghi DB rồi gửi Kafka là ghi kép, crash giữa hai bước là mất; dùng **outbox**: ghi sự kiện vào bảng outbox cùng transaction với dữ liệu, một relay đẩy lên Kafka.
+Phía phát cũng có bẫy: ghi DB rồi gửi Kafka là hai việc riêng, crash ở giữa là mất sự kiện. Outbox sửa việc này: ghi sự kiện vào một bảng trong cùng transaction với dữ liệu, rồi một tiến trình riêng đẩy lên Kafka.
 
-Transaction của Kafka cho exactly-once khi đọc topic, ghi topic và commit offset trong cùng một transaction, với consumer `read_committed`. Phạm vi chỉ trong Kafka: đầu ra là DB thì vẫn cần at-least-once cộng idempotent consumer. Producer chết giữa transaction làm consumer `read_committed` đứng chờ tới hết `transaction.timeout.ms`.
-
-## Hỏi nhanh, đáp gọn
-
-- **Bên kia nói "mình có exactly-once", hỏi lại gì?** "Đầu ra cuối cùng là Kafka hay DB?" Nếu là DB thì đó là at-least-once cộng dedup.
-- **Bảng dedup giữ bao lâu?** Lâu hơn khoảng thời gian một bản trùng còn có thể xuất hiện, thường gắn với retention của topic.
+Transaction của Kafka cho exactly-once khi cả đầu vào lẫn đầu ra là topic. Đầu ra là DB thì vẫn cần at-least-once cộng chống trùng. Nên khi ai đó nói "bên mình exactly-once", hãy hỏi: đầu ra cuối là Kafka hay DB?

@@ -291,6 +291,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Kiến trúc: bốn núm vặn ở producer và topic cho "không mất"; phần trùng để consumer xử lý.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Idempotence có chống được trùng khi service restart rồi gửi lại không?** Không. Nó chỉ phủ retry trong một session của producer; gửi lại ở tầng ứng dụng là record mới, phải chống trùng ở consumer (Bài 7).
+- **Telemetry có cần cấu hình như vậy không?** Không nhất thiết. Nếu mất vài điểm chấp nhận được, có thể chọn minISR=1 hoặc acks=1 để đổi lấy sẵn sàng và độ trễ. Quyết định theo domain.
+
 ## 5. Tự nói thành lời
 
 Không nhìn tài liệu, trong 45 giây: *"Để một message đã báo thành công không mất khi một broker chết, mình cần ... vì ...; cái giá phải trả là ..."* Dùng đủ các từ: ISR, `acks=all`, `min.insync.replicas`, leader, retry.

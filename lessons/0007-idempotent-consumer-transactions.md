@@ -256,6 +256,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Kiến trúc mặc định cho sự kiện tiền: outbox ở phía phát, at-least-once qua Kafka, dedup trong transaction DB ở phía nhận.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Bên kia nói "mình có exactly-once", hỏi lại gì?** "Đầu ra cuối cùng là Kafka hay DB?" Nếu là DB thì đó là at-least-once cộng dedup.
+- **Bảng dedup giữ bao lâu?** Lâu hơn khoảng thời gian một bản trùng còn có thể xuất hiện, thường gắn với retention của topic.
+
 ## 5. Tự nói thành lời
 
 Trong 60 giây: *"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."* Dùng: at-least-once, idempotent, outbox, `read_committed`, LSO.

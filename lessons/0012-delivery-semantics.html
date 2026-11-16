@@ -198,6 +198,13 @@ Note over K,DB: Không lỗi nào trong log. Thiếu nửa chịu được trùn
 <figcaption>Sequence: at-least-once giao lại đúng như hứa; consumer không chống trùng nên cộng tiền hai lần.</figcaption>
 </figure>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Bên kia nói "mình exactly-once"?</b> Hỏi "đầu ra cuối là Kafka hay DB?". DB thì thực chất là at-least-once cộng dedup.</li>
+<li><b>Cấu hình at-most-once trong Spring?</b> Producer <code>retries: 0</code>, <code>acks: "1"</code>, tắt idempotence; listener <code>ack.acknowledge()</code> trước rồi mới xử lý.</li>
+<li><b>Vì sao transaction Kafka không cứu được SMS gửi hai lần?</b> Cuộc gọi ra ngoài không nằm trong transaction; abort và giao lại thì SMS đi lần nữa.</li>
+</ul>
+
 <h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Ba ngữ nghĩa là ... Ngữ nghĩa của cả chuỗi phụ thuộc vào ... Với tiền thì mình chọn ... vì exactly-once của Kafka chỉ phủ ... Giá hiển thị thì ... vì ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0012-delivery-semantics.md">tóm tắt Bài 5c</a> (đọc sau khi đã tự nói).</p>

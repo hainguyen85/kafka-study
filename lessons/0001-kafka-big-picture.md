@@ -85,6 +85,11 @@ Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các
 | "Sao khách nhận hai email xác nhận?" / "sao kho bị trừ hai lần?" | consumer group, commit offset, at-least-once | Bài 5 |
 | "Một message lỗi làm kẹt cả hàng" | poison pill, retry, DLQ, rebalance | Bài 6 |
 
+### Hỏi nhanh, đáp gọn
+
+- **Kafka có phải message queue không?** Dùng được như queue (các consumer cùng group chia nhau partition) và như pub/sub (mỗi group nhận đủ), nhưng bản chất là một log chỉ ghi thêm: đọc không xoá, đọc lại được, song song bị giới hạn bởi số partition.
+- **Một broker chết thì sao?** Partition có leader trên broker đó được bầu leader mới từ các bản sao còn bám kịp (ISR); cụm chạy tiếp. Chi tiết ở Bài 3 và 4.
+
 ## 6. Tự nói thành lời (30 giây, rồi mới làm quiz)
 
 Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): *"Order gửi event, Kafka ... , Notification và Inventory ..."* Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.

@@ -86,6 +86,12 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code>
 <h2>5. Điều khác đi khi nơi mới là dịch vụ managed</h2>
 <p>Cụm tự dựng của bạn là chỗ để <em>học</em>; nơi làm việc là dịch vụ do devops lo. Bốn thứ cần hỏi trước khi chốt thẻ thiết kế (chi tiết, so sánh MSK/Confluent và nguồn ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>): <b>(1)</b> RF/minISR có bị khoá không (MSK Express khoá, Serverless không cho sửa, Confluent nhận minISR 1 hoặc 2); <b>(2)</b> <code>unclean.leader.election.enable</code> hiệu lực là gì (MSK Standard mặc định <b>true</b>); <b>(3)</b> bạn có quyền tạo topic và trần partition là bao nhiêu; <b>(4)</b> trần kích thước message. Những khái niệm của bài 4-8 dùng được ở mọi nơi; chỉ giá trị và quyền thay đổi.</p>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Chọn bao nhiêu partition?</b> Bắt đầu từ số consumer song song cần có ở đỉnh tải, cộng dư địa; đo thông lượng thật và kiểm quota của dịch vụ managed. Không có con số chung.</li>
+<li><b>Compaction có đảm bảo mỗi key một bản ghi không?</b> Không tức thì: segment đang ghi không bị compact và thời điểm compact không cứng. Consumer phải chịu được việc thấy nhiều bản của một key.</li>
+</ul>
+
 <h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây, cho "bảng giá sản phẩm": <i>"Mình tạo topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0008-topic-design.md">tóm tắt Bài 8</a> (đọc sau khi đã tự nói).</p>

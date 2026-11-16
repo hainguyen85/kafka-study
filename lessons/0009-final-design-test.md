@@ -221,6 +221,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 **Ôn nhanh:** [tóm tắt Bài 9](../summaries/0009-final-design-test.md) (đọc sau khi đã tự nói).
 
+### Hỏi nhanh, đáp gọn
+
+- **Khung nói dùng lại cho đề bất kỳ** Yêu cầu (mất được không, trùng được không, thứ tự theo gì, tải bao nhiêu) → topic và key → partition → độ bền → consumer và chống trùng → lỗi → dữ liệu (retention, kích thước, schema) → rủi ro → câu hỏi cho platform team.
+- **Người nghe ngắt lời hỏi "sao không exactly-once?"** Vì đầu ra cuối là DB; transaction Kafka chỉ phủ Kafka sang Kafka. Ở đây at-least-once cộng dedup trong DB cho cùng kết quả.
+
 ## 5. Sau bài này
 
 - **Dán thẻ của bạn cho giáo viên** để chấm và chỉ ra chỗ cần ôn; mình sẽ ghi một learning record dựa trên kết quả thật, không phải trên dự đoán.

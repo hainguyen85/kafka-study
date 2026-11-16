@@ -170,6 +170,13 @@ Note over C1,C2: Hạ session.timeout.ms thì phát hiện nhanh hơn, nhưng GC
 <h3>(d) Nếu là ngân hàng</h3>
 <p>"Service đọc giao dịch dùng cooperative + static membership, commit khi bị thu hồi partition, và consumer idempotent vì rebalance vẫn có thể gây xử lý lại." Câu cuối quan trọng nhất: giảm rebalance là tối ưu, chống trùng mới là bảo đảm.</p>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Deploy làm lag tăng vọt, xử lý sao?</b> Cooperative + static membership với tên pod ổn định; hoặc giao thức consumer nếu broker hỗ trợ.</li>
+<li><b>Hạ <code>session.timeout.ms</code> cho phát hiện nhanh?</b> Phát hiện nhanh hơn, nhưng GC pause dài có thể bị coi là chết và gây rebalance oan.</li>
+<li><b>Thêm consumer có làm nhanh hơn không?</b> Chỉ tới số partition; thừa thì ngồi chờ, và mỗi lần thêm bớt là một lần rebalance.</li>
+</ul>
+
 <h2>5. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Rebalance xảy ra khi ... Với eager thì ..., với cooperative thì ... Consumer chết đột ngột thì ... vì ... Để deploy không làm group đứng, mình cấu hình ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0011-rebalance.md">tóm tắt Bài 5b</a> (đọc sau khi đã tự nói).</p>

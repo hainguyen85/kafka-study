@@ -192,6 +192,12 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
 <tr><td>"Một message lỗi làm kẹt cả hàng"</td><td>poison pill, retry, DLQ, rebalance</td><td>Bài 6</td></tr>
 </table>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Kafka có phải message queue không?</b> Dùng được như queue (các consumer cùng group chia nhau partition) và như pub/sub (mỗi group nhận đủ), nhưng bản chất là một log chỉ ghi thêm: đọc không xoá, đọc lại được, song song bị giới hạn bởi số partition.</li>
+<li><b>Một broker chết thì sao?</b> Partition có leader trên broker đó được bầu leader mới từ các bản sao còn bám kịp (ISR); cụm chạy tiếp. Chi tiết ở Bài 3 và 4.</li>
+</ul>
+
 <h2>6. Tự nói thành lời (30 giây, rồi mới làm quiz)</h2>
 <p>Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): <i>"Order gửi event, Kafka ... , Notification và Inventory ..."</i> Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0001-kafka-big-picture.md">tóm tắt Bài 1</a> (đọc sau khi đã tự nói).</p>

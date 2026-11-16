@@ -95,6 +95,11 @@ Tôi đã chạy s13 và ghi lại số record trước/sau
 
 Cụm tự dựng của bạn là chỗ để *học*; nơi làm việc là dịch vụ do devops lo. Bốn thứ cần hỏi trước khi chốt thẻ thiết kế (chi tiết, so sánh MSK/Confluent và nguồn ở [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)): **(1)** RF/minISR có bị khoá không (MSK Express khoá, Serverless không cho sửa, Confluent nhận minISR 1 hoặc 2); **(2)** `unclean.leader.election.enable` hiệu lực là gì (MSK Standard mặc định **true**); **(3)** bạn có quyền tạo topic và trần partition là bao nhiêu; **(4)** trần kích thước message. Những khái niệm của bài 4-8 dùng được ở mọi nơi; chỉ giá trị và quyền thay đổi.
 
+### Hỏi nhanh, đáp gọn
+
+- **Chọn bao nhiêu partition?** Bắt đầu từ số consumer song song cần có ở đỉnh tải, cộng dư địa; đo thông lượng thật và kiểm quota của dịch vụ managed. Không có con số chung.
+- **Compaction có đảm bảo mỗi key một bản ghi không?** Không tức thì: segment đang ghi không bị compact và thời điểm compact không cứng. Consumer phải chịu được việc thấy nhiều bản của một key.
+
 ## 6. Tự nói thành lời
 
 Trong 60 giây, cho "bảng giá sản phẩm": *"Mình tạo topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."*

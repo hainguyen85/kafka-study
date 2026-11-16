@@ -2,15 +2,12 @@
 
 [← Tóm tắt Bài 5c](0012-delivery-semantics.md) · [Bài học](../lessons/0006-error-handling-dlt.html) · [Tóm tắt Bài 7 →](0007-idempotent-consumer-transactions.md)
 
-*Tóm tắt cả bài bằng lời, khoảng 60 giây. Dùng để ôn nhanh và tra cứu.*
+*Bài nói 1-2 phút để giải thích cho người khác. Cấu hình chi tiết và câu hỏi hay gặp nằm trong bài học.*
 
-Message lỗi đi vào consumer Spring Kafka mặc định thì `DefaultErrorHandler` giao lại tối đa 10 lần, không chờ, rồi **chỉ log ERROR và commit offset**: message mất im lặng. Với yêu cầu "không mất", mặc định này không chấp nhận được.
+Một message lỗi đi vào consumer Spring Kafka mặc định sẽ được thử lại vài lần, rồi chỉ ghi log và đi tiếp. Nghĩa là mất im lặng, không chấp nhận được với sự kiện tiền.
 
-Cấu hình tối thiểu: `DefaultErrorHandler` với back-off ngắn cho lỗi tạm thời, đánh dấu lỗi dữ liệu là không retry, và `DeadLetterPublishingRecoverer` đẩy record hỏng sang topic `<topic>-dlt`, cùng số partition, kèm header lý do lỗi. Topic DLT phải tự tạo, có ít nhất số partition của topic gốc. Lỗi giải mã thì bọc deserializer bằng `ErrorHandlingDeserializer`.
+Cấu hình đúng chia lỗi làm hai loại. Lỗi tạm thời, như dịch vụ phụ chết vài giây, thì thử lại vài lần có giãn cách. Lỗi vĩnh viễn, như dữ liệu sai định dạng, thì không thử lại mà chuyển ngay sang dead letter topic, kèm lý do lỗi.
 
-Đánh đổi chính: blocking retry giữ thứ tự nhưng làm cả partition đứng và có thể vượt `max.poll.interval.ms`; retry topic (`@RetryableTopic`) không chặn partition nhưng phá thứ tự theo key. Và DLT không phải thùng rác: cần cảnh báo khi có record, cần quy trình replay. DLQ cho consumer thường là pattern ứng dụng, không phải tính năng trong docs Apache.
+Có một đánh đổi: thử lại tại chỗ giữ được thứ tự nhưng làm cả partition đứng chờ; đẩy sang topic retry thì không chặn, nhưng phá thứ tự theo key.
 
-## Hỏi nhanh, đáp gọn
-
-- **Chọn retry kiểu nào cho dòng tiền theo tài khoản?** Thường là blocking retry ngắn để giữ thứ tự theo tài khoản, rồi DLT; lỗi kéo dài thì cảnh báo thay vì retry vô hạn.
-- **DLT xong rồi thì sao?** Có người nhận cảnh báo, sửa nguyên nhân, rồi replay record về topic gốc; consumer phải idempotent vì replay là giao thêm lần nữa.
+Và dead letter topic không phải thùng rác. Phải có cảnh báo khi có message rơi vào, có người xử lý, và có quy trình đưa message về topic gốc sau khi sửa lỗi.

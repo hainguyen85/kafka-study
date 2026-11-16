@@ -94,6 +94,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Flow: một key "to" dồn 70% tải vào một partition; consumer thêm vào không có partition để nhận.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Dùng một partition cho chắc thứ tự được không?** Được thứ tự toàn topic nhưng mất song song: một group chỉ có một consumer làm việc. Thường chỉ cần thứ tự theo đối tượng, nên chọn key đúng là đủ.
+- **Không gửi key thì sao?** Message được rải theo sticky partition; không có thứ tự giữa các message, hợp với sự kiện độc lập nhau.
+
 ## Tự nói thành lời (60 giây)
 
 Không nhìn tài liệu, nói to: *"Một message có key đi vào partition nào, thứ tự được giữ tới đâu, offset là gì, và vì sao tăng số partition là chuyện lớn."*

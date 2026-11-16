@@ -130,6 +130,12 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Flow: một dòng "tối ưu hiệu năng" cho hai kết cục, tuỳ có ghi tường minh enable.idempotence hay không.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Bật idempotence là hết trùng?** Hết trùng do retry của producer trong một session. Không hết trùng do ứng dụng gửi lại hay do consumer xử lý lại.
+- **Vì sao giới hạn in-flight là 5?** Mô tả config nói broker chỉ giữ thông tin 5 batch gần nhất của mỗi producer.
+- **Liên quan gì tới transaction?** Đặt `transactional.id` thì idempotence được bật kèm, và ID đó có ý nghĩa qua nhiều session (Bài 7).
+
 ## 5. Tự nói thành lời
 
 Trong 45 giây: *"Idempotent producer chặn trùng bằng ... Nó giữ được thứ tự vì ... Nó không chặn được ... vì ... Để không ai tắt nó vô tình, mình cấu hình ..."*

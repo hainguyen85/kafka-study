@@ -291,6 +291,12 @@ L->>K: ack
 <figcaption>Sequence: ack sau khi transaction DB commit, chống trùng bằng mã sự kiện; restart giao lại thì bỏ qua.</figcaption>
 </figure>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Tại sao không commit sau mỗi record cho chắc?</b> Được, đổi lại nhiều lần commit hơn nên chậm hơn; và vẫn có thể trùng một record nếu crash giữa xử lý và commit.</li>
+<li><b>Muốn xử lý lại message cũ thì làm sao?</b> Dừng group rồi dùng <code>kafka-consumer-groups.sh --reset-offsets</code> (xem trước, rồi <code>--execute</code>).</li>
+</ul>
+
 <h2>5. Tự nói thành lời</h2>
 <p>Trong 45 giây: <i>"Consumer crash giữa chừng thì ... vì offset được commit ... Để không mất, mình ... và chấp nhận ... Để hết trùng thì ..."</i> Dùng: poll, commit, at-least-once, rebalance, <code>max.poll.interval.ms</code>.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0005-consumer-offset-commit.md">tóm tắt Bài 5</a> (đọc sau khi đã tự nói).</p>

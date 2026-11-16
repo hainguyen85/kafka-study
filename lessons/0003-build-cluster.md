@@ -225,6 +225,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Flow: gõ sai tên topic thì broker tự tạo topic "ma"; tắt auto-create để lỗi lộ ra ở bên gửi.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Vì sao min.insync.replicas=2 mà không phải 3?** Đặt 2 thì mất một broker vẫn ghi được an toàn; đặt 3 thì mất một broker là ngừng ghi (thấy ở Bài 4).
+- **Production có chạy combined mode không?** Tài liệu không khuyến nghị; ở nơi làm mới cụm do dịch vụ managed và devops lo, mình chỉ cần biết hệ quả.
+
 ## 4. Tự nói thành lời
 
 Không nhìn tài liệu, giải thích trong 30 giây: *"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."* Dùng đúng các từ: leader, follower, ISR, controller, quorum.

@@ -227,6 +227,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 *Kiến trúc: cấu hình tối thiểu cho sự kiện tiền: retry giới hạn, DLT bền, cảnh báo, replay, listener idempotent.*
 
+### Hỏi nhanh, đáp gọn
+
+- **Chọn retry kiểu nào cho dòng tiền theo tài khoản?** Thường là blocking retry ngắn để giữ thứ tự theo tài khoản, rồi DLT; lỗi kéo dài thì cảnh báo thay vì retry vô hạn.
+- **DLT xong rồi thì sao?** Có người nhận cảnh báo, sửa nguyên nhân, rồi replay record về topic gốc; consumer phải idempotent vì replay là giao thêm lần nữa.
+
 ## 5. Tự nói thành lời
 
 Trong 45 giây: *"Message lỗi vào consumer Spring Kafka mặc định thì ... Mình cấu hình ... để ... Đánh đổi của retry blocking so với retry topic là ..."* Dùng: poison pill, DLT, back-off, thứ tự, `max.poll.interval.ms`.

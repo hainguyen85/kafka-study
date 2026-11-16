@@ -2,14 +2,12 @@
 
 [← Tóm tắt Bài 5b](0011-rebalance.md) · [Bài học](../lessons/0012-delivery-semantics.html) · [Tóm tắt Bài 6 →](0006-error-handling-dlt.md)
 
-*Tóm tắt cả bài bằng lời, khoảng 60 giây. Dùng để ôn nhanh và tra cứu.*
+*Bài nói 1-2 phút để giải thích cho người khác. Cấu hình chi tiết và câu hỏi hay gặp nằm trong bài học.*
 
-Có ba ngữ nghĩa: **at-most-once** (có thể mất, không bao giờ giao lại), **at-least-once** (không mất, có thể giao lại) và **exactly-once** (mỗi message được xử lý đúng một lần). Ngữ nghĩa là của cả chuỗi, gồm nửa ghi và nửa đọc, và nửa yếu nhất quyết định. Nửa ghi: không retry là có thể mất, có retry là có thể trùng, thêm idempotence thì hết trùng do retry. Nửa đọc: lưu vị trí trước khi xử lý là at-most-once, xử lý xong mới lưu là at-least-once. Kafka mặc định at-least-once.
+Có ba mức bảo đảm. At-most-once: có thể mất, không bao giờ trùng. At-least-once: không mất, có thể trùng. Exactly-once: mỗi message được xử lý đúng một lần.
 
-Exactly-once của Kafka chỉ phủ luồng Kafka → Kafka, bằng transaction và `read_committed`. Ra DB hay API thì phải phối hợp với hệ thống đó; cách thực tế là at-least-once cộng consumer idempotent (khoá dedup trong cùng transaction DB) và outbox ở phía phát. Vì vậy tiền và lệnh đi theo "at-least-once + idempotent", bước xử lý luồng giữa các topic dùng transaction, còn giá hiển thị thời gian thực có thể at-most-once.
+Mức của cả luồng do mắt xích yếu nhất quyết định. Producer cấu hình chuẩn mà consumer lưu vị trí trước khi xử lý thì cả luồng vẫn có thể mất.
 
-## Hỏi nhanh, đáp gọn
+Kafka mặc định at-least-once. Exactly-once của Kafka chỉ đúng khi đọc từ topic và ghi ra topic, bằng transaction. Khi đầu ra là database hay một API bên ngoài, cách thực tế là at-least-once cộng consumer chống trùng.
 
-- **Bên kia nói "mình exactly-once"?** Hỏi "đầu ra cuối là Kafka hay DB?". DB thì thực chất là at-least-once cộng dedup.
-- **Cấu hình at-most-once trong Spring?** Producer `retries: 0`, `acks: "1"`, tắt idempotence; listener `ack.acknowledge()` trước rồi mới xử lý.
-- **Vì sao transaction Kafka không cứu được SMS gửi hai lần?** Cuộc gọi ra ngoài không nằm trong transaction; abort và giao lại thì SMS đi lần nữa.
+Áp vào ngân hàng: tiền và lệnh dùng at-least-once, chống trùng bằng mã sự kiện trong cùng transaction DB. Bước xử lý luồng giữa các topic có thể dùng transaction Kafka. Còn dữ liệu như giá hiển thị thời gian thực thì at-most-once cũng được.

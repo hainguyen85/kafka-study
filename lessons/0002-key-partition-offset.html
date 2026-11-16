@@ -127,6 +127,12 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <figcaption>Flow: một key "to" dồn 70% tải vào một partition; consumer thêm vào không có partition để nhận.</figcaption>
 </figure>
 
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Dùng một partition cho chắc thứ tự được không?</b> Được thứ tự toàn topic nhưng mất song song: một group chỉ có một consumer làm việc. Thường chỉ cần thứ tự theo đối tượng, nên chọn key đúng là đủ.</li>
+<li><b>Không gửi key thì sao?</b> Message được rải theo sticky partition; không có thứ tự giữa các message, hợp với sự kiện độc lập nhau.</li>
+</ul>
+
 <h2>Tự nói thành lời (60 giây)</h2>
 <p>Không nhìn tài liệu, nói to: <i>"Một message có key đi vào partition nào, thứ tự được giữ tới đâu, offset là gì, và vì sao tăng số partition là chuyện lớn."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0002-key-partition-offset.md">tóm tắt Bài 2</a> (đọc sau khi đã tự nói).</p>
