@@ -2,28 +2,59 @@
 
 [Kafka](../README.md) / [Bài 5](0005-consumer-offset-commit.md) / Bài 5b · [Bài 5c](0012-delivery-semantics.md) · [Sổ tay tình huống](../reference/0003-tricky-scenarios.md)
 
-# Bài 5b: Rebalance, khi group chia lại partition
+# Bài 5b: Rebalance
 
-Mỗi lần deploy, scale hay một consumer chết, group phải chia lại partition. Đó là lúc message đứng yên và message bị xử lý lại.
+Rebalance là lúc group chia lại partition. Mỗi lần deploy, scale hay một consumer chết, group phải chia lại partition. Đó là lúc message đứng yên và message bị xử lý lại.
 
 > **Liên quan tới mission** "Sao mỗi lần deploy lag tăng vọt?", "sao có message bị xử lý hai lần dù code không lỗi?". Hai câu này thường có chung một câu trả lời: rebalance. Sau bài này bạn nói được nó xảy ra khi nào, cả group dừng hay chỉ một phần dừng, và cấu hình nào giảm nó.
 
 **Thắng lợi của bài này:** bạn kể được 5 nguyên nhân gây rebalance, dự đoán partition nào dừng ở eager và ở cooperative, và chọn được cấu hình (cooperative, static membership, giao thức consumer, commit khi bị thu hồi) cho một service deploy thường xuyên.
 
-## 1. Kiến thức tối thiểu (có nguồn)
+## 1. Bốn câu hỏi về rebalance
 
-1. **Rebalance là gì.** Group coordinator (một broker) chia lại partition giữa các consumer trong group. Trong lúc chia, partition đang chuyển chủ không có ai đọc. [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
-2. **Khi nào xảy ra.** Javadoc liệt kê: số partition của topic đang đọc thay đổi; topic được tạo hoặc xoá (khi subscribe theo pattern); một member tắt hoặc chết; một member mới vào. Thêm trường hợp thứ năm: consumer không gọi `poll()` trong `max.poll.interval.ms` thì tự rời group (Bài 5). [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
-3. **Coordinator biết consumer chết bằng heartbeat.** Consumer gửi heartbeat định kỳ (`heartbeat.interval.ms`, mặc định 3000). Không nhận được heartbeat trong `session.timeout.ms` (mặc định 45000) thì coordinator loại consumer và rebalance. Hệ quả: consumer bị `kill -9` thì **khoảng 45 giây** partition của nó không ai đọc. Tắt êm (`close()`) thì consumer báo rời group ngay. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
-4. **Rebalance chỉ diễn ra trong `poll()`**, và các callback chạy trên chính thread gọi `poll()`. Consumer đang mắc kẹt xử lý một lô dài thì không tham gia rebalance được, cả group chờ nó. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html)
-5. **Eager và cooperative.**   [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html) [[CooperativeStickyAssignor]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/CooperativeStickyAssignor.html) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
-   - **Eager:** `onPartitionsRevoked` được gọi với *toàn bộ* partition đang giữ: mọi consumer trả hết rồi mới chia lại, cả group dừng.
-   - **Cooperative:** chỉ thu hồi các partition thật sự chuyển chủ; partition giữ nguyên chủ thì đọc tiếp. Phải đặt `CooperativeStickyAssignor` cho *mọi* consumer trong group.
-   - **Mặc định:** `partition.assignment.strategy` = `[RangeAssignor, CooperativeStickyAssignor]`, nghĩa là vẫn dùng `RangeAssignor` (eager). Docs hướng dẫn chuyển sang cooperative bằng một lần rolling restart sau khi bỏ `RangeAssignor` khỏi danh sách.
-6. **Rebalance và trùng message.** Partition chuyển sang consumer khác thì consumer mới đọc từ *offset đã commit*; record đã xử lý mà chưa commit sẽ bị xử lý lại. Docs khuyên commit trong `onPartitionsRevoked` "to prevent duplicate data". Nếu consumer đã bị loại vì hết session timeout thì `onPartitionsLost` được gọi và lúc đó thường không commit được nữa, vì partition có thể đã thuộc consumer khác. Consumer bị đá vì quá `max.poll.interval.ms` mà vẫn commit thì nhận `CommitFailedException`: chỉ member còn trong group mới được commit. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html) [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
-7. **Static membership.** Đặt `group.instance.id` (duy nhất mỗi instance) thì consumer là static member. Restart nhanh, quay lại trước khi hết `session.timeout.ms`, thì không rebalance; static member quá `max.poll.interval.ms` thì partition cũng không bị chia lại ngay mà chờ hết session timeout. Đổi lại: static member chết thật thì partition của nó đứng tới hết session timeout. Mỗi `group.instance.id` chỉ một instance được dùng tại một thời điểm. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
-8. **Giao thức mới `group.protocol=consumer` (KIP-848).** Giao thức classic dựa trên "a group-wide synchronization barrier", nên "a single misbehaving consumer can take down or disturb the whole group". Giao thức mới chia lại từng phần, việc tính toán chuyển về coordinator, và "a consumer should not be impacted at all by a rebalance if its assignment is not changed". Khi dùng nó, `session.timeout.ms` và `heartbeat.interval.ms` phía client không còn tác dụng; broker quyết định. Mặc định của client vẫn là `classic`; dùng được hay không phụ thuộc broker (xem [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)). [[KIP-848]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
-9. **Spring Kafka.** Boot không có property riêng cho `group.instance.id` hay `partition.assignment.strategy`; đặt qua `spring.kafka.consumer.properties[...]`. Với `concurrency` > 1, container tự thêm hậu tố `-n` vào `group.instance.id` cho từng consumer. Muốn chạy code khi bị thu hồi partition: khai báo bean `ConsumerAwareRebalanceListener`, Boot tự gắn vào container. [[Message listener container]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html) [[Rebalance listeners]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/rebalance-listeners.html)
+**Rebalance** là lúc group coordinator (một broker) chia lại partition giữa các consumer trong group. Bốn câu hỏi dưới đây đủ để bạn đoán trước hệ quả của mỗi lần deploy, scale hay sự cố.
+
+```mermaid
+flowchart LR
+A["Consumer vào group"] --> R["REBALANCE"]
+B["Consumer tắt êm"] --> R
+C["Consumer chết: phát hiện sau session.timeout.ms (45 giây)"] --> R
+D["Không poll() trong max.poll.interval.ms (5 phút)"] --> R
+E["Topic thêm partition"] --> R
+R --> S["Partition đổi chủ: không ai đọc trong lúc chia<br/>eager: cả group dừng"]
+R --> X["Chủ mới đọc từ offset đã commit<br/>phần chưa commit bị xử lý lại"]
+class R warn
+class S,X bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Flow: năm nguyên nhân gây rebalance và hai hệ quả của nó.*
+
+### 1.1. Khi nào rebalance xảy ra?
+
+- **Năm trường hợp:** một consumer vào group; một consumer tắt hoặc chết; số partition của topic đang đọc thay đổi; topic được tạo hoặc xoá (khi subscribe theo pattern); consumer không gọi `poll()` trong `max.poll.interval.ms`. [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+- **Chết đột ngột thì phát hiện chậm:** coordinator chỉ loại consumer khi không nhận heartbeat trong `session.timeout.ms` (45 giây). `kill -9` là khoảng 45 giây partition của nó không ai đọc. Tắt êm (`close()`) thì báo rời group ngay. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+- **Rebalance chỉ diễn ra trong `poll()`:** consumer đang kẹt xử lý một lô dài thì cả group chờ nó. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html)
+
+### 1.2. Ai phải dừng?
+
+- **Eager** (`RangeAssignor`, vẫn là mặc định): mọi consumer trả lại *toàn bộ* partition rồi mới chia lại, cả group dừng.
+- **Cooperative** (`CooperativeStickyAssignor`): chỉ partition thật sự đổi chủ bị thu hồi, phần còn lại đọc tiếp. Phải đặt cho *mọi* consumer trong group. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html)
+
+### 1.3. Có xử lý lại không?
+
+- **Có, phần đã xử lý mà chưa commit:** chủ mới đọc từ offset đã commit.
+- **Rời êm thì giảm được:** commit trong `onPartitionsRevoked` "to prevent duplicate data". Chết đột ngột thì không kịp commit. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html)
+- **Bị đá vì quá `max.poll.interval.ms`** mà vẫn commit thì nhận `CommitFailedException`. Kết luận: consumer phải chịu được trùng (Bài 7). [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+
+### 1.4. Giảm rebalance thế nào?
+
+- **Static membership** (`group.instance.id` riêng cho mỗi instance): restart nhanh, quay lại trước khi hết session timeout, thì không rebalance. Đổi lại, chết thật thì partition đứng tới hết session timeout. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+- **Cooperative** (mục 1.2): rebalance vẫn xảy ra nhưng chỉ partition đổi chủ dừng.
+- **Giao thức mới `group.protocol=consumer`** (KIP-848): bỏ rào chắn toàn group, "a consumer should not be impacted at all by a rebalance if its assignment is not changed". Dùng được hay không tuỳ broker. [[KIP-848]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol)
+- **Spring Boot** đặt hai cấu hình đầu qua `spring.kafka.consumer.properties[...]`: [[Rebalance listeners]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/rebalance-listeners.html)
 
 ```
 spring:
@@ -35,6 +66,19 @@ spring:
 ```
 
 Hai dòng này là ví dụ ghép từ docs, chưa chạy thử. `${HOSTNAME}` chỉ ổn định qua restart nếu tên pod ổn định (ví dụ StatefulSet); tên pod ngẫu nhiên làm mất lợi ích của static membership.
+
+### Sáu giá trị mặc định cần nhớ
+
+| Cấu hình (consumer) | Mặc định | Câu hỏi |
+|---|---|---|
+| `session.timeout.ms` | 45000 | 1.1 |
+| `heartbeat.interval.ms` | 3000 | 1.1 |
+| `max.poll.interval.ms` | 300000 | 1.1 |
+| `partition.assignment.strategy` | `[RangeAssignor, CooperativeStickyAssignor]`: dùng Range (eager) | 1.2 |
+| `group.instance.id` | không đặt (dynamic member) | 1.4 |
+| `group.protocol` | `classic` | 1.4 |
+
+[[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
 
 ## 2. Mô phỏng: ai dừng khi group chia lại
 
@@ -118,7 +162,35 @@ Nếu chưa chạy ở Bài 5: `mvn -q spring-boot:run -Dspring-boot.run.profile
 
 Tôi đã đếm số lần rebalance trong log s7
 
-## 4. Usecase oái oăm
+## 4. Đi sâu: chi tiết cho bốn câu hỏi
+
+Đọc sau khi đã làm các bước thực hành.
+
+### Khi nào rebalance xảy ra
+
+- **Rebalance là gì.** Group coordinator (một broker) chia lại partition giữa các consumer trong group. Trong lúc chia, partition đang chuyển chủ không có ai đọc. [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+- **Khi nào xảy ra.** Javadoc liệt kê: số partition của topic đang đọc thay đổi; topic được tạo hoặc xoá (khi subscribe theo pattern); một member tắt hoặc chết; một member mới vào. Thêm trường hợp thứ năm: consumer không gọi `poll()` trong `max.poll.interval.ms` thì tự rời group (Bài 5). [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+- **Coordinator biết consumer chết bằng heartbeat.** Consumer gửi heartbeat định kỳ (`heartbeat.interval.ms`, mặc định 3000). Không nhận được heartbeat trong `session.timeout.ms` (mặc định 45000) thì coordinator loại consumer và rebalance. Hệ quả: consumer bị `kill -9` thì **khoảng 45 giây** partition của nó không ai đọc. Tắt êm (`close()`) thì consumer báo rời group ngay. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+- **Rebalance chỉ diễn ra trong `poll()`**, và các callback chạy trên chính thread gọi `poll()`. Consumer đang mắc kẹt xử lý một lô dài thì không tham gia rebalance được, cả group chờ nó. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html)
+
+### Eager và cooperative
+
+- **Eager và cooperative.**   [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html) [[CooperativeStickyAssignor]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/CooperativeStickyAssignor.html) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+   - **Eager:** `onPartitionsRevoked` được gọi với *toàn bộ* partition đang giữ: mọi consumer trả hết rồi mới chia lại, cả group dừng.
+   - **Cooperative:** chỉ thu hồi các partition thật sự chuyển chủ; partition giữ nguyên chủ thì đọc tiếp. Phải đặt `CooperativeStickyAssignor` cho *mọi* consumer trong group.
+   - **Mặc định:** `partition.assignment.strategy` = `[RangeAssignor, CooperativeStickyAssignor]`, nghĩa là vẫn dùng `RangeAssignor` (eager). Docs hướng dẫn chuyển sang cooperative bằng một lần rolling restart sau khi bỏ `RangeAssignor` khỏi danh sách.
+
+### Rebalance và trùng message
+
+- **Rebalance và trùng message.** Partition chuyển sang consumer khác thì consumer mới đọc từ *offset đã commit*; record đã xử lý mà chưa commit sẽ bị xử lý lại. Docs khuyên commit trong `onPartitionsRevoked` "to prevent duplicate data". Nếu consumer đã bị loại vì hết session timeout thì `onPartitionsLost` được gọi và lúc đó thường không commit được nữa, vì partition có thể đã thuộc consumer khác. Consumer bị đá vì quá `max.poll.interval.ms` mà vẫn commit thì nhận `CommitFailedException`: chỉ member còn trong group mới được commit. [[ConsumerRebalanceListener]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html) [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+
+### Static membership, giao thức mới, Spring Kafka
+
+- **Static membership.** Đặt `group.instance.id` (duy nhất mỗi instance) thì consumer là static member. Restart nhanh, quay lại trước khi hết `session.timeout.ms`, thì không rebalance; static member quá `max.poll.interval.ms` thì partition cũng không bị chia lại ngay mà chờ hết session timeout. Đổi lại: static member chết thật thì partition của nó đứng tới hết session timeout. Mỗi `group.instance.id` chỉ một instance được dùng tại một thời điểm. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+- **Giao thức mới `group.protocol=consumer` (KIP-848).** Giao thức classic dựa trên "a group-wide synchronization barrier", nên "a single misbehaving consumer can take down or disturb the whole group". Giao thức mới chia lại từng phần, việc tính toán chuyển về coordinator, và "a consumer should not be impacted at all by a rebalance if its assignment is not changed". Khi dùng nó, `session.timeout.ms` và `heartbeat.interval.ms` phía client không còn tác dụng; broker quyết định. Mặc định của client vẫn là `classic`; dùng được hay không phụ thuộc broker (xem [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)). [[KIP-848]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+- **Spring Kafka.** Boot không có property riêng cho `group.instance.id` hay `partition.assignment.strategy`; đặt qua `spring.kafka.consumer.properties[...]`. Với `concurrency` > 1, container tự thêm hậu tố `-n` vào `group.instance.id` cho từng consumer. Muốn chạy code khi bị thu hồi partition: khai báo bean `ConsumerAwareRebalanceListener`, Boot tự gắn vào container. [[Message listener container]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html) [[Rebalance listeners]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/rebalance-listeners.html)
+
+## 5. Usecase oái oăm
 
 ### (a) Gọi xe: rolling deploy 10 pod làm điều phối đứng hình
 
@@ -193,13 +265,13 @@ Note over C1,C2: Hạ session.timeout.ms thì phát hiện nhanh hơn, nhưng GC
 - **Hạ `session.timeout.ms` cho phát hiện nhanh?** Phát hiện nhanh hơn, nhưng GC pause dài có thể bị coi là chết và gây rebalance oan.
 - **Thêm consumer có làm nhanh hơn không?** Chỉ tới số partition; thừa thì ngồi chờ, và mỗi lần thêm bớt là một lần rebalance.
 
-## 5. Tự nói thành lời
+## 6. Tự nói thành lời
 
 Trong 60 giây: *"Rebalance xảy ra khi ... Với eager thì ..., với cooperative thì ... Consumer chết đột ngột thì ... vì ... Để deploy không làm group đứng, mình cấu hình ..."*
 
 **Ôn nhanh:** [tóm tắt Bài 5b](../summaries/0011-rebalance.md) (đọc sau khi đã tự nói).
 
-## 6. Kiểm tra
+## 7. Kiểm tra
 
 <!-- quiz:quiz -->
 

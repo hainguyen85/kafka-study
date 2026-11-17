@@ -10,25 +10,65 @@
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0006-error-handling-dlt.html">Bài 6</a> / Bài 7 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a></nav>
 
-<h1>Bài 7: Không mất nghĩa là có thể trùng. Làm sao để trùng cũng không sao?</h1>
-<p class="lede">Bài 4-6 đẩy bạn về phía "ít nhất một lần". Bài này lo nửa còn lại: tác dụng phụ chỉ xảy ra một lần dù message được giao nhiều lần.</p>
+<h1>Bài 7: Idempotent consumer, outbox, transaction</h1>
+<p class="lede">Không mất nghĩa là có thể trùng. Bài 4-6 đẩy bạn về phía "ít nhất một lần"; bài này lo nửa còn lại: tác dụng phụ chỉ xảy ra một lần dù message được giao nhiều lần.</p>
 
 <div class="mission"><b>Liên quan tới mission</b>
 "Không mất" + at-least-once = có trùng. Ai đó trong họp sẽ hỏi: "vậy có bị trừ tiền hai lần không?". Bạn cần ba câu trả lời có tên: idempotent consumer, outbox, transaction; và biết phạm vi của "exactly-once" để không hứa quá.</div>
 
 <p class="win"><b>Thắng lợi của bài này:</b> bạn thiết kế được consumer chống trùng đúng chỗ (cùng transaction DB với tác dụng phụ), giải thích vì sao "dedup trong RAM" vẫn sai, và nói được exactly-once của Kafka phủ tới đâu và dừng ở đâu.</p>
 
-<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
-<ol class="steps">
-<li><b>Ba ngữ nghĩa giao hàng</b> theo docs: at-most-once (có thể mất, không bao giờ gửi lại), at-least-once (không mất, có thể trùng), exactly-once (mỗi message có tác dụng đúng một lần). Docs nói cách đạt at-most-once là tắt retry ở producer và commit offset <em>trước</em> khi xử lý; exactly-once của Kafka dùng transaction cho luồng đọc Kafka → ghi Kafka; khi ghi sang hệ thống ngoài, cần phối hợp giữa offset và đầu ra. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<h2>1. Ba công cụ</h2>
+<p>At-least-once nghĩa là message có thể tới nhiều lần (ba ngữ nghĩa giao hàng ở <a href="0012-delivery-semantics.html">Bài 5c</a>). Ba công cụ dưới đây đứng ở ba chỗ khác nhau của luồng: <b>outbox</b> ở phía phát, <b>transaction</b> trong Kafka, <b>idempotent consumer</b> ở phía nhận.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+A["Phía phát: Service"] -->|"một transaction DB"| OB[("Dữ liệu + bảng outbox")]
+OB --> RL["Relay đọc outbox, gửi lên Kafka"]
+RL --> X["Trong Kafka: đọc topic A, ghi topic B, commit offset<br/>cùng một transaction"]
+X --> C["Phía nhận: Consumer"]
+C -->|"một transaction DB"| DB[("UNIQUE(eventId) + nghiệp vụ")]
+class OB,X,DB ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: outbox ở phía phát, transaction cho bước Kafka → Kafka, idempotent consumer ở phía nhận.</figcaption>
+</figure>
 
-<li><b>Cách docs mô tả cho hệ thống ngoài:</b> lưu offset <em>cùng</em> kết quả trong một giao dịch ở hệ thống đích, và khi khởi động lại thì <code>seek()</code> tới offset đã lưu. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc: storing offsets outside Kafka]</a></li>
-<li><b>Idempotent producer chỉ phủ "một session"</b>; resend ở tầng ứng dụng "cannot be de-duplicated" (Bài 4). <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a></li>
-<li><b>Idempotent consumer và outbox là pattern ứng dụng.</b> Cả Apache lẫn Spring Kafka đều không có tài liệu chính thức cho chúng (<a href="../research/0002-spring-kafka.md">research/0002, mục 2.4</a>). Bài này dạy chúng như thiết kế, không như tính năng.</li>
-<li><b>Transaction trong Spring Boot:</b> chỉ cần đặt <code>spring.kafka.producer.transaction-id-prefix</code> thì Boot tự dựng <code>KafkaTransactionManager</code> và gắn vào container. <code>transactional.id</code> = prefix + n; prefix phải khác nhau ở mỗi instance. Container mở transaction, gửi offset vào cùng transaction (<code>sendOffsetsToTransaction</code>), và rollback + giao lại khi listener ném lỗi. <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a> <a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html">[Exactly Once]</a></li>
-<li><b>Phía đọc:</b> consumer cần <code>isolation.level=read_committed</code> (mặc định <code>read_uncommitted</code>) và <code>enable.auto.commit=false</code>. <code>read_committed</code> chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. <code>transaction.timeout.ms</code> mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense">[KIP-890]</a></li>
-<li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
-</ol>
+<h3>1.1. Idempotent consumer: trùng cũng không sao</h3>
+<ul class="tight">
+<li><b>Chống trùng ở phía nhận, bằng mã nghiệp vụ của sự kiện</b> (<code>eventId</code>): trong cùng một transaction DB, ghi mã vào bảng có khoá duy nhất rồi mới thực hiện tác dụng phụ; gặp lại mã cũ thì bỏ qua. Commit DB xong mới commit offset.</li>
+<li><b>Không dùng offset làm khoá:</b> ứng dụng gửi lại tạo record mới với offset mới. Idempotent producer cũng không giúp, vì nó chỉ phủ retry trong một session; resend ở tầng ứng dụng "cannot be de-duplicated". <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a></li>
+<li><b>Không dedup trong RAM:</b> restart là mất trí nhớ, và instance khác không thấy.</li>
+<li>Đây là pattern ứng dụng, không phải tính năng của Kafka. Cách docs Apache mô tả cho hệ thống ngoài là lưu offset cùng kết quả trong một giao dịch ở hệ thống đích. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc: storing offsets outside Kafka]</a></li>
+</ul>
+
+<h3>1.2. Outbox: ghi DB và gửi Kafka không lệch nhau</h3>
+<ul class="tight">
+<li><b>Vấn đề "ghi kép"</b>: lưu đơn vào DB rồi gửi Kafka là hai hệ thống không có transaction chung. Crash ở giữa là DB có đơn mà Kafka không có sự kiện.</li>
+<li><b>Outbox:</b> ghi sự kiện vào bảng outbox <em>trong cùng transaction DB</em> với dữ liệu; một tiến trình relay đọc bảng đó, gửi lên Kafka rồi đánh dấu đã gửi.</li>
+<li><b>Relay có thể gửi hai lần</b> (crash giữa gửi và đánh dấu), nên phía nhận vẫn phải là idempotent consumer. Outbox cũng là pattern ứng dụng.</li>
+</ul>
+
+<h3>1.3. Transaction: exactly-once trong Kafka</h3>
+<ul class="tight">
+<li><b>Transaction gộp ba việc</b> thành một: đọc topic đầu vào, ghi topic đầu ra, commit offset đầu vào. Hoặc cả ba xảy ra, hoặc không việc nào. Đó là exactly-once cho luồng Kafka → Kafka. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<li><b>Spring Boot:</b> đặt <code>spring.kafka.producer.transaction-id-prefix</code> là đủ để Boot dựng <code>KafkaTransactionManager</code> và gắn vào container; listener ném lỗi thì transaction rollback và record được giao lại. <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
+<li><b>Phía đọc phải đặt <code>isolation.level=read_committed</code>.</b> Mặc định <code>read_uncommitted</code> trả về mọi record, kể cả record của transaction đã abort. Transaction đang mở chặn consumer <code>read_committed</code> ở LSO (last stable offset) cho tới khi nó kết thúc, hoặc hết <code>transaction.timeout.ms</code> (60 giây). <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a> <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+<li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB hay API bên ngoài. Đầu ra là DB thì quay về idempotent consumer.</li>
+</ul>
+
+<h3>Năm điều cần nhớ</h3>
+<table>
+<tr><th>Thứ</th><th>Giá trị / quy tắc</th><th>Công cụ</th></tr>
+<tr><td>Khoá chống trùng</td><td><code>eventId</code> (mã nghiệp vụ), không phải offset</td><td>1.1</td></tr>
+<tr><td>Nơi đặt dedup</td><td>Cùng transaction DB với tác dụng phụ, rồi mới commit offset</td><td>1.1</td></tr>
+<tr><td>Phía phát ghi DB + gửi sự kiện</td><td>Bảng outbox trong cùng transaction DB</td><td>1.2</td></tr>
+<tr><td><code>spring.kafka.producer.transaction-id-prefix</code></td><td>Bật transaction; prefix khác nhau mỗi instance</td><td>1.3</td></tr>
+<tr><td><code>isolation.level</code></td><td>Mặc định <code>read_uncommitted</code>; dùng <code>read_committed</code> khi đọc topic có transaction</td><td>1.3</td></tr>
+</table>
+
 
 <p><b>Chọn ngữ nghĩa nào cho luồng nào, và cấu hình Spring Boot cho từng loại:</b> xem <a href="0012-delivery-semantics.html">Bài 5c</a>. Bài này đi sâu vào hai công cụ của dòng cuối bảng đó: idempotent consumer với outbox, và transaction.</p>
 
@@ -77,7 +117,29 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <p><b>Dọn dẹp:</b> bảng <code>processed_event</code> lớn dần; giữ theo cửa sổ thời gian lớn hơn thời gian tối đa mà một bản trùng có thể xuất hiện (retention của topic).</p>
 </details>
 
-<h2>4. Usecase oái oăm</h2>
+<h2>4. Đi sâu: chi tiết cho ba công cụ</h2>
+<p>Đọc sau khi đã làm lab và bài tập thiết kế.</p>
+
+<h3>Ngữ nghĩa giao hàng và cách docs mô tả cho hệ thống ngoài</h3>
+<ul class="tight">
+<li><b>Ba ngữ nghĩa giao hàng</b> theo docs: at-most-once (có thể mất, không bao giờ gửi lại), at-least-once (không mất, có thể trùng), exactly-once (mỗi message có tác dụng đúng một lần). Docs nói cách đạt at-most-once là tắt retry ở producer và commit offset <em>trước</em> khi xử lý; exactly-once của Kafka dùng transaction cho luồng đọc Kafka → ghi Kafka; khi ghi sang hệ thống ngoài, cần phối hợp giữa offset và đầu ra. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a></li>
+<li><b>Cách docs mô tả cho hệ thống ngoài:</b> lưu offset <em>cùng</em> kết quả trong một giao dịch ở hệ thống đích, và khi khởi động lại thì <code>seek()</code> tới offset đã lưu. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc: storing offsets outside Kafka]</a></li>
+<li><b>Idempotent producer chỉ phủ "một session"</b>; resend ở tầng ứng dụng "cannot be de-duplicated" (Bài 4). <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html">[KafkaProducer javadoc]</a></li>
+</ul>
+
+<h3>Idempotent consumer và outbox là pattern ứng dụng</h3>
+<ul class="tight">
+<li><b>Idempotent consumer và outbox là pattern ứng dụng.</b> Cả Apache lẫn Spring Kafka đều không có tài liệu chính thức cho chúng (<a href="../research/0002-spring-kafka.md">research/0002, mục 2.4</a>). Bài này dạy chúng như thiết kế, không như tính năng.</li>
+</ul>
+
+<h3>Transaction trong Spring, phía đọc và phạm vi</h3>
+<ul class="tight">
+<li><b>Transaction trong Spring Boot:</b> chỉ cần đặt <code>spring.kafka.producer.transaction-id-prefix</code> thì Boot tự dựng <code>KafkaTransactionManager</code> và gắn vào container. <code>transactional.id</code> = prefix + n; prefix phải khác nhau ở mỗi instance. Container mở transaction, gửi offset vào cùng transaction (<code>sendOffsetsToTransaction</code>), và rollback + giao lại khi listener ném lỗi. <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a> <a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html">[Exactly Once]</a></li>
+<li><b>Phía đọc:</b> consumer cần <code>isolation.level=read_committed</code> (mặc định <code>read_uncommitted</code>) và <code>enable.auto.commit=false</code>. <code>read_committed</code> chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. <code>transaction.timeout.ms</code> mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense">[KIP-890]</a></li>
+<li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
+</ul>
+
+<h2>5. Usecase oái oăm</h2>
 <h3>(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
 <p>Dịch vụ lưu đơn vào DB rồi <code>send</code> sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. <b>Outbox</b>: ghi sự kiện vào bảng <code>outbox</code> <em>cùng transaction DB</em> với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.</p>
 <figure class="diagram">
@@ -196,11 +258,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <li><b>Bảng dedup giữ bao lâu?</b> Lâu hơn khoảng thời gian một bản trùng còn có thể xuất hiện, thường gắn với retention của topic.</li>
 </ul>
 
-<h2>5. Tự nói thành lời</h2>
+<h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."</i> Dùng: at-least-once, idempotent, outbox, <code>read_committed</code>, LSO.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0007-idempotent-consumer-transactions.md">tóm tắt Bài 7</a> (đọc sau khi đã tự nói).</p>
 
-<h2>6. Kiểm tra</h2>
+<h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>

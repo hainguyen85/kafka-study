@@ -10,26 +10,86 @@
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0004-producer-durability.html">Bài 4</a> / Bài 5 · <a href="../reference/0001-core-concepts.html">Bảng tra</a> · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a></nav>
 
-<h1>Bài 5: Producer hoàn hảo vẫn có thể bị consumer làm mất message</h1>
-<p class="lede">Offset commit là lời hứa "tôi đã xử lý tới đây". Lời hứa đó có thể được đưa ra sớm hơn sự thật.</p>
+<h1>Bài 5: Consumer, offset, commit, rebalance</h1>
+<p class="lede">Producer hoàn hảo vẫn có thể bị consumer làm mất message. Commit là lời hứa "tôi đã xử lý tới đây", và lời hứa đó có thể được đưa ra sớm hơn sự thật.</p>
 
 <div class="mission"><b>Liên quan tới mission</b>
 "Không mất" là một chuỗi: producer ghi bền (Bài 4), broker giữ, consumer xử lý rồi mới ghi nhận. Bài này lo mắt xích cuối. Câu bạn sẽ gặp: "service này restart thì có mất hoặc xử lý lại message không?". Bạn trả lời được bằng chế độ commit và vị trí của lệnh commit trong code.</div>
 
 <p class="win"><b>Thắng lợi của bài này:</b> với một consumer cho trước, bạn chỉ ra được khi nào commit xảy ra, "crash ở đây thì mất hay trùng", và chọn cấu hình Spring Kafka đảm bảo at-least-once. Bạn cũng gỡ rối được một group bị rebalance liên tục bằng CLI.</p>
 
-<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
-<ol class="steps">
-<li><b>Vị trí và commit.</b> Vị trí của consumer ở mỗi partition là một số nguyên: offset của message <em>kế tiếp</em> sẽ đọc. Commit lưu số đó (vào topic nội bộ <code>__consumer_offsets</code>); sau restart consumer chạy tiếp từ offset đã commit. <a href="https://kafka.apache.org/44/design/design/">[Design: consumer position]</a> <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
-<li><b>Mặc định của Kafka client (4.4):</b> <code>enable.auto.commit=true</code>, <code>auto.commit.interval.ms=5000</code>, <code>auto.offset.reset=latest</code>, <code>max.poll.records=500</code>, <code>max.poll.interval.ms=300000</code>, <code>session.timeout.ms=45000</code>, <code>heartbeat.interval.ms=3000</code>, <code>group.protocol=classic</code>, <code>isolation.level=read_uncommitted</code>. <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
-<li><b>Auto-commit chạy bên trong <code>poll()</code>.</b> Nếu bạn chưa xử lý xong mọi record của lần <code>poll</code> trước khi gọi <code>poll</code> kế tiếp (hoặc <code>close</code>), "committed offset can move ahead of consumption": offset đi trước việc xử lý, crash là mất. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
-<li><b>Spring Kafka đổi mặc định:</b> container có <code>AckMode=BATCH</code> và đặt <code>enable.auto.commit=false</code> "unless explicitly set". Tức là với Boot không cấu hình gì, commit do container làm sau khi xử lý xong lô, an toàn hơn Kafka thuần. Muốn kiểm soát từng record: <code>ack-mode=manual_immediate</code> và nhận <code>Acknowledgment</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html">[Message listener container]</a></li>
-<li><b>Bẫy đã gặp khi chạy thật:</b> khai báo tham số <code>Acknowledgment</code> ở chế độ <em>không</em> manual làm Spring ném <code>IllegalStateException</code> (không phải đưa <code>null</code> như research ban đầu ghi); đã đính chính ở <a href="../research/0002-spring-kafka.md">research/0002</a>.</li>
-<li><b>Sống chết của consumer có hai đồng hồ.</b> Heartbeat/session (<code>session.timeout.ms</code>) và <em>khoảng cách giữa hai lần <code>poll</code></em> (<code>max.poll.interval.ms</code>). Quá hạn thứ hai thì consumer rời group, rebalance xảy ra, <code>commitSync</code> ném <code>CommitFailedException</code>. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
-<li><b>Giảm rebalance khi deploy:</b> static membership (<code>group.instance.id</code> khác nhau mỗi instance: restart không rebalance, đổi lại partition được giữ tới hết session timeout); assignor <code>CooperativeStickyAssignor</code>; hoặc giao thức mới <code>group.protocol=consumer</code> (KIP-848, GA từ Kafka 4.0; khi đó <code>session.timeout.ms</code> và <code>heartbeat.interval.ms</code> phía client không áp dụng). <a href="https://kafka.apache.org/44/design/design/">[Design]</a> <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol">[KIP-848]</a></li>
-<li><b>Hết hạn offset.</b> Offset đã commit bị xoá sau <code>offsets.retention.minutes</code> (mặc định 10080 phút, 7 ngày) kể từ khi group rỗng; khi không còn offset hợp lệ, <code>auto.offset.reset</code> quyết định (mặc định <code>latest</code>). Docs cảnh báo thêm partition khi dùng <code>latest</code> "may cause silent message loss". <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
-<li><b>CLI cứu hộ:</b> <code>kafka-consumer-groups.sh --describe</code> hiện CURRENT-OFFSET, LOG-END-OFFSET, LAG; <code>--reset-offsets</code> (<code>--to-earliest</code>, <code>--to-datetime</code>, <code>--shift-by</code>, <code>--by-duration</code>, <code>--to-offset</code>) mặc định chỉ xem trước, và group phải không có member đang chạy. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
-</ol>
+<h2>1. Bốn khái niệm</h2>
+<p>Bài này đi qua bốn khái niệm theo đúng thứ tự chúng phụ thuộc nhau: <b>consumer</b> đọc dữ liệu, <b>offset</b> đánh dấu đọc tới đâu, <b>commit</b> lưu dấu đó lại, <b>rebalance</b> là lúc việc đọc được chia lại. Mỗi khái niệm chỉ có vài ý cần nhớ.</p>
+
+<h3>1.1. Consumer và consumer group</h3>
+<ul class="tight">
+<li><b>Consumer kéo dữ liệu</b> bằng vòng lặp <code>poll()</code>: lấy một lô record, xử lý, rồi <code>poll()</code> tiếp. Broker không đẩy dữ liệu tới consumer. <a href="https://kafka.apache.org/44/design/design/">[Design: push vs pull]</a></li>
+<li><b>Consumer cùng <code>group.id</code> là một group</b>, chia nhau các partition của topic: mỗi partition chỉ một consumer trong group đọc. Thêm consumer thì chia được việc, nhưng không quá số partition. <a href="https://kafka.apache.org/intro">[Introduction]</a></li>
+<li><b>Hai group khác nhau đọc độc lập</b>, mỗi group nhận đủ mọi record, theo tốc độ riêng.</li>
+</ul>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart LR
+subgraph T ["Topic orders: 3 partition"]
+P0["P0"]
+P1["P1"]
+P2["P2"]
+end
+subgraph GA ["Group inventory: chia nhau partition"]
+C1["Consumer 1"]
+C2["Consumer 2"]
+end
+subgraph GB ["Group notification: nhận đủ mọi record"]
+N1["Consumer A"]
+end
+P0 --> C1
+P1 --> C1
+P2 --> C2
+P0 -.-> N1
+P1 -.-> N1
+P2 -.-> N1
+</script>
+<figcaption>Kiến trúc: trong một group mỗi partition chỉ một consumer đọc; hai group đọc cùng topic một cách độc lập.</figcaption>
+</figure>
+
+<h3>1.2. Offset</h3>
+<ul class="tight">
+<li><b>Offset</b> là số thứ tự của record trong một partition, tăng dần từ 0. <a href="https://kafka.apache.org/intro">[Introduction]</a></li>
+<li><b>Vị trí (position)</b> của consumer là offset của record <em>kế tiếp</em> sẽ đọc. <b>Offset đã commit</b> là vị trí đã được lưu lại an toàn. Hai số này khác nhau: consumer đọc tới đâu thì vị trí tới đó, còn offset đã commit chỉ đổi khi có commit. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
+<li><b>Lag</b> là khoảng cách từ offset đã commit tới cuối log: còn bao nhiêu record chưa xử lý xong. Xem bằng <code>kafka-consumer-groups.sh --describe</code>. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
+<li><b>Khi không có offset đã commit</b> (group mới, hoặc offset đã hết hạn sau 7 ngày group rỗng), <code>auto.offset.reset</code> quyết định đọc từ đâu: <code>latest</code> (mặc định, bỏ qua dữ liệu cũ) hoặc <code>earliest</code> (đọc từ đầu). <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a> <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs: offsets.retention.minutes]</a></li>
+</ul>
+<table>
+<tr><th>offset</th><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td><td>8</td><td>9</td></tr>
+<tr><th>trạng thái</th><td>commit ✓</td><td>commit ✓</td><td>commit ✓</td><td>đã đọc</td><td>đã đọc</td><td>đã đọc</td><td>chưa đọc</td><td>chưa đọc</td><td>chưa đọc</td><td>chưa đọc</td></tr>
+</table>
+<p>"commit ✓": đã xử lý và đã commit. "đã đọc": consumer đã nhận và xử lý, nhưng chưa commit. Ở ví dụ trên: offset đã commit = 3, vị trí = 6, cuối log = 10, lag = 7. Crash lúc này thì consumer mới đọc lại từ 3, nên 3, 4, 5 bị xử lý lại.</p>
+
+<h3>1.3. Commit</h3>
+<ul class="tight">
+<li><b>Commit</b> là lưu vị trí vào topic nội bộ <code>__consumer_offsets</code>. Restart hay đổi consumer thì đọc tiếp từ offset đã commit. <a href="https://kafka.apache.org/44/design/design/">[Design: consumer position]</a></li>
+<li><b>Mọi câu hỏi "có mất không" quy về một câu: commit trước hay sau khi xử lý xong?</b> Commit trước rồi crash: record chưa xử lý bị bỏ qua, tức là <b>mất</b>. Xử lý xong rồi mới commit: crash chỉ làm <b>xử lý lại</b> (at-least-once).</li>
+<li><b>Ai commit, khi nào:</b> Kafka client thuần mặc định tự commit định kỳ (<code>enable.auto.commit=true</code>, 5 giây, xét trong <code>poll()</code>). Spring Boot tắt cơ chế đó; <em>container</em> commit sau khi listener xử lý xong lô (<code>AckMode.BATCH</code>). Muốn commit từng record sau khi xử lý: <code>ack-mode: manual_immediate</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html">[Spring: message listener container]</a></li>
+</ul>
+
+<h3>1.4. Rebalance</h3>
+<ul class="tight">
+<li><b>Rebalance</b> là lúc group chia lại partition giữa các consumer: khi có consumer vào, rời, chết, hoặc xử lý quá chậm. Trong lúc chia, partition đang đổi chủ không ai đọc. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
+<li><b>Hai đồng hồ quyết định "consumer còn sống":</b> heartbeat phải tới trong <code>session.timeout.ms</code> (45 giây), và hai lần <code>poll()</code> không được cách nhau quá <code>max.poll.interval.ms</code> (5 phút). Quá đồng hồ thứ hai thì consumer bị coi là chết dù process vẫn chạy, và commit sau đó bị từ chối (<code>CommitFailedException</code>). <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
+<li><b>Rebalance gây xử lý lại:</b> consumer nhận partition đọc từ offset đã commit, nên phần đã xử lý mà chưa commit bị làm lại. Cách giảm số lần rebalance (cooperative, static membership) ở <a href="0011-rebalance.html">Bài 5b</a>.</li>
+</ul>
+
+<h3>Sáu giá trị mặc định cần nhớ</h3>
+<table>
+<tr><th>Cấu hình (Kafka client 4.4)</th><th>Mặc định</th><th>Thuộc khái niệm</th></tr>
+<tr><td><code>enable.auto.commit</code></td><td><code>true</code> (Spring Boot đặt <code>false</code>)</td><td>Commit</td></tr>
+<tr><td><code>auto.commit.interval.ms</code></td><td>5000</td><td>Commit</td></tr>
+<tr><td><code>auto.offset.reset</code></td><td><code>latest</code></td><td>Offset</td></tr>
+<tr><td><code>max.poll.records</code></td><td>500</td><td>Consumer</td></tr>
+<tr><td><code>max.poll.interval.ms</code></td><td>300000 (5 phút)</td><td>Rebalance</td></tr>
+<tr><td><code>session.timeout.ms</code></td><td>45000 (45 giây)</td><td>Rebalance</td></tr>
+</table>
+<p><a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></p>
 
 <h2>2. Mô phỏng: chỗ nào của dòng thời gian thì crash gây mất?</h2>
 <p>Partition có 9 record, mỗi <code>poll()</code> trả 3 (như <code>max.poll.records=3</code>). Mô phỏng theo mô hình ở mục 1 (không phải client thật).</p>
@@ -51,7 +111,10 @@
 <div class="expect">Mong đợi: không bao giờ mất; trùng nhiều nhất một record (record đang xử lý lúc crash). Muốn hết trùng phải chống trùng ở phía xử lý (Bài 7).</div>
 </div>
 
-<h3>Commit offset xảy ra lúc nào, cụ thể</h3>
+<h2>3. Đi sâu: commit xảy ra lúc nào, chọn chế độ nào</h2>
+<p>Phần này mở rộng khái niệm commit (mục 1.3) cho câu hỏi "chính xác lúc nào thì commit", ở cả Kafka client thuần và Spring Kafka. Đọc sau khi đã chạy mô phỏng.</p>
+
+<h3>Kafka client và Spring Kafka commit lúc nào</h3>
 <p><b>Kafka client với <code>enable.auto.commit=true</code></b> (mặc định của client thuần). Offset được commit:</p>
 <ul class="tight">
 <li><b>khi đã hết chu kỳ, và chỉ trong lần gọi <code>poll()</code> kế tiếp</b>: <code>auto.commit.interval.ms</code> (mặc định 5000) chỉ là một bộ đếm giờ. Consumer kiểm tra nó bên trong <code>poll()</code> (và khi đổi assignment). Hết giờ trong lúc ứng dụng còn đang xử lý thì chưa có gì xảy ra. Tới lần <code>poll()</code> sau, consumer gửi commit bất đồng bộ cho <em>vị trí</em> hiện tại: offset kế tiếp sau record cuối cùng mà <code>poll()</code> đã trả cho ứng dụng. Xử lý ngay trong thread gọi <code>poll()</code> thì tới lúc đó mọi record ấy đã xong. Giao record cho thread khác rồi gọi <code>poll()</code> tiếp thì vị trí đã vượt qua record chưa xử lý, đúng điều javadoc cảnh báo: "committed offset to get ahead of the consumed position, which results in missing records";</li>
@@ -59,7 +122,7 @@
 <li><b>trước khi partition bị chia lại</b>: "an async commit (based on the old assignment) will be triggered before the new assignment replaces the old one".</li>
 </ul>
 <p><a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a> Docs không nói thẳng "commit trong <code>poll()</code>"; điều đó được kiểm trong source kafka-clients 4.2.0: giao thức classic gọi <code>maybeAutoCommitOffsetsAsync</code> từ <code>ConsumerCoordinator.poll</code> <a href="https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/consumer/internals/ConsumerCoordinator.java">[ConsumerCoordinator]</a>; giao thức consumer (KIP-848) cập nhật bộ đếm và commit khi xử lý sự kiện poll của ứng dụng (<code>updateTimerAndMaybeCommit</code>) <a href="https://github.com/apache/kafka/blob/4.2.0/clients/src/main/java/org/apache/kafka/clients/consumer/internals/events/ApplicationEventProcessor.java">[ApplicationEventProcessor]</a>. Cả hai commit <code>subscriptions.allConsumed()</code>, tức vị trí đã trả cho ứng dụng.</p>
-<p><b>Spring Boot + Spring Kafka.</b> Framework đặt <code>enable.auto.commit=false</code> "unless explicitly set", và <em>container</em> commit theo <code>AckMode</code> (mặc định <code>BATCH</code>), dùng <code>commitSync</code> vì <code>syncCommits</code> mặc định <code>true</code>: <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html">[Message listener container]</a></p>
+<p><b>Spring Boot + Spring Kafka.</b> Framework đặt <code>enable.auto.commit=false</code> "unless explicitly set", và <em>container</em> commit theo <code>AckMode</code> (mặc định <code>BATCH</code>), dùng <code>commitSync</code> vì <code>syncCommits</code> mặc định <code>true</code>. Bẫy đã gặp khi chạy lab: khai báo tham số <code>Acknowledgment</code> trong listener mà ack-mode <em>không</em> phải manual thì Spring ném <code>IllegalStateException</code>, không phải truyền <code>null</code> (đã đính chính ở <a href="../research/0002-spring-kafka.md">research/0002</a>). Các thời điểm commit theo docs: <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html">[Message listener container]</a></p>
 <table>
 <tr><th>AckMode</th><th>Container commit khi nào (docs)</th><th>Crash giữa chừng thì xử lý lại tối đa</th></tr>
 <tr><td><code>BATCH</code> (mặc định)</td><td>"when all the records returned by the poll() have been processed"</td><td>cả lô của lần poll đó (tới <code>max.poll.records</code>, mặc định 500)</td></tr>
@@ -123,7 +186,7 @@ Note over App,G: Một thread: lúc commit 500, record 0..499 đã xử lý xong
 </table>
 <p>Đánh đổi của C: nhiều lần commit hơn nên thông lượng thấp hơn A. Nếu đo thấy chậm, có thể commit theo nhóm nhỏ (<code>COUNT</code>/<code>TIME</code>) và chấp nhận xử lý lại nhiều hơn một record khi crash; điều kiện là consumer idempotent. Ba chế độ này là ba điểm trên cùng một trục: commit sớm thì nhanh và có thể mất, commit muộn thì chậm hơn và có thể trùng. Ghép với phía producer thành ngữ nghĩa của cả luồng: <a href="0012-delivery-semantics.html">Bài 5c</a>.</p>
 
-<h2>3. Lab thật: <code>labs/05-scenarios</code></h2>
+<h2>4. Lab thật: <code>labs/05-scenarios</code></h2>
 <p>Cùng code nền, mỗi tình huống là một profile. Dữ liệu và <code>group.id</code> của mỗi lần chạy gắn mã riêng nên chạy lại không bị nhiễu. Chạy trên cụm 3 broker của Bài 3 (Maven phải dùng JDK 17+, xem README).</p>
 <div class="warn"><b>Trạng thái trung thực:</b> <code>s7</code> và <code>s6fix</code> đã chạy trên broker nhúng 1 node: s7 cho thấy cả 3 offset đầu được xử lý <b>3 lần</b>; s6fix cho MẤT 0, TRÙNG 0 (crash giả lập đóng êm). <code>s6</code> (profile gây mất) đã sửa lỗi sau lần chạy thử nhưng <b>chưa chạy lại</b>, nên kết quả dưới đây là dự đoán. Cả hai chưa chạy với cụm 3 broker. Lệnh <code>spring-boot.run.*</code> chưa kiểm chứng trên máy bạn; README có cách dự phòng bằng <code>java -jar</code>.</div>
 
@@ -190,7 +253,7 @@ $J --spring.profiles.active=consumer --lab.instance=c1 --lab.group=g1     # đ�
 <label class="tick"><input type="checkbox" data-step="3"> Tôi đã xem lag và reset offset bằng CLI</label>
 </div>
 
-<h2>4. Usecase oái oăm (mỗi cái một miền)</h2>
+<h2>5. Usecase oái oăm (mỗi cái một miền)</h2>
 <h3>(a) Gửi email/SMS thông báo: vừa mất vừa trùng</h3>
 <p>Listener đẩy việc gửi email sang thread pool rồi return để "nhanh". Auto-commit đẩy offset đi; crash giữa chừng làm vài email không bao giờ đi (mất), và nếu bạn commit cuối lô thì vài cái khác đi hai lần. Xử lý: ack sau khi xong (Thử 3), nhưng nếu việc gửi cần song song thì phải <em>đợi</em> worker xong trước khi ack (hoặc quản lý offset theo worker). Đánh đổi: tốc độ lấy an toàn.</p>
 <figure class="diagram">
@@ -297,11 +360,11 @@ L->>K: ack
 <li><b>Muốn xử lý lại message cũ thì làm sao?</b> Dừng group rồi dùng <code>kafka-consumer-groups.sh --reset-offsets</code> (xem trước, rồi <code>--execute</code>).</li>
 </ul>
 
-<h2>5. Tự nói thành lời</h2>
+<h2>6. Tự nói thành lời</h2>
 <p>Trong 45 giây: <i>"Consumer crash giữa chừng thì ... vì offset được commit ... Để không mất, mình ... và chấp nhận ... Để hết trùng thì ..."</i> Dùng: poll, commit, at-least-once, rebalance, <code>max.poll.interval.ms</code>.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0005-consumer-offset-commit.md">tóm tắt Bài 5</a> (đọc sau khi đã tự nói).</p>
 
-<h2>6. Kiểm tra</h2>
+<h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -315,6 +378,7 @@ L->>K: ack
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/flow-anim.js"></script>
 <script src="../assets/commit-sim.js"></script>
 <script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>

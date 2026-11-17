@@ -10,39 +10,79 @@
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0002-key-partition-offset.html">Bài 2</a> / Bài 3 · <a href="../reference/0001-core-concepts.html">Bảng tra</a></nav>
 
-<h1>Bài 3: Dựng cụm 3 broker và nhìn tận mắt leader, ISR</h1>
-<p class="lede">Đọc về leader và replica thì dễ quên. Kill một broker và thấy leader đổi thì nhớ lâu.</p>
+<h1>Bài 3: Dựng cụm 3 broker</h1>
+<p class="lede">Đọc về leader và replica thì dễ quên. Dựng cụm, kill một broker và tận mắt thấy leader, ISR đổi thì nhớ lâu.</p>
 
 <div class="mission"><b>Liên quan tới mission</b>
 Mục tiêu của bạn là "chém" được về Kafka sau onboarding. Câu như "broker chết thì chuyện gì xảy ra?" gần như chắc chắn xuất hiện trong buổi họp. Sau bài này bạn trả lời được bằng thứ bạn đã thấy tận mắt, không phải bằng sách.</div>
 
 <p class="win"><b>Thắng lợi của bài này:</b> bạn có cụm 3 broker chạy trên máy, tạo được topic có RF=3, đọc được <code>--describe</code>, và giải thích được vì sao kill 1 broker thì cụm vẫn chạy còn kill 2 thì không.</p>
 
-<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
-<ol class="steps">
-<li><b>Mỗi node có thể vừa là broker vừa là controller.</b> <code>process.roles</code> nhận <code>broker</code>, <code>controller</code> hoặc cả hai (combined mode). Combined mode đơn giản cho lab nhưng "is not recommended in critical deployment environments." <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
-<li><b>Controller giữ metadata của cụm theo kiểu đồng thuận (quorum), và quorum cần <em>đa số</em> controller còn sống.</b> Tài liệu: "3 controllers tolerate 1 failure and 5 tolerate 2"; muốn chịu được N controller hỏng thì cần 2N+1 controller. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a> Áp vào cụm lab (3 node, node nào cũng là controller):
-  <ul class="tight">
-  <li>Chết 1 node: còn 2/3, vẫn là đa số, cụm bầu được leader mới và chạy tiếp.</li>
-  <li>Chết 2 node: còn 1/3, không còn đa số. Node còn lại vẫn "sống" nhưng cụm không đổi được metadata, không bầu được leader: coi như không dùng được.</li>
-  <li>Hệ quả: số controller nên là số lẻ (3, 5). Thêm node thứ 4 không giúp chịu thêm lỗi (4 cần đa số 3, vẫn chỉ chịu được 1).</li>
-  </ul></li>
-<li><b>Mỗi partition có một leader và các follower.</b> Producer chỉ ghi vào leader; follower chép lại từ leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
-<li><b>ISR (in-sync replicas) co giãn theo thời gian, không tức thì.</b> ISR là tập replica đang bám kịp leader. Follower bị loại khỏi ISR khi tụt lại quá <code>replica.lag.time.max.ms</code> (mặc định 30000, tức 30 giây), chứ không bị loại ngay khi nó chết. Nên ngay sau khi kill một broker, <code>--describe</code> có thể vẫn hiện ISR đủ 3; khoảng 30 giây sau mới co còn 2. Khi broker sống lại và bám kịp, nó vào lại ISR. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
-<li><b>Giá trị mặc định phía broker rất "mỏng":</b> <code>num.partitions=1</code>, <code>default.replication.factor=1</code>, <code>min.insync.replicas=1</code> và <code>auto.create.topics.enable=true</code>. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
-<li><b>Vì sao lab đặt RF=3 và <code>min.insync.replicas=2</code>, không phải 3.</b> Khi producer dùng <code>acks=all</code>, broker từ chối ghi nếu ISR nhỏ hơn <code>min.insync.replicas</code>. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> Với RF=3:
-  <ul class="tight">
-  <li><code>min.insync.replicas=2</code>: mất 1 broker, ISR còn 2, vẫn ghi được, và mỗi ghi có ít nhất 2 bản sao.</li>
-  <li><code>min.insync.replicas=3</code>: mất 1 broker là ISR còn 2 &lt; 3, mọi ghi bị từ chối. Bền hơn không đáng kể mà mất sẵn sàng.</li>
-  <li><code>min.insync.replicas=1</code>: luôn ghi được, nhưng một ghi có thể chỉ nằm ở một bản sao. Bài 4 đi sâu vào cái bẫy này.</li>
-  </ul></li>
-<li><b>Bootstrap chỉ là cửa vào.</b> <code>bootstrap.servers</code> dùng cho kết nối đầu tiên: client hỏi một broker trong danh sách để biết toàn bộ cụm ("discover the full set of Kafka brokers"), nên danh sách không cần đủ mọi broker, nhưng nên có hơn một để vẫn vào được khi một broker chết. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> Sau đó client nói chuyện thẳng với broker giữ leader của từng partition, theo địa chỉ mà broker đó <b>quảng bá</b> trong <code>advertised.listeners</code>; cấu hình này dùng khi địa chỉ broker lắng nghe không phải địa chỉ client nên dùng (ví dụ môi trường cloud). <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a>
-  <ul class="tight">
-  <li>Ví dụ ngay trong lab: <code>kafka-1</code> quảng bá hai địa chỉ, <code>kafka-1:19092</code> cho các container trong mạng Docker và <code>localhost:29092</code> cho máy của bạn (xem <code>labs/03-cluster/docker-compose.yml</code>). Vì vậy lệnh CLI chạy <em>trong</em> container dùng <code>kafka-1:19092</code>, còn ứng dụng Spring chạy trên Windows dùng <code>localhost:29092,39092,49092</code>.</li>
-  <li>Hệ quả khi gỡ rối (suy ra): "kết nối được bootstrap nhưng gửi không được" thường là client không tới được địa chỉ được quảng bá. Ở nơi mới, chuỗi bootstrap do devops đưa: MSK là danh sách vài broker, Confluent Cloud là một endpoint.</li>
-  </ul></li>
-<li><b>Sửa cấu hình của topic đã tạo, không cần xoá topic:</b> <code>kafka-configs.sh --entity-type topics --entity-name &lt;topic&gt; --alter --add-config &lt;key&gt;=&lt;value&gt;</code>; <code>--delete-config &lt;key&gt;</code> để quay về mặc định của broker; <code>--describe</code> để xem các giá trị đang ghi đè. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations: modifying topics]</a></li>
-</ol>
+<h2>1. Bốn khái niệm của một cụm</h2>
+<p>Một cụm Kafka có hai loại việc: <b>controller</b> giữ metadata (partition nào, leader ở đâu), <b>broker</b> giữ dữ liệu và phục vụ client. Bài này đi qua bốn khái niệm bạn sẽ thấy tận mắt khi kill broker trong lab.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart LR
+subgraph Q ["Quorum controller: cần đa số, 3 node chịu được mất 1"]
+N1["node 1: broker + controller"]
+N2["node 2: broker + controller"]
+N3["node 3: broker + controller"]
+end
+subgraph T ["Topic lab-orders, partition P0, RF=3"]
+L["Leader P0 trên node 1"]
+F2["Follower P0 trên node 2"]
+F3["Follower P0 trên node 3"]
+end
+APP["Ứng dụng: bootstrap.servers"] -->|"1. hỏi metadata"| N2
+APP -->|"2. ghi thẳng vào leader"| L
+F2 -->|"fetch"| L
+F3 -->|"fetch"| L
+class L ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: cụm lab 3 node combined, một partition có leader và hai follower; client vào qua bootstrap rồi nói chuyện thẳng với leader.</figcaption>
+</figure>
+
+<h3>1.1. Broker, controller và quorum</h3>
+<ul class="tight">
+<li><b>Mỗi node có thể là broker, controller, hoặc cả hai</b> (combined mode, như lab). Combined mode "is not recommended in critical deployment environments". <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
+<li><b>Controller giữ metadata theo quorum, cần đa số còn sống:</b> "3 controllers tolerate 1 failure and 5 tolerate 2". Cụm lab chết 2 node thì node còn lại vẫn chạy nhưng cụm không bầu được leader, coi như dừng. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
+<li><b>Số controller nên là số lẻ:</b> 4 controller cần đa số 3, nên vẫn chỉ chịu được mất 1 như 3 controller.</li>
+</ul>
+
+<h3>1.2. Leader, follower, ISR</h3>
+<ul class="tight">
+<li><b>Mỗi partition có một leader và các follower.</b> Producer ghi vào leader, follower tự fetch để chép lại. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+<li><b>ISR</b> (in-sync replicas) là các replica đang bám kịp leader. Chỉ thành viên ISR mới được bầu làm leader khi leader chết.</li>
+<li><b>ISR co lại chậm, không tức thì:</b> follower bị loại khi tụt quá <code>replica.lag.time.max.ms</code> (30 giây). Ngay sau khi kill broker, <code>--describe</code> có thể vẫn hiện ISR đủ 3. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
+</ul>
+
+<h3>1.3. Cấu hình topic: số bản sao và cái sàn</h3>
+<ul class="tight">
+<li><b>Mặc định broker rất mỏng:</b> 1 partition, 1 bản sao, <code>min.insync.replicas=1</code>, và tự tạo topic khi gõ sai tên. Người tạo topic phải tự đặt. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
+<li><b>Lab đặt RF=3 và <code>min.insync.replicas=2</code>:</b> mất 1 broker vẫn ghi được, mỗi ghi có ít nhất 2 bản sao. Đặt 3 thì mất 1 broker là ngừng ghi. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
+<li><b>Sửa topic đã có, không cần xoá:</b> <code>kafka-configs.sh --alter --add-config</code>. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
+</ul>
+
+<h3>1.4. Client vào cụm: bootstrap và advertised.listeners</h3>
+<ul class="tight">
+<li><b><code>bootstrap.servers</code> chỉ là cửa vào:</b> client hỏi một broker để biết cả cụm. Danh sách không cần đủ mọi broker, nhưng nên có hơn một. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+<li><b>Sau đó client nói chuyện thẳng với leader</b> theo địa chỉ mà broker quảng bá trong <code>advertised.listeners</code>. "Vào được bootstrap mà gửi không được" thường là client không tới được địa chỉ quảng bá. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
+</ul>
+
+<h3>Năm giá trị mặc định cần nhớ</h3>
+<table>
+<tr><th>Cấu hình (broker)</th><th>Mặc định</th><th>Lab đặt</th><th>Khái niệm</th></tr>
+<tr><td><code>default.replication.factor</code></td><td>1</td><td>RF=3 khi tạo topic</td><td>1.3</td></tr>
+<tr><td><code>min.insync.replicas</code></td><td>1</td><td>2 ở topic</td><td>1.3</td></tr>
+<tr><td><code>num.partitions</code></td><td>1</td><td>3 khi tạo topic</td><td>1.3</td></tr>
+<tr><td><code>auto.create.topics.enable</code></td><td><code>true</code></td><td><code>false</code></td><td>1.3</td></tr>
+<tr><td><code>replica.lag.time.max.ms</code></td><td>30000</td><td>giữ mặc định</td><td>1.2</td></tr>
+</table>
+<p><a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></p>
+
 
 <h2>2. Thực hành (mỗi bước có kết quả mong đợi)</h2>
 <p>Ghi lại điều bạn <em>thật sự thấy</em>. Các "mong đợi" dưới đây suy ra từ tài liệu; nếu bạn thấy khác, đó là thông tin quý, hãy báo lại cho giáo viên.</p>
@@ -150,7 +190,48 @@ docker start kafka-2 kafka-3</code></pre>
 <label class="tick"><input type="checkbox" data-step="6"> Tôi đã thử kill hai broker và ghi lại kết quả</label>
 </div>
 
-<h2>3. Usecase oái oăm</h2>
+<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<p>Đọc sau khi đã làm các bước thực hành. Mỗi khối mở rộng một khái niệm ở mục 1.</p>
+
+<h3>Broker, controller và quorum</h3>
+<ul class="tight">
+<li><b>Mỗi node có thể vừa là broker vừa là controller.</b> <code>process.roles</code> nhận <code>broker</code>, <code>controller</code> hoặc cả hai (combined mode). Combined mode đơn giản cho lab nhưng "is not recommended in critical deployment environments." <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a></li>
+<li><b>Controller giữ metadata của cụm theo kiểu đồng thuận (quorum), và quorum cần <em>đa số</em> controller còn sống.</b> Tài liệu: "3 controllers tolerate 1 failure and 5 tolerate 2"; muốn chịu được N controller hỏng thì cần 2N+1 controller. <a href="https://kafka.apache.org/44/operations/kraft/">[KRaft overview]</a> Áp vào cụm lab (3 node, node nào cũng là controller):
+  <ul class="tight">
+  <li>Chết 1 node: còn 2/3, vẫn là đa số, cụm bầu được leader mới và chạy tiếp.</li>
+  <li>Chết 2 node: còn 1/3, không còn đa số. Node còn lại vẫn "sống" nhưng cụm không đổi được metadata, không bầu được leader: coi như không dùng được.</li>
+  <li>Hệ quả: số controller nên là số lẻ (3, 5). Thêm node thứ 4 không giúp chịu thêm lỗi (4 cần đa số 3, vẫn chỉ chịu được 1).</li>
+  </ul></li>
+</ul>
+
+<h3>Leader, follower, ISR</h3>
+<ul class="tight">
+<li><b>Mỗi partition có một leader và các follower.</b> Producer chỉ ghi vào leader; follower chép lại từ leader. Một ghi được coi là committed khi mọi replica trong ISR đã nhận; chỉ thành viên của ISR mới được bầu làm leader. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
+<li><b>ISR (in-sync replicas) co giãn theo thời gian, không tức thì.</b> ISR là tập replica đang bám kịp leader. Follower bị loại khỏi ISR khi tụt lại quá <code>replica.lag.time.max.ms</code> (mặc định 30000, tức 30 giây), chứ không bị loại ngay khi nó chết. Nên ngay sau khi kill một broker, <code>--describe</code> có thể vẫn hiện ISR đủ 3; khoảng 30 giây sau mới co còn 2. Khi broker sống lại và bám kịp, nó vào lại ISR. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
+</ul>
+
+<h3>Cấu hình topic</h3>
+<ul class="tight">
+<li><b>Giá trị mặc định phía broker rất "mỏng":</b> <code>num.partitions=1</code>, <code>default.replication.factor=1</code>, <code>min.insync.replicas=1</code> và <code>auto.create.topics.enable=true</code>. Vì bạn là người tạo topic, bạn phải tự đặt những giá trị này. <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
+<li><b>Vì sao lab đặt RF=3 và <code>min.insync.replicas=2</code>, không phải 3.</b> Khi producer dùng <code>acks=all</code>, broker từ chối ghi nếu ISR nhỏ hơn <code>min.insync.replicas</code>. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> Với RF=3:
+  <ul class="tight">
+  <li><code>min.insync.replicas=2</code>: mất 1 broker, ISR còn 2, vẫn ghi được, và mỗi ghi có ít nhất 2 bản sao.</li>
+  <li><code>min.insync.replicas=3</code>: mất 1 broker là ISR còn 2 &lt; 3, mọi ghi bị từ chối. Bền hơn không đáng kể mà mất sẵn sàng.</li>
+  <li><code>min.insync.replicas=1</code>: luôn ghi được, nhưng một ghi có thể chỉ nằm ở một bản sao. Bài 4 đi sâu vào cái bẫy này.</li>
+  </ul></li>
+<li><b>Sửa cấu hình của topic đã tạo, không cần xoá topic:</b> <code>kafka-configs.sh --entity-type topics --entity-name &lt;topic&gt; --alter --add-config &lt;key&gt;=&lt;value&gt;</code>; <code>--delete-config &lt;key&gt;</code> để quay về mặc định của broker; <code>--describe</code> để xem các giá trị đang ghi đè. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations: modifying topics]</a></li>
+</ul>
+
+<h3>Bootstrap và advertised.listeners</h3>
+<ul class="tight">
+<li><b>Bootstrap chỉ là cửa vào.</b> <code>bootstrap.servers</code> dùng cho kết nối đầu tiên: client hỏi một broker trong danh sách để biết toàn bộ cụm ("discover the full set of Kafka brokers"), nên danh sách không cần đủ mọi broker, nhưng nên có hơn một để vẫn vào được khi một broker chết. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> Sau đó client nói chuyện thẳng với broker giữ leader của từng partition, theo địa chỉ mà broker đó <b>quảng bá</b> trong <code>advertised.listeners</code>; cấu hình này dùng khi địa chỉ broker lắng nghe không phải địa chỉ client nên dùng (ví dụ môi trường cloud). <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a>
+  <ul class="tight">
+  <li>Ví dụ ngay trong lab: <code>kafka-1</code> quảng bá hai địa chỉ, <code>kafka-1:19092</code> cho các container trong mạng Docker và <code>localhost:29092</code> cho máy của bạn (xem <code>labs/03-cluster/docker-compose.yml</code>). Vì vậy lệnh CLI chạy <em>trong</em> container dùng <code>kafka-1:19092</code>, còn ứng dụng Spring chạy trên Windows dùng <code>localhost:29092,39092,49092</code>.</li>
+  <li>Hệ quả khi gỡ rối (suy ra): "kết nối được bootstrap nhưng gửi không được" thường là client không tới được địa chỉ được quảng bá. Ở nơi mới, chuỗi bootstrap do devops đưa: MSK là danh sách vài broker, Confluent Cloud là một endpoint.</li>
+  </ul></li>
+</ul>
+
+<h2>4. Usecase oái oăm</h2>
 <h3>(a) Kho lạnh mất điện cả giá đỡ (IoT)</h3>
 <p>Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt. Còn đúng một node "sống", nhưng dashboard trống và không cảm biến nào ghi được. Lý do: mất đa số controller thì cụm không đổi được metadata, không bầu được leader. Sống một node không có nghĩa là cụm còn dùng được. Cách giảm đau (khái niệm): đặt các node ở các khu vực mất điện khác nhau, và tách controller khỏi broker ở môi trường quan trọng (tài liệu khuyến nghị tránh combined mode).</p>
 <figure class="diagram">
@@ -199,11 +280,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <li><b>Production có chạy combined mode không?</b> Tài liệu không khuyến nghị; ở nơi làm mới cụm do dịch vụ managed và devops lo, mình chỉ cần biết hệ quả.</li>
 </ul>
 
-<h2>4. Tự nói thành lời</h2>
+<h2>5. Tự nói thành lời</h2>
 <p>Không nhìn tài liệu, giải thích trong 30 giây: <i>"Cụm 3 node, một node chết thì ... vì ...; hai node chết thì ... vì ..."</i> Dùng đúng các từ: leader, follower, ISR, controller, quorum.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0003-build-cluster.md">tóm tắt Bài 3</a> (đọc sau khi đã tự nói).</p>
 
-<h2>5. Kiểm tra</h2>
+<h2>6. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>

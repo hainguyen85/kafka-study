@@ -7,7 +7,10 @@
  *      sequence nhảy cóc -> từ chối (out of order), producer gửi lại theo đúng thứ tự (giữ thứ tự).
  *  - Producer khởi động lại: nhận producer ID MỚI, sequence đếm lại từ 0 ("single session").
  *
- * Dùng: <div id="isim"></div> <script src="../assets/idempotence-sim.js"></script>
+ * Hình động (assets/flow-anim.js, nạp trước file này nếu có): batch bay producer → broker → log, ack quay về;
+ * ack bị mất rơi giữa đường; batch nhảy cóc bị bật ngược.
+ *
+ * Dùng: <div id="isim"></div> <script src="../assets/flow-anim.js"></script> <script src="../assets/idempotence-sim.js"></script>
  *       <script>IdempotenceSim.mount(document.getElementById('isim'));</script>
  */
 (function (global) {
@@ -21,25 +24,54 @@
     var row = el('div', 'row');
     var idem = el('input'); idem.type = 'checkbox'; idem.checked = true;
     var lab = el('label'); lab.appendChild(idem); lab.appendChild(document.createTextNode(' enable.idempotence=true'));
-    idem.addEventListener('change', function () { fresh(); ev(idem.checked ? 'Bật idempotence (làm lại từ đầu).' : 'Tắt idempotence (làm lại từ đầu).'); draw(); });
+    idem.addEventListener('change', function () { fresh(); S.events.unshift(idem.checked ? 'Bật idempotence (làm lại từ đầu).' : 'Tắt idempotence (làm lại từ đầu).'); draw(); });
     row.appendChild(lab);
     var row2 = el('div', 'row');
+    var stageHost = el('div'), cap = el('div', 'fa-cap');
+    var table = el('div', 'parts');
+    var ledger = el('div', 'note');
+    var evBox = el('div'); evBox.style.cssText = 'font-size:.78rem;margin-top:.5rem;color:var(--muted)';
+    [row, row2, stageHost, cap, table, ledger, evBox].forEach(function (x) { box.appendChild(x); });
+    root.appendChild(box);
+
+    // ---------- sân khấu ----------
+    var st = global.FlowAnim ? FlowAnim.stage(stageHost, {
+      width: 640, height: 215, label: 'Producer gửi batch tới broker; broker ghi vào log của partition.'
+    }) : null;
+    var pl = global.FlowAnim ? FlowAnim.player(box, st, cap) : null;
+    if (pl) row.appendChild(pl.controls());
+    if (st) {
+      st.node('P', { x: 20, y: 76, w: 200, h: 62 });
+      st.node('B', { x: 420, y: 14, w: 200, h: 62 });
+      st.node('L', { x: 420, y: 140, w: 200, h: 62 });
+      st.link('PB', 'P', 'B'); st.setLink('PB', 'on');
+      st.link('BL', 'B', 'L'); st.setLink('BL', 'on');
+    }
+    function snapshot() {
+      return { pid: S.pid, seq: S.seq, last: JSON.parse(JSON.stringify(S.last)), log: S.log.map(function (r) { return r.val; }), idem: idem.checked };
+    }
+    function paint(s) {
+      if (!st) return;
+      st.setNode('P', { title: 'Producer', sub: s.idem ? 'PID ' + s.pid + ' · seq kế tiếp ' + s.seq : 'idempotence tắt', cls: 'client' });
+      var mem = Object.keys(s.last).map(function (k) { return k + '→' + s.last[k]; }).join(', ');
+      st.setNode('B', { title: 'Broker (leader)', sub: s.idem ? 'nhớ seq: ' + (mem || '(chưa có)') : 'không nhớ gì', cls: 'hot' });
+      var tail = s.log.slice(-3).join(' · ');
+      st.setNode('L', { title: 'Log partition (' + s.log.length + ')', sub: (s.log.length > 3 ? '… ' : '') + (tail || '(trống)') });
+    }
+    function snap() { var s = snapshot(); if (pl) pl.call(function () { paint(s); }); }
+    function lbl(b) { return b.val.replace('đơn ', '') + (idem.checked ? ' s' + b.seq : ''); }
+
     [['Gửi bình thường', normal],
      ['Gửi, ack bị mất trên đường về', lostAck],
      ['Gửi 2 batch, batch đầu lỗi tạm thời', reorder],
      ['Producer restart, ứng dụng gửi lại đơn cuối', restart],
      ['Làm lại', function () { fresh(); }]].forEach(function (p) {
       var b = el('button', null, p[0]); b.type = 'button';
-      b.addEventListener('click', function () { p[1](); draw(); });
+      b.addEventListener('click', function () { if (pl && p[0] !== 'Làm lại') pl.run(p[1], draw); else { p[1](); draw(); } });
       row2.appendChild(b);
     });
-    var table = el('div', 'parts');
-    var ledger = el('div', 'note');
-    var evBox = el('div'); evBox.style.cssText = 'font-size:.78rem;margin-top:.5rem;color:var(--muted)';
-    [row, row2, table, ledger, evBox].forEach(function (x) { box.appendChild(x); });
-    root.appendChild(box);
 
-    function ev(t) { S.events.unshift(t); S.events = S.events.slice(0, 7); }
+    function ev(t) { S.events.unshift(t); S.events = S.events.slice(0, 7); if (pl) pl.say(t); }
     function newBatch(val) { return { pid: S.pid, seq: S.seq++, val: val || ('đơn #' + S.n++) }; }
 
     // Broker nhận một batch. Trả 'ok' | 'dup' | 'outoforder'.
@@ -53,45 +85,69 @@
       S.last[b.pid] = b.seq;
       return 'ok';
     }
+    // Gửi kèm hình: batch bay tới broker, nếu được ghi thì bay xuống log
+    function sendAnim(b, r) {
+      if (!pl) return;
+      if (r === 'outoforder') { pl.tok('P', 'B', lbl(b), 'err', { bounce: true }); return; }
+      pl.tok('P', 'B', lbl(b), 'msg');
+      if (r === 'ok') { pl.tok('B', 'L', lbl(b), 'fetch'); snap(); }
+      else pl.pulse('B');   // 'dup': broker nhận ra, không ghi
+    }
 
     function normal() {
-      var b = newBatch(); deliver(b); S.lastVal = b.val;
+      var b = newBatch(); var r = deliver(b); S.lastVal = b.val;
+      sendAnim(b, r);
+      if (pl) pl.tok('B', 'P', 'ack', 'ack');
       ev('Gửi ' + b.val + tag(b) + ' → broker ghi, producer nhận ack.');
     }
 
     function lostAck() {
-      var b = newBatch(); deliver(b); S.lastVal = b.val;
+      var b = newBatch(); var r1 = deliver(b); S.lastVal = b.val;
+      sendAnim(b, r1);
+      if (pl) pl.tok('B', 'P', 'ack', 'ack', { half: true });
       ev('Gửi ' + b.val + tag(b) + ' → broker ĐÃ ghi, nhưng ack bị mất trên đường về.');
       var r = deliver(b); // retry của producer: cùng batch, cùng sequence
+      sendAnim(b, r);
+      if (pl) pl.tok('B', 'P', 'ack', 'ack');
       if (r === 'dup') ev('Producer tự retry cùng batch' + tag(b) + ' → broker thấy sequence đã có, KHÔNG ghi lại, trả ack.');
       else ev('Producer tự retry → broker không nhận ra, ghi thêm một bản: TRÙNG.');
     }
 
     function reorder() {
       var a = newBatch(), b = newBatch(); S.lastVal = b.val;
+      if (pl) pl.tok('P', 'B', lbl(a), 'err', { half: true });
       ev('Gửi song song ' + a.val + tag(a) + ' và ' + b.val + tag(b) + '. ' + a.val + ' gặp lỗi tạm thời, chưa được ghi.');
       var rb = deliver(b);
+      sendAnim(b, rb);
       if (rb === 'outoforder') {
         ev(b.val + ' tới trước nhưng sequence nhảy cóc → broker từ chối (out of order).');
-        deliver(a); deliver(b);
+        sendAnim(a, deliver(a)); sendAnim(b, deliver(b));
+        if (pl) pl.tok('B', 'P', 'ack', 'ack');
         ev('Producer gửi lại ' + a.val + ' rồi ' + b.val + ' theo đúng thứ tự sequence → thứ tự giữ nguyên.');
       } else {
         ev(b.val + ' được ghi trước. Producer retry ' + a.val + ' → ghi sau: ĐẢO THỨ TỰ.');
-        deliver(a);
+        sendAnim(a, deliver(a));
+        if (pl) pl.tok('B', 'P', 'ack', 'ack');
       }
     }
 
     function restart() {
       if (!S.lastVal) { ev('Chưa có đơn nào để gửi lại.'); return; }
       S.pid += 1; S.seq = 0;
+      if (pl) pl.pulse('P');
+      snap();
       ev('Producer khởi động lại → producer ID mới ' + S.pid + ', sequence đếm lại từ 0.');
-      var b = newBatch(S.lastVal); deliver(b);
+      var b = newBatch(S.lastVal); var r = deliver(b);
+      sendAnim(b, r);
+      if (pl) pl.tok('B', 'P', 'ack', 'ack');
       ev('Ứng dụng không chắc lần trước đã vào chưa, gửi lại ' + b.val + tag(b) + ' → với broker đây là bản ghi MỚI: TRÙNG' + (idem.checked ? ' dù đã bật idempotence.' : '.'));
     }
 
     function tag(b) { return idem.checked ? ' (PID ' + b.pid + ', seq ' + b.seq + ')' : ''; }
 
     function draw() {
+      paint(snapshot());
+      cap.textContent = S.events[0] ? '› ' + S.events[0] : (st ? 'Bấm một nút gửi để bắt đầu.' : '');
       table.innerHTML = '';
       var col = el('div', 'part');
       col.appendChild(el('h4', null, 'Log của partition'));

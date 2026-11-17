@@ -155,3 +155,34 @@ svg.diagram .tag { fill: var(--accent); font-weight: 700; font-size: 12px; }
 .sim .msg { display: block; font-family: "Cascadia Code", Consolas, monospace; font-size: .72rem; background: var(--node); border-radius: 3px; padding: .08rem .3rem; margin: .12rem 0; }
 .sim .note { margin-top: .6rem; padding: .4rem .6rem; border-radius: 4px; background: var(--ok-bg); }
 .sim .note.bad { background: var(--bad-bg); }
+/* Sân khấu SVG có animation (assets/flow-anim.js) */
+.fa-stage { display: block; width: 100%; height: auto; max-width: 42rem; margin: .4rem auto .2rem; overflow: visible; }
+.fa-node rect { fill: var(--bg); stroke: var(--muted); stroke-width: 1.5; }
+.fa-node .t { font: 600 14px system-ui, sans-serif; fill: var(--fg); }
+.fa-node .s { font: 12px "Cascadia Code", Consolas, monospace; fill: var(--muted); }
+.fa-node { transition: opacity .3s; }
+.fa-node.leader rect { stroke: var(--accent); stroke-width: 3; }
+.fa-node.leader .t { fill: var(--accent); }
+.fa-node.out rect { stroke-dasharray: 5 4; }
+.fa-node.dead { opacity: .55; }
+.fa-node.dead rect { fill: var(--bad-bg); stroke: var(--bad); }
+.fa-node.dead .t { fill: var(--bad); }
+.fa-node.client rect { fill: var(--ctrl); }
+.fa-node.ok rect { fill: var(--ok-bg); stroke: var(--ok); }
+.fa-node.pending rect { fill: var(--ctrl); stroke: var(--accent); stroke-dasharray: 4 3; }
+.fa-node.bad rect { fill: var(--bad-bg); stroke: var(--bad); stroke-width: 2.5; }
+.fa-node.hot rect { stroke: var(--accent); stroke-width: 2.5; }
+.fa-node.gone { display: none; }
+.fa-node.small .t { font-size: 13px; }
+.fa-node.small .s { font-size: 11px; }
+.fa-link { fill: none; stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.fa-link.on { stroke: var(--accent); stroke-dasharray: none; opacity: .55; }
+.fa-text { font: 12px system-ui, sans-serif; fill: var(--muted); }
+.fa-text.strong { font-weight: 600; fill: var(--fg); }
+.fa-tok rect { fill: var(--node); stroke: var(--muted); stroke-width: 1.2; }
+.fa-tok text { font: 600 11px "Cascadia Code", Consolas, monospace; fill: var(--fg); }
+.fa-tok.ack rect { fill: var(--ok-bg); stroke: var(--ok); }
+.fa-tok.err rect { fill: var(--bad-bg); stroke: var(--bad); }
+.fa-tok.fetch rect { fill: var(--ctrl); stroke: var(--accent); }
+.sim .fa-cap { min-height: 1.4em; margin: .2rem 0 .4rem; font-size: .82rem; color: var(--fg); }
+.sim .busy button, .sim .busy select { opacity: .55; }
