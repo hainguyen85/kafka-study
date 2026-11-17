@@ -228,6 +228,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 ## 5. Sau bài này
 
+- **Ôn lại toàn khoá bằng [Bài 10: Tổng kết 80/20](0013-core-80-20.md)**: tám ý cốt lõi, các ngộ nhận phổ biến và sáu câu hỏi thiết kế.
 - **Dán thẻ của bạn cho giáo viên** để chấm và chỉ ra chỗ cần ôn; mình sẽ ghi một learning record dựa trên kết quả thật, không phải trên dự đoán.
 - **Chạy những lab chưa kiểm chứng:** lab 04 (ba thí nghiệm độ bền), s6, s10, s13. Kết quả của bạn quyết định các câu "Mong đợi" trong bài 4, 5, 7, 8 còn đúng không.
 - **Hỏi platform team** 8 câu ở [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md) ngay tuần đầu onboarding; và nếu muốn học thêm Schema Registry, nói để mình chạy research có nguồn trước khi dạy.

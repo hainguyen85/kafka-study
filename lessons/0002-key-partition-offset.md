@@ -38,7 +38,9 @@ Theo tài liệu producer, khi có key, producer "choose a partition based on a 
 
 Điều bạn vừa thấy: sau khi đổi số partition, `DRV-001` có thể sang partition khác, nên các event cũ và mới của cùng một tài xế *nằm ở hai partition khác nhau*, không còn thứ tự chung. Tài liệu vận hành cảnh báo đúng điều này: "messages with the same key may be routed to different partitions after the expansion", và Kafka "will not attempt to automatically redistribute existing data". [[Basic operations: modifying topics]](https://kafka.apache.org/44/operations/basic-kafka-operations/) Đây là lý do số partition thường được tính trước kỹ càng ở giai đoạn thiết kế. (Tài liệu consumer cũng cảnh báo về tăng partition kết hợp `auto.offset.reset=latest` có thể gây mất message âm thầm. [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/))
 
-## 4. Usecase oái oăm: hai lĩnh vực, cùng một bài học về key
+## 4. Usecase: hai lĩnh vực, cùng một bài học về key
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Gọi xe: tài xế "nhảy lùi" trên bản đồ
 
@@ -66,6 +68,8 @@ Note over App,Map: Sửa: key = DRV-001. Mọi toạ độ của tài xế vào 
 ### (b) Flash sale: một shop làm nghẽn một partition
 
 Topic `orders` dùng **mã shop** làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. Consumer của partition đó quá tải trong khi các consumer khác rảnh; thêm consumer cũng không giúp vì mỗi partition chỉ một consumer trong group đọc. Đây là đánh đổi giữa *thứ tự* và *phân tải*: key càng "to" càng dễ nghẽn. Cách cấu hình và thiết kế để giảm đau sẽ có ở các bài sau, khi có cụm thật để đo.
+
+**Xử lý:** chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8).
 
 ```mermaid
 flowchart LR

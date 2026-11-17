@@ -254,11 +254,15 @@ Tôi đã thử kill hai broker và ghi lại kết quả
    - Ví dụ ngay trong lab: `kafka-1` quảng bá hai địa chỉ, `kafka-1:19092` cho các container trong mạng Docker và `localhost:29092` cho máy của bạn (xem `labs/03-cluster/docker-compose.yml`). Vì vậy lệnh CLI chạy *trong* container dùng `kafka-1:19092`, còn ứng dụng Spring chạy trên Windows dùng `localhost:29092,39092,49092`.
    - Hệ quả khi gỡ rối (suy ra): "kết nối được bootstrap nhưng gửi không được" thường là client không tới được địa chỉ được quảng bá. Ở nơi mới, chuỗi bootstrap do devops đưa: MSK là danh sách vài broker, Confluent Cloud là một endpoint.
 
-## 4. Usecase oái oăm
+## 4. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Kho lạnh mất điện cả giá đỡ (IoT)
 
 Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt. Còn đúng một node "sống", nhưng dashboard trống và không cảm biến nào ghi được. Lý do: mất đa số controller thì cụm không đổi được metadata, không bầu được leader. Sống một node không có nghĩa là cụm còn dùng được. Cách giảm đau (khái niệm): đặt các node ở các khu vực mất điện khác nhau, và tách controller khỏi broker ở môi trường quan trọng (tài liệu khuyến nghị tránh combined mode).
+
+**Xử lý:** đặt các node ở các khu vực mất điện khác nhau, và ở môi trường quan trọng thì tách controller khỏi broker.
 
 ```mermaid
 flowchart TB

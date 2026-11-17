@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "PaymentCompleted",
+  "namespace": "lab.bank",
+  "doc": "v3: thêm field BẮT BUỘC branchCode, không có default. Phá vỡ BACKWARD: consumer dùng v3 không đọc được message cũ thiếu field này.",
+  "fields": [
+    {"name": "eventId", "type": "string"},
+    {"name": "accountId", "type": "string"},
+    {"name": "amount", "type": "long"},
+    {"name": "currency", "type": "string"},
+    {"name": "channel", "type": ["null", "string"], "default": null},
+    {"name": "branchCode", "type": "string"}
+  ]
+}

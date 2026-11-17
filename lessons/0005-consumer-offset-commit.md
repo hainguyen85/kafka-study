@@ -281,7 +281,9 @@ Mong đợi (theo docs, chưa chạy thử trên cụm này): lần `--describe`
 
 Tôi đã xem lag và reset offset bằng CLI
 
-## 5. Usecase oái oăm (mỗi cái một miền)
+## 5. Usecase (mỗi cái một miền)
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Gửi email/SMS thông báo: vừa mất vừa trùng
 

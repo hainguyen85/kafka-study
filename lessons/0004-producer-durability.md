@@ -221,7 +221,9 @@ Mong đợi (suy ra): ban đầu ghi treo; sau khoảng 30 giây ISR co lại c�
 
 Tôi đã chạy strict và ghi lại các loại lỗi
 
-## 5. Usecase oái oăm (mỗi cái một miền)
+## 5. Usecase (mỗi cái một miền)
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Flash sale: "đơn đã nhận" rồi biến mất
 
@@ -262,6 +264,8 @@ Topic cảm biến RF=3, minISR=2, `acks=all`. Hai broker giữ partition đó c
 - Sổ cái, thanh toán: giữ minISR=2; thà ngừng ghi và báo lỗi cho người dùng còn hơn báo thành công rồi mất.
 
 Trong họp bạn sẽ phải nói được lựa chọn này, kèm hệ quả cho người dùng cuối (lỗi gì, trong bao lâu).
+
+**Xử lý:** chọn theo loại dữ liệu: telemetry mất vài điểm không sao thì `min.insync.replicas=1`; sổ cái, thanh toán giữ `min.insync.replicas=2` và báo lỗi cho người dùng.
 
 ```mermaid
 sequenceDiagram

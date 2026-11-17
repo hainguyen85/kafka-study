@@ -10,15 +10,16 @@
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0007-idempotent-consumer-transactions.html">Bài 7</a> / Bài 8 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a> · <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">Managed trên AWS</a></nav>
 
-<h1>Bài 8: Bạn là người tạo topic. Bảy quyết định không sửa lại được dễ dàng</h1>
-<p class="lede">Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.</p>
+<h1>Bài 8: Thiết kế topic</h1>
+<p class="lede">Bạn là người tạo topic, và có bảy quyết định không sửa lại được dễ dàng. Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.</p>
 
 <div class="mission"><b>Liên quan tới mission</b>
 Bạn tự tạo và cấu hình topic ở nơi mới. Đây là phần thiết kế ảnh hưởng lớn nhất và khó đảo ngược nhất. Bài kiểm tra cuối (Bài 9) đòi bạn đưa ra các quyết định này trong 30 phút cho một bài toán lạ.</div>
 
 <p class="win"><b>Thắng lợi của bài này:</b> với một bài toán, bạn điền được "thẻ thiết kế topic" (key, số partition, RF/minISR, retention hay compaction, kích thước message, tên, schema) kèm lý do và đánh đổi, và biết quyết định nào gần như không đổi lại được.</p>
 
-<h2>1. Kiến thức tối thiểu (có nguồn)</h2>
+<h2>1. Bảy quyết định khi tạo topic</h2>
+<p>Mỗi ý dưới đây là một quyết định: số partition, mức song song, retention, compaction, kích thước message, độ bền, tên và cách tạo topic. Thẻ thiết kế ở mục 3 gom chúng lại thành một mẫu điền.</p>
 <ol class="steps">
 <li><b>Số partition chỉ tăng, không giảm; tăng làm key đổi partition.</b> Docs: sau khi mở rộng "messages with the same key may be routed to different partitions"; Kafka không phân phối lại dữ liệu cũ. Với consumer <code>auto.offset.reset=latest</code>, thêm partition "may cause silent message loss". <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
 <li><b>Song song hoá bị chặn bởi số partition:</b> trong một group, mỗi partition chỉ có một consumer; thêm consumer vượt số partition là consumer nhàn rỗi. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
@@ -104,7 +105,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code>
 <b>Bổ trợ:</b> <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">Basic operations</a>, mục thêm partition.<br>
 <b>Mã nguồn bài này:</b> <code>labs/05-scenarios</code> (<code>TopicsConfig</code>, <code>S11</code>, <code>S12</code>, <code>S13</code>). <b>Tra nhanh:</b> <a href="../reference/0003-tricky-scenarios.html">Sổ tay</a>, nhóm D.</div>
 
-<p><b>Bài tiếp theo:</b> <a href="0009-final-design-test.html">Bài 9: bài kiểm tra cuối</a>.</p>
+<p><b>Bài tiếp theo:</b> <a href="0014-throughput-latency.html">Bài 8b: quá tải, thông lượng, độ trễ</a>, rồi 8c (đọc lại, audit) và 8d (schema) trước <a href="0009-final-design-test.html">Bài 9: bài kiểm tra cuối</a>.</p>
 
 <div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "chọn bao nhiêu partition cho topic này?", "key nóng xử lý thế nào?". Dán kết quả quiz và thẻ thiết kế bạn tự điền để mình chấm.</div>
 </main>

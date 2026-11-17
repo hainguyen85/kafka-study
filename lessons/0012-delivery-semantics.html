@@ -141,8 +141,9 @@ void on(ConsumerRecord&lt;String, String&gt; rec) {
 </ol>
 </details>
 
-<h2>5. Usecase oái oăm</h2>
-<h3>(a) "Exactly-once" mà khách nhận hai SMS</h3>
+<h2>5. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) "Exactly-once" mà khách nhận hai SMS</h3>
 <p>Listener chạy trong transaction Kafka, gửi SMS rồi ghi sự kiện ra topic. Lần đầu ghi topic lỗi, transaction abort, record được giao lại, SMS đi lần hai. Transaction Kafka không rút lại được một cuộc gọi ra ngoài. Xử lý: tách việc gửi SMS sang consumer riêng đọc topic đã commit, và cho nó chống trùng.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -162,8 +163,9 @@ Note over K,O: Sửa: tách việc gửi SMS sang consumer riêng đọc topic �
 </script>
 <figcaption>Sequence: transaction Kafka abort và giao lại record, nhưng không rút lại được SMS đã gửi.</figcaption>
 </figure>
-<h3>(b) At-most-once ngoài ý muốn</h3>
+<h3 id="uc-b">(b) At-most-once ngoài ý muốn</h3>
 <p>Team nghĩ mình đang at-least-once vì cấu hình producer chuẩn, nhưng listener giao việc cho thread pool rồi return (chế độ B ở Bài 5). Offset đi trước việc xử lý; crash là mất. Ngữ nghĩa của chuỗi do nửa yếu nhất quyết định.</p>
+<p><b>Xử lý:</b> ack sau khi xử lý xong (chế độ C ở Bài 5), và kiểm cả nửa đọc chứ không chỉ cấu hình producer.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -179,8 +181,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: ngữ nghĩa của cả chuỗi do nửa yếu nhất quyết định.</figcaption>
 </figure>
-<h3>(c) At-least-once với consumer không idempotent</h3>
+<h3 id="uc-c">(c) At-least-once với consumer không idempotent</h3>
 <p>Rebalance (Bài 5b) giao lại 300 record đã xử lý chưa commit; consumer cộng tiền lần nữa. Không có lỗi nào trong log. At-least-once không sai; thiếu là nửa "chịu được trùng".</p>
+<p><b>Xử lý:</b> chống trùng theo <code>eventId</code> trong cùng transaction DB với tác dụng phụ (Bài 7).</p>
 <figure class="diagram">
 <script type="text/mermaid">
 sequenceDiagram

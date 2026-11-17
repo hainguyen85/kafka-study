@@ -61,3 +61,22 @@ services:
       <<: *kafka-env
       KAFKA_NODE_ID: 3
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:19092,PLAINTEXT_HOST://localhost:49092
+
+  # Bài 8d: Confluent Schema Registry (Confluent Community License). Chỉ chạy khi bật profile "schema":
+  #   docker compose --profile schema up -d schema-registry
+  # Registry lưu schema trong topic compact _schemas (một partition) trên chính cụm này, tự tạo topic đó
+  # (cụm tắt auto-create nên registry phải tự tạo). REST API ở http://localhost:18081 từ máy host
+  # (cổng 8081 quen thuộc của registry hay bị chiếm, ví dụ bởi load balancer của k3d; trong mạng Docker vẫn là 8081).
+  # Docs: https://docs.confluent.io/platform/current/schema-registry/index.html
+  schema-registry:
+    image: confluentinc/cp-schema-registry:8.3.2
+    profiles: ["schema"]
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on: [kafka-1, kafka-2, kafka-3]
+    ports:
+      - 18081:8081
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-1:19092,PLAINTEXT://kafka-2:19092,PLAINTEXT://kafka-3:19092

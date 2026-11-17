@@ -1,6 +1,8 @@
 # Lab 03: cụm Kafka 3 broker (KRaft) bằng Docker
 
-Trạng thái: **chưa chạy thử** (lúc viết máy chưa có Docker). Bài 3 sẽ dẫn bạn cài Docker Engine trong WSL2 rồi chạy file này. Khi chạy lần đầu, các bước "kiểm tra" bên dưới chính là bài kiểm tra file có đúng không; nếu lệch, báo lại để sửa.
+Trạng thái (2026-11-17): **đã chạy** trên WSL Ubuntu-24.04 (Docker 29.9.3) cùng service `schema-registry` cho Bài 8d. Bài 3 dẫn bạn cài Docker Engine trong WSL2 rồi chạy file này.
+
+**Schema Registry (Bài 8d):** nằm trong compose profile `schema`, không chạy theo mặc định. Bật bằng `docker compose --profile schema up -d schema-registry`; REST ở `http://localhost:18081` (cổng 8081 trên máy học đã bị load balancer của k3d dùng). Dừng cả cụm và registry: `docker compose --profile schema stop`.
 
 ## Cách nhanh: wizard
 

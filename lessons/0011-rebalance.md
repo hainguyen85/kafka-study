@@ -190,7 +190,9 @@ Tôi đã đếm số lần rebalance trong log s7
 - **Giao thức mới `group.protocol=consumer` (KIP-848).** Giao thức classic dựa trên "a group-wide synchronization barrier", nên "a single misbehaving consumer can take down or disturb the whole group". Giao thức mới chia lại từng phần, việc tính toán chuyển về coordinator, và "a consumer should not be impacted at all by a rebalance if its assignment is not changed". Khi dùng nó, `session.timeout.ms` và `heartbeat.interval.ms` phía client không còn tác dụng; broker quyết định. Mặc định của client vẫn là `classic`; dùng được hay không phụ thuộc broker (xem [bảng managed](../reference/0004-managed-kafka-msk-vs-confluent.md)). [[KIP-848]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
 - **Spring Kafka.** Boot không có property riêng cho `group.instance.id` hay `partition.assignment.strategy`; đặt qua `spring.kafka.consumer.properties[...]`. Với `concurrency` > 1, container tự thêm hậu tố `-n` vào `group.instance.id` cho từng consumer. Muốn chạy code khi bị thu hồi partition: khai báo bean `ConsumerAwareRebalanceListener`, Boot tự gắn vào container. [[Message listener container]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html) [[Rebalance listeners]](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/rebalance-listeners.html)
 
-## 5. Usecase oái oăm
+## 5. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Gọi xe: rolling deploy 10 pod làm điều phối đứng hình
 
@@ -238,6 +240,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ### (c) Consumer chết đột ngột: 45 giây im lặng rồi xử lý trùng
 
 Pod bị OOM kill. Coordinator không nhận heartbeat nhưng chỉ loại nó sau `session.timeout.ms`. Trong lúc đó partition của nó không ai đọc; sau đó consumer mới đọc từ offset đã commit và xử lý lại phần chưa commit. Hạ `session.timeout.ms` giúp phát hiện nhanh hơn, nhưng một lần GC pause dài cũng có thể bị coi là chết và gây rebalance oan. Không có giá trị đúng cho mọi nơi; thứ cố định là consumer phải idempotent (Bài 7).
+
+**Xử lý:** consumer phải idempotent (Bài 7); chỉ hạ `session.timeout.ms` khi chấp nhận rủi ro rebalance oan do GC pause.
 
 ```mermaid
 sequenceDiagram

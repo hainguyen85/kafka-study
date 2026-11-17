@@ -176,11 +176,15 @@ Tôi đã đổi back-off hoặc loại lỗi không retry
 - **`DeadLetterPublishingRecoverer`:** mặc định gửi tới `<topic gốc>-dlt` (tutorial cũ ghi `.DLT`, đã lỗi thời), **cùng số partition** với record gốc, nên DLT phải có ít nhất bằng số partition của topic gốc. Nó giữ mọi header gốc và thêm header `DLT_EXCEPTION_*`, `DLT_ORIGINAL_TOPIC/PARTITION/OFFSET`. Nó *không tự tạo* topic DLT. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html) [[mã nguồn v4.1.2]](https://github.com/spring-projects/spring-kafka/blob/v4.1.2/spring-kafka/src/main/java/org/springframework/kafka/listener/DeadLetterPublishingRecoverer.java)
 - **Docs Apache không định nghĩa DLQ cho consumer thường.** DLQ chính thức chỉ có ở Kafka Connect (`errors.tolerance`, `errors.deadletterqueue.topic.name`) và Share Groups. Retry topic và DLT trong consumer là *pattern ứng dụng*; Spring Kafka hiện thực nó cho bạn. [[Connect guide]](https://kafka.apache.org/44/kafka-connect/user-guide/) [[research/0001, mục 1.1]](../research/0001-curriculum-coverage.md)
 
-## 5. Usecase oái oăm
+## 5. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Cổng thanh toán: một message JSON thiếu trường chặn cả partition
 
 Nếu bạn tự viết consumer thuần mà không xử lý, `poll` ném `RecordDeserializationException` (có `offset()` của record hỏng) và, nếu không bỏ qua record đó, lần `poll` kế tiếp lặp lại lỗi tại cùng offset, lag tăng mãi (đây là suy luận, docs không mô tả cách bỏ qua). Với Spring Kafka thì ngược lại: hành vi mặc định *không chặn* nhưng *mất im lặng* (Bước 1). Hai thái cực. Thiết kế đúng nằm giữa: retry có giới hạn, rồi DLT, rồi cảnh báo trên độ sâu DLT.
+
+**Xử lý:** retry có giới hạn, rồi DLT, rồi cảnh báo theo độ sâu DLT.
 
 ```mermaid
 flowchart TB
@@ -205,6 +209,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 Dịch vụ phụ trợ chết 2 giây (tạm thời) khác với dữ liệu sai định dạng (vĩnh viễn). Retry 3 lần × 300ms chữa được loại đầu; loại sau nên thành "không retry" để khỏi lãng phí. Nếu lỗi tạm thời kéo dài phút thì blocking retry làm partition đứng và có nguy cơ vượt `max.poll.interval.ms`: đó là lúc cân nhắc `@RetryableTopic`, đổi lại **thứ tự** message cùng key không còn được đảm bảo (record lỗi đi sang topic khác trong khi record sau chạy tiếp). Hệ quả thiết kế: nếu thứ tự theo key là bắt buộc (ví dụ chuyển trạng thái đơn), chọn blocking retry hoặc xử lý bất biến theo thứ tự ở tầng nghiệp vụ.
 
+**Xử lý:** lỗi tạm thời ngắn thì retry có back-off; lỗi vĩnh viễn thì không retry, đưa thẳng sang DLT; lỗi tạm thời kéo dài thì cân nhắc `@RetryableTopic` nếu không cần thứ tự theo key.
+
 ```mermaid
 flowchart TB
 E{"Loại lỗi?"} -->|"vĩnh viễn: dữ liệu sai định dạng"| N["Không retry<br/>đưa thẳng sang DLT"]
@@ -225,6 +231,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 Có DLT mà không ai nhìn nó là mất message có tên đẹp. Cần: cảnh báo khi DLT có record, quy trình "replay" (đưa record về topic gốc sau khi sửa lỗi), và giữ `retention` của DLT đủ dài. Docs Spring Kafka không quy định quy trình này: đó là quyết định thiết kế của bạn.
 
+**Xử lý:** cảnh báo khi DLT có record, có quy trình replay về topic gốc, và giữ retention của DLT đủ dài.
+
 ```mermaid
 flowchart TB
 T["Topic gốc"] --> L["Listener"]
@@ -244,6 +252,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ### (d) DLT cùng số partition: bẫy khi tăng partition
 
 Bài 2 đã nói thêm partition làm đổi mapping key. Hệ quả mới ở đây: topic gốc tăng partition mà quên tăng DLT thì recoverer không gửi được record có partition vượt (nó kiểm tra và đặt partition là null theo docs). Khi đó phải chọn lại: để Kafka chọn partition của DLT, hay bắt buộc cùng partition.
+
+**Xử lý:** tăng partition của DLT cùng lúc với topic gốc, hoặc chủ động để Kafka tự chọn partition của DLT.
 
 ```mermaid
 flowchart TB

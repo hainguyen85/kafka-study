@@ -20,4 +20,14 @@ public class TopicsConfig {
                 .config("min.insync.replicas", "2") // TopicBuilder không có minInsyncReplicas()
                 .build();
     }
+
+    /** Topic cho phép đo thông lượng ở Bài 8b: 6 partition để có chỗ cho nhiều consumer song song. */
+    @Bean
+    NewTopic labPerf() {
+        return TopicBuilder.name("lab-perf")
+                .partitions(6)
+                .replicas(3)
+                .config("min.insync.replicas", "2")
+                .build();
+    }
 }

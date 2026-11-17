@@ -8,6 +8,8 @@ Sắp onboarding ở một ngân hàng dùng Kafka trong kiến trúc microservi
 - Giải thích được cho đồng nghiệp đường đi của một message từ producer tới consumer: topic, partition, key, offset, replication, consumer group.
 - Đọc một cấu hình producer/consumer và nói được nó đánh đổi gì (mất message, trùng message, thứ tự, độ trễ).
 - Tự dựng cụm Kafka 3 broker (KRaft) trên máy, viết code Spring Kafka producer/consumer, và cố tình làm hỏng (kill broker, consumer chết, message lỗi) rồi quan sát hệ thống xử lý.
+- Ngoài trục chính "không mất" (mở rộng 2026-11-17, người học xác nhận): thiết kế được cho ba mảng nữa: (a) quá tải, thông lượng, độ trễ; (b) đọc lại, audit, giữ dữ liệu (retention, compaction, replay); (c) hợp đồng sự kiện (schema, thay đổi schema giữa nhiều team). Mỗi mảng một bài theo khuôn hiện tại, research nguồn chính trước khi viết.
+- Có bài tổng kết theo nguyên tắc 80/20: 20% kiến thức giải thích 80% điều quan trọng, kèm các ngộ nhận phổ biến về phần 20% đó.
 - Bài kiểm tra cuối: cho một bài toán mới trong lĩnh vực bất kỳ (gọi xe, đơn hàng, IoT, thanh toán, sổ cái...), trong 30 phút bạn tự đề xuất topic, key, số partition, cấu hình độ bền, cấu hình producer/consumer, cách xử lý trùng/lỗi, và giải thích được đánh đổi bằng lời như đang họp.
 
 ## Constraints
@@ -17,10 +19,9 @@ Sắp onboarding ở một ngân hàng dùng Kafka trong kiến trúc microservi
 - Nơi mới (người học xác nhận 2026-11-11): Kafka là dịch vụ cloud trên AWS, chưa biết là Amazon MSK hay Confluent Cloud (ghi nhận trước đó "Apache Kafka tự vận hành" không còn đúng); hạ tầng do devops lo; client là Spring Kafka; người học tự tạo và cấu hình topic; yêu cầu nghiệp vụ chính là KHÔNG MẤT message. Người học tập trung vào giải pháp và thiết kế.
 - Code demo bằng Java với Spring Kafka (stack của nơi mới); chỉ dùng client thuần khi cần thấy cấu hình gốc của Kafka.
 - Thời gian: học full-time, xong trong 2 ngày (2026-11-11 và 2026-11-12). Lộ trình nén ~16 giờ, ưu tiên thực hành và tình huống oái oăm.
-- Học bằng usecase "oái oăm" kèm code chạy thật, không học lý thuyết khô. Usecase đa dạng nhiều lĩnh vực, không bắt buộc gắn với ngân hàng (có thể ánh xạ sang banking khi cần).
+- Học bằng usecase kèm code chạy thật, không học lý thuyết khô. Usecase đa dạng nhiều lĩnh vực, không bắt buộc gắn với ngân hàng (có thể ánh xạ sang banking khi cần). Từ 2026-11-17: thêm usecase mảng chứng khoán (market data, luồng lệnh) vì nơi mới là ngân hàng có mảng này; tiêu đề mục không dùng chữ "oái oăm"; có một trang tổng hợp mọi usecase.
 
 ## Out of scope
-- Schema Registry: học một bài (ảnh hưởng thiết kế event); chưa có nguồn chính, phải research trước khi viết.
 - Kafka Connect và Kafka Streams: bỏ hẳn (người học xác nhận 2026-11-12: nơi mới không dùng Connect).
 - Bảo mật (SASL/SSL/mTLS/ACL) ở giai đoạn study này, theo yêu cầu của người học; nơi mới có thể dùng SSL/mTLS theo topic (chưa chắc). Quay lại khi cần.
 - Hạ tầng và vận hành cụm (devops lo): dựng cụm chỉ ở mức sandbox thực hành, không đi sâu KRaft/quorum/capacity.

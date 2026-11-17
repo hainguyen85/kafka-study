@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 8c: Đọc lại, audit, giữ dữ liệu</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0014-throughput-latency.html">Bài 8b</a> / Bài 8c · <a href="0016-schema-evolution.html">Bài 8d</a> · <a href="../reference/0005-usecase-index.html">Tổng hợp usecase</a></nav>
+
+<h1>Bài 8c: Đọc lại, audit, giữ dữ liệu</h1>
+<p class="lede">Kafka không xoá message khi đã đọc. Đó là lý do bạn đọc lại được: dựng lại số dư sau một bug, chạy lại một phiên giao dịch, phục vụ audit. Nhưng "giữ được" có giới hạn, và có vài bẫy làm bạn đọc lại sai chỗ.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mảng mở rộng thứ hai của mission: đọc lại, audit, giữ dữ liệu. Câu bạn sẽ gặp: "bug tính phí chạy từ 3 ngày trước, chạy lại được không?", "Kafka có dùng làm audit trail được không?". Sau bài này bạn trả lời được dữ liệu còn bao lâu, đọc lại bằng cách nào, và Kafka bảo đảm gì cho audit.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn đọc lại được dữ liệu từ một mốc thời gian bằng Spring Kafka và bằng CLI, tự thấy bẫy múi giờ của lệnh reset offset, và nói được Kafka bảo đảm gì, không bảo đảm gì khi làm audit.</p>
+
+<h2>1. Bốn khái niệm</h2>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+E["Sự kiện giao dịch"] --> T1["account-transactions<br/>cleanup.policy=delete, retention đủ dài<br/>lịch sử đầy đủ, theo thứ tự từng tài khoản"]
+T1 --> S["Service tính số dư"]
+S --> T2["account-balance<br/>cleanup.policy=compact<br/>chỉ giữ số dư mới nhất mỗi tài khoản"]
+T2 -->|"service mới: seekToBeginning"| N["Nạp cache số dư khi khởi động"]
+T1 -->|"có bug: reset offset về mốc thời gian"| S
+class T1 ok
+class T2 warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: một topic "delete" giữ lịch sử để đọc lại, một topic "compact" giữ trạng thái mới nhất.</figcaption>
+</figure>
+
+<h3>1.1. Retention: dữ liệu được giữ bao lâu</h3>
+<ul class="tight">
+<li><b>Đọc không xoá dữ liệu:</b> "events are not deleted after consumption"; mỗi topic tự định thời gian giữ. <a href="https://kafka.apache.org/44/getting-started/introduction/">[Introduction]</a></li>
+<li><b><code>retention.ms</code> mặc định 7 ngày</b>, và docs gọi nó là "an SLA on how soon consumers must read their data". Lag vượt retention là mất dữ liệu chưa đọc. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
+<li><b>Xoá theo cả segment, không theo từng record</b>, và căn theo timestamp lớn nhất trong segment. Nên dữ liệu có thể sống <em>lâu hơn</em> retention (chờ segment đóng) hoặc <em>ngắn hơn</em> (record mang timestamp cũ). <a href="https://kafka.apache.org/44/implementation/log/">[Implementation: Log]</a></li>
+</ul>
+
+<h3>1.2. Compaction: trạng thái mới nhất, không phải lịch sử</h3>
+<ul class="tight">
+<li><b><code>cleanup.policy=compact</code></b> giữ "at least the last known value for each message key"; thứ tự và offset không đổi. Dùng để nạp lại trạng thái hay cache. <a href="https://kafka.apache.org/44/design/design/">[Design: Log Compaction]</a></li>
+<li><b>Xoá một key bằng tombstone</b> (value <code>null</code>). Tombstone chỉ sống <code>delete.retention.ms</code> (1 ngày): consumer đọc chậm hơn mức đó "may miss delete markers".</li>
+<li><b>Compaction không tức thì</b> (segment đang ghi không bao giờ bị compact), và topic compact <em>không</em> là lịch sử: đừng dùng một mình làm audit.</li>
+</ul>
+
+<h3>1.3. Đọc lại: ba con đường</h3>
+<ul class="tight">
+<li><b>CLI</b> <code>kafka-consumer-groups.sh --reset-offsets</code>: một group mỗi lần, group phải đang dừng, mặc định chỉ xem trước (<code>--dry-run</code>), thêm <code>--execute</code> mới thật sự đổi. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
+<li><b>API</b> <code>seek()</code> và <code>offsetsForTimes()</code>: trả "the earliest offset whose timestamp is greater than or equal to the given timestamp". <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
+<li><b>Spring</b>: <code>ConsumerSeekAware</code> / <code>AbstractConsumerSeekAware</code> với <code>seekToTimestamp</code>, <code>seekToBeginning</code>, <code>seekToEnd</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/seek.html">[Spring: seek]</a></li>
+<li><b>Bẫy múi giờ:</b> <code>--to-datetime</code> không ghi múi giờ thì bị hiểu là <b>UTC</b> (đọc trong source 4.4.0, docs không nói). Ở Việt Nam phải ghi <code>+07:00</code>. Mục 2 cho bạn thấy tận mắt. <a href="https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/utils/Utils.java">[Utils.getDateTime]</a></li>
+</ul>
+
+<h3>1.4. Timestamp và audit</h3>
+<ul class="tight">
+<li><b><code>CreateTime</code></b> (mặc định) là giờ producer gán; <b><code>LogAppendTime</code></b> là giờ broker ghi đè khi lưu. Từ Kafka 4.0, record có timestamp tương lai quá 1 giờ bị từ chối. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/ProducerRecord.html">[ProducerRecord]</a> <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></li>
+<li><b>Kafka bảo đảm cho audit:</b> thứ tự trong một partition; "The offset for a message never changes"; message đã commit không mất khi còn một replica ISR. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
+<li><b>Kafka không hứa "bất biến":</b> docs không dùng chữ "immutable". Dữ liệu vẫn bị xoá theo retention, compaction, <code>deleteRecords</code> (cần quyền Delete trên Topic) hoặc xoá topic. <a href="https://kafka.apache.org/44/security/authorization-and-acls/">[ACLs]</a></li>
+</ul>
+
+<h3>Bảy giá trị cần nhớ</h3>
+<table>
+<tr><th>Cấu hình</th><th>Mặc định 4.4</th><th>Ý nghĩa</th><th>Khái niệm</th></tr>
+<tr><td><code>retention.ms</code></td><td>604800000 (7 ngày)</td><td>"SLA" cho consumer; <code>-1</code> là không giới hạn thời gian</td><td>1.1</td></tr>
+<tr><td><code>retention.bytes</code></td><td>-1</td><td>Giới hạn theo dung lượng, <em>mỗi partition</em></td><td>1.1</td></tr>
+<tr><td><code>segment.bytes</code> / <code>segment.ms</code></td><td>1 GB / 7 ngày</td><td>Xoá và compact theo từng segment</td><td>1.1</td></tr>
+<tr><td><code>cleanup.policy</code></td><td><code>delete</code></td><td><code>compact</code> giữ bản cuối mỗi key</td><td>1.2</td></tr>
+<tr><td><code>delete.retention.ms</code></td><td>86400000 (1 ngày)</td><td>Tombstone sống bao lâu</td><td>1.2</td></tr>
+<tr><td><code>message.timestamp.type</code></td><td><code>CreateTime</code></td><td><code>LogAppendTime</code> nếu cần giờ broker</td><td>1.4</td></tr>
+<tr><td><code>offsets.retention.minutes</code> (broker)</td><td>10080 (7 ngày)</td><td>Offset của group rỗng bị xoá sau thời gian này</td><td>1.3</td></tr>
+</table>
+<p><a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></p>
+
+<h2>2. Thực hành trên cụm</h2>
+<p>Dùng profile mới <code>replay</code> của <code>labs/03-spring-clients</code> và cụm của Bài 3.</p>
+<pre><code>// labs/03-spring-clients/src/main/java/lab/ReplayListener.java (rút gọn)
+public class ReplayListener extends AbstractConsumerSeekAware {
+    private final AtomicBoolean seekedOnce = new AtomicBoolean();
+
+    @Override
+    public void onPartitionsAssigned(Map&lt;TopicPartition, Long&gt; assignments, ConsumerSeekCallback callback) {
+        super.onPartitionsAssigned(assignments, callback);
+        if (!seekedOnce.getAndSet(true)) {            // chỉ seek LẦN ĐẦU: hàm này chạy lại sau mỗi rebalance
+            long from = System.currentTimeMillis() - replayMinutes * 60_000;
+            callback.seekToTimestamp(assignments.keySet(), from);   // bên dưới là offsetsForTimes
+        }
+    }
+
+    @KafkaListener(topics = "${lab.topic}", groupId = "${lab.group:g-replay}")
+    void onMessage(ConsumerRecord&lt;String, String&gt; rec) { /* in timestamp theo giờ VN, partition, offset */ }
+}</code></pre>
+
+<div class="step">
+<h3>Bước 1. Đọc lại 2 phút gần nhất bằng Spring</h3>
+<pre><code>cd labs/03-spring-clients
+J="java -jar target/spring-clients-0.0.1-SNAPSHOT.jar"
+$J --spring.profiles.active=producer --lab.count=6                          # gửi vài message mới vào lab-orders
+$J --spring.profiles.active=replay --lab.group=g-replay-1 --lab.replay-minutes=2</code></pre>
+<div class="expect">Đã chạy thật (2026-11-17, rút gọn):
+<pre><code>[replay] seekToTimestamp(16:34:06 17/11) cho [lab-orders-2, lab-orders-1, lab-orders-0]
+[replay] 16:35:54 17/11 CreateTime partition=2 offset=0 key=DRV-001
+[replay] 16:35:54 17/11 CreateTime partition=2 offset=1 key=DRV-002
+[replay] 16:35:54 17/11 CreateTime partition=0 offset=0 key=DRV-003</code></pre>
+Consumer nhảy tới record đầu tiên có timestamp từ mốc trở đi ở từng partition. Timestamp loại <code>CreateTime</code>: giờ của máy producer.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã đọc lại theo thời gian bằng Spring</label>
+</div>
+
+<div class="step">
+<h3>Bước 2. Bẫy múi giờ của <code>--reset-offsets</code></h3>
+<p>Message vừa gửi lúc khoảng 16:35 giờ Việt Nam. Hai lệnh dưới cùng muốn "đọc lại từ 16:30", đều ở chế độ chỉ xem trước. Dự đoán kết quả của lệnh đầu.</p>
+<pre><code># trong terminal Ubuntu (WSL)
+G="docker exec kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka-1:19092 --group g-reset-demo --topic lab-orders --reset-offsets"
+$G --to-datetime 2026-11-17T16:30:00.000 --dry-run           # KHÔNG ghi múi giờ
+$G --to-datetime 2026-11-17T16:30:00.000+07:00 --dry-run     # CÓ ghi +07:00</code></pre>
+<div class="expect">Đã chạy thật:
+<pre><code># không ghi múi giờ: 16:30 UTC = 23:30 giờ VN, tức tương lai
+Warn: Partition 2 from topic lab-orders is empty. Falling back to latest known offset.
+g-reset-demo  lab-orders  2  4
+g-reset-demo  lab-orders  0  3
+# có +07:00
+g-reset-demo  lab-orders  2  0
+g-reset-demo  lab-orders  0  0</code></pre>
+Lệnh đầu nhảy tới <b>cuối log</b>, tức bỏ qua toàn bộ dữ liệu cần đọc lại, kèm cảnh báo "is empty" gây hiểu lầm (partition có dữ liệu, chỉ không có record nào sau mốc). Lệnh sau mới đúng ý. Quy tắc: luôn ghi <code>+07:00</code>, luôn chạy <code>--dry-run</code> trước <code>--execute</code>.</div>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã thấy bẫy múi giờ</label>
+</div>
+
+<div class="step">
+<h3>Bước 3. Một topic compact có sẵn trong cụm của bạn</h3>
+<pre><code>docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19092 --describe --topic _schemas</code></pre>
+<div class="expect">Có sau khi bật Schema Registry ở Bài 8d: <code>PartitionCount: 1 ... Configs: min.insync.replicas=1,cleanup.policy=compact</code>. Registry dùng chính compaction để giữ "bản mới nhất mỗi key": đúng mô hình ở mục 1.2.</div>
+</div>
+
+<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<h3>Retention</h3>
+<ul class="tight">
+<li>"Data is deleted one log segment at a time"; với retention theo thời gian, "the largest timestamp in a segment file ... defining the retention time for the entire segment"; retention theo dung lượng tắt mặc định. Broker kiểm tra mỗi 5 phút (<code>log.retention.check.interval.ms</code>), rồi chờ <code>file.delete.delay.ms</code> (1 phút) trước khi xoá file. <a href="https://kafka.apache.org/44/implementation/log/">[Implementation: Log]</a></li>
+<li>Consumer đứng ở offset đã bị xoá thì nhận <code>OutOfRangeException</code> và "can either reset itself or fail", theo <code>auto.offset.reset</code> (<code>earliest</code>, <code>latest</code>, <code>by_duration:&lt;ISO8601&gt;</code>, <code>none</code>). Với ngân hàng, <code>latest</code> ở đây là bỏ qua âm thầm phần chưa đọc. <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
+<li><code>message.timestamp.before.max.ms</code> mặc định <code>Long.MAX</code>, nên broker không chặn timestamp cũ: nạp lại dữ liệu lịch sử với <code>CreateTime</code> gốc có thể bị xoá ngay khi segment đóng.</li>
+</ul>
+
+<h3>Compaction</h3>
+<ul class="tight">
+<li>Bốn bảo đảm của docs: consumer theo kịp thấy mọi message; "Compaction will never re-order messages, just remove some"; "The offset for a message never changes"; đọc từ đầu thấy "at least the final state of all records". Đọc từ offset đã bị compact thì nhận message kế tiếp còn lại. <a href="https://kafka.apache.org/44/design/design/">[Design: Log Compaction]</a></li>
+<li>Thời hạn compaction "is not a hard guarantee"; mặc định <code>min.compaction.lag.ms</code>=0, <code>max.compaction.lag.ms</code>=Long.MAX, <code>min.cleanable.dirty.ratio</code>=0.5.</li>
+</ul>
+
+<h3>Đọc lại</h3>
+<ul class="tight">
+<li>Kịch bản của <code>--reset-offsets</code>: <code>--to-datetime</code>, <code>--to-earliest</code>, <code>--to-latest</code>, <code>--shift-by</code>, <code>--by-duration</code>, <code>--to-offset</code>, <code>--from-file</code>; offset ngoài khoảng được kẹp về đầu hoặc cuối hợp lệ. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
+<li>Spring: gọi <code>seekToTimestamp</code> cho nhiều partition bằng bản nhận <code>Collection</code>, vì "it is more efficient to find the offsets for the timestamps in a single call". Cố định offset ban đầu: <code>@PartitionOffset(initialOffset = ...)</code> với manual assignment. <a href="https://docs.spring.io/spring-kafka/reference/kafka/seek.html">[Spring: seek]</a></li>
+<li>Docs nêu đúng usecase dựng lại trạng thái: "the state may be recreated on a new machine by re-consuming all the data ... (assuming that Kafka is retaining sufficient history)". <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
+</ul>
+
+<h3>Lưu lâu: tiered storage</h3>
+<ul class="tight">
+<li>Tiered storage (KIP-405) "marked production-ready since Kafka 3.9": segment đã đóng chuyển sang kho rẻ (ví dụ S3); không hỗ trợ topic compact; Apache không kèm sẵn plugin lưu trữ. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-405%3A+Kafka+Tiered+Storage">[KIP-405]</a> <a href="https://kafka.apache.org/44/operations/tiered-storage/">[Tiered storage]</a></li>
+<li>MSK: chỉ cho Standard brokers; "The minimum retention period in low-cost storage is 3 days"; đọc từ tầng rẻ "an increase in read latency for the first few bytes". <a href="https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html">[MSK tiered storage]</a></li>
+</ul>
+
+<h2>4. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Ngân hàng: bug tính phí chạy 3 ngày, dựng lại số dư</h3>
+<p>Phát hiện service tính phí sai từ 00:00 ngày 14/11. Topic <code>account-transactions</code> (key = số tài khoản, retention 30 ngày) vẫn còn đủ dữ liệu. Cần cho service đọc lại từ mốc đó sau khi sửa code. Đọc lại nghĩa là xử lý lại: mọi tác dụng phụ ra ngoài (ghi DB, gửi thông báo) sẽ xảy ra lần nữa.</p>
+<p><b>Xử lý:</b> dừng group, <code>--reset-offsets --to-datetime 2026-11-14T00:00:00.000+07:00 --dry-run</code>, kiểm tra offset mới, rồi <code>--execute</code>; consumer phải idempotent theo <code>eventId</code> (Bài 7) để đọc lại không trừ phí hai lần.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant Ops as Người vận hành
+participant CLI as kafka-consumer-groups.sh
+participant K as Topic account-transactions
+participant S as Service tính phí (đã sửa)
+participant DB as DB (UNIQUE eventId)
+Ops->>S: dừng mọi instance của group
+Ops->>CLI: --to-datetime 2026-11-14T00:00:00.000+07:00 --dry-run
+CLI-->>Ops: offset mới từng partition
+Ops->>CLI: --execute
+Ops->>S: khởi động lại
+K->>S: sự kiện từ 14/11
+S->>DB: ghi lại, trùng eventId thì bỏ qua
+</script>
+<figcaption>Sequence: đọc lại từ một mốc thời gian an toàn: dừng group, xem trước, thực hiện, và consumer chịu được trùng.</figcaption>
+</figure>
+
+<h3 id="uc-b">(b) Ngân hàng: nạp lại lịch sử 2 năm, dữ liệu biến mất sau vài phút</h3>
+<p>Team migrate nạp giao dịch 2 năm trước vào một topic retention 7 ngày, giữ nguyên <code>CreateTime</code> gốc của từng giao dịch. Mọi segment có timestamp lớn nhất đã quá 7 ngày, nên ngay khi segment đóng và broker kiểm tra (mỗi 5 phút), cả segment bị xoá. Không có lỗi nào, broker không chặn timestamp cũ.</p>
+<p><b>Xử lý:</b> đặt <code>message.timestamp.type=LogAppendTime</code> cho topic nạp lại (timestamp là giờ ghi, giờ nghiệp vụ để trong payload), hoặc đặt <code>retention.ms</code> phù hợp với dữ liệu lịch sử.</p>
+
+<h3 id="uc-c">(c) Ngân hàng: tài khoản đã đóng vẫn hiện trong cache</h3>
+<p>Topic <code>account-balance</code> (compact) ghi tombstone khi tài khoản đóng. Một service dựng cache từ topic này chạy chậm hơn 1 ngày (ví dụ chỉ chạy mỗi tuần): tombstone đã bị dọn sau <code>delete.retention.ms</code>, nên service có thể không bao giờ thấy lệnh xoá, và cache còn giữ tài khoản đã đóng tuỳ thời điểm cleaner chạy.</p>
+<p><b>Xử lý:</b> tăng <code>delete.retention.ms</code> của topic lớn hơn khoảng thời gian chậm nhất của consumer, hoặc cho service dựng cache đọc lại từ đầu mỗi lần khởi động (<code>seekToBeginning</code>).</p>
+
+<h3 id="uc-d">(d) Chứng khoán: chạy lại phiên 14/11 nhưng bắt đầu nhầm 7 tiếng</h3>
+<p>Team quant muốn chạy lại thuật toán trên dữ liệu phiên 14/11 (09:00 tới 15:00 giờ Việt Nam). Lệnh reset ghi <code>--to-datetime 2026-11-14T09:00:00.000</code>, không có múi giờ: công cụ hiểu là 09:00 UTC, tức 16:00 giờ Việt Nam, nên bỏ qua cả phiên. Không có lỗi, chỉ có kết quả rỗng.</p>
+<p><b>Xử lý:</b> luôn ghi <code>+07:00</code> và chạy <code>--dry-run</code> trước; dừng ở 15:00 bằng <code>offsetsForTimes</code> (tìm offset của mốc 15:00 ở từng partition) hoặc logic ứng dụng dừng khi gặp timestamp sau 15:00, vì CLI không có tuỳ chọn "dừng ở thời điểm".</p>
+
+<h3 id="uc-e">(e) Audit: "Kafka là bất biến, không ai sửa được"</h3>
+<p>Trong họp, có người đề xuất dùng Kafka làm audit trail vì "log bất biến". Đúng là Kafka chỉ ghi thêm, không có API sửa record, offset không đổi. Nhưng dữ liệu vẫn có thể biến mất: hết retention, compaction, <code>deleteRecords</code>, xoá topic, hoặc ai đó đổi <code>retention.ms</code> bằng <code>kafka-configs.sh</code>. <code>CreateTime</code> cũng là giờ ứng dụng tự đặt.</p>
+<p><b>Xử lý:</b> chỉ cấp quyền <code>Delete</code> trên Topic cho vai trò quản trị; giám sát thay đổi <code>cleanup.policy</code> và <code>retention.ms</code>; dùng <code>LogAppendTime</code> nếu cần giờ ghi do broker đặt; retention dài theo chính sách lưu trữ của ngân hàng (hỏi platform team, cân nhắc tiered storage).</p>
+
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Đặt <code>retention.ms</code> 7 ngày thì đúng ngày thứ 8 dữ liệu mất?</b> Không chính xác: xoá theo segment, nên có thể muộn hơn tới khi segment đóng.</li>
+<li><b>Seek trong <code>onPartitionsAssigned</code> có sao không?</b> Hàm này chạy lại sau mỗi rebalance: seek vô điều kiện thì mỗi lần rebalance lại đọc lại từ mốc. Seek một lần, hoặc dùng CLI khi group dừng.</li>
+<li><b>Topic compact có thay được topic lịch sử?</b> Không: nó chỉ giữ bản cuối mỗi key.</li>
+</ul>
+
+<h2>5. Tự nói thành lời</h2>
+<p>Trong 60 giây: <i>"Kafka giữ dữ liệu theo ..., không theo việc đã đọc; mặc định ... và đó là SLA cho ... Xoá theo ..., nên ... Compaction giữ ..., không phải ... Đọc lại có ba đường: ... Bẫy lớn nhất là ... Cho audit, Kafka bảo đảm ... nhưng không ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0015-replay-retention.md">tóm tắt Bài 8c</a> (đọc sau khi đã tự nói).</p>
+
+<h2>6. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> mục "Log Compaction" trong <a href="https://kafka.apache.org/44/design/design/">Kafka Design</a> và trang <a href="https://kafka.apache.org/44/implementation/log/">Implementation: Log</a> (khoảng 20 phút).<br>
+<b>Spring:</b> <a href="https://docs.spring.io/spring-kafka/reference/kafka/seek.html">Seeking to a Specific Offset</a>. Nguồn đầy đủ: <code>research/0007-replay-retention-audit.md</code>.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0016-schema-evolution.html">Bài 8d: hợp đồng sự kiện (schema)</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "audit giao dịch 10 năm thì nên để ở Kafka hay chỗ khác?", "đọc lại mà không làm trùng thông báo thì sao?".</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/diagram.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Topic giao dịch để retention mặc định. Consumer group báo cáo nghỉ 10 ngày rồi chạy lại. Dữ liệu 10 ngày trước còn không?',
+    options: ['Còn, vì group chưa đọc tới', 'Có thể đã bị xoá theo retention', 'Còn, vì offset không bao giờ đổi', 'Còn, broker giữ lại cho group'],
+    answer: 1, why: 'retention.ms mặc định 7 ngày, là "SLA on how soon consumers must read their data". Kafka xoá theo thời gian, không theo việc đã đọc.' },
+  { q: 'Ở Việt Nam, bạn chạy --reset-offsets --to-datetime 2026-11-14T09:00:00.000 (không ghi múi giờ). Công cụ hiểu là?',
+    options: ['09:00 theo giờ của máy bạn', '09:00 theo giờ của broker', '09:00 UTC, tức 16:00 giờ VN', 'Báo lỗi vì thiếu múi giờ'],
+    answer: 2, why: 'Source 4.4.0: Utils.getDateTime nối thêm "Z" khi thiếu múi giờ, tức UTC. Luôn ghi +07:00.' },
+  { q: 'Topic account-balance dùng cleanup.policy=compact. Dùng nó làm audit trail mọi thay đổi số dư được không?',
+    options: ['Được, compaction giữ thứ tự', 'Được, offset không bao giờ đổi', 'Được nếu retention.ms=-1', 'Không, nó chỉ giữ bản cuối mỗi key'],
+    answer: 3, why: 'Compaction giữ "at least the last known value for each message key": trạng thái mới nhất, không phải lịch sử. Audit cần một topic delete giữ đủ sự kiện.' },
+  { q: 'Listener Spring gọi seekToTimestamp trong onPartitionsAssigned mỗi lần được gọi. Rủi ro là gì?',
+    options: ['Mỗi rebalance lại đọc lại từ mốc', 'Spring báo lỗi khi khởi động', 'Chỉ partition đầu được seek', 'Offset đã commit bị xoá đi'],
+    answer: 0, why: 'onPartitionsAssigned chạy mỗi lần được giao partition, kể cả sau rebalance. Muốn đọc lại một lần thì seek một lần, hoặc dùng CLI khi group dừng.' },
+  { q: 'Trong họp: "Kafka log là bất biến, dùng làm audit là yên tâm". Câu trả lời đúng nhất?',
+    options: ['Đúng, không ai xoá được dữ liệu', 'Chỉ ghi thêm, nhưng vẫn xoá được', 'Sai, record sửa được bằng Admin API', 'Đúng nếu bật idempotence producer'],
+    answer: 1, why: 'Không có API sửa record và offset không đổi, nhưng dữ liệu vẫn mất theo retention, compaction, deleteRecords hoặc xoá topic. Docs không dùng chữ "immutable".' }
+]);
+</script>
+</body>
+</html>

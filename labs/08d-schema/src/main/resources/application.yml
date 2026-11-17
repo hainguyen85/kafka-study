@@ -1,0 +1,33 @@
+lab:
+  topic: payments-avro
+  schema: v1          # v1 | v2 | v3: chọn file schemas/payment-<schema>.avsc cho producer
+  count: 3
+spring:
+  application:
+    name: lab-schema
+  main:
+    web-application-type: none
+  kafka:
+    bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
+    properties:
+      # dùng chung cho serializer và deserializer (Boot: spring.kafka.properties[...])
+      "[schema.registry.url]": http://localhost:18081   # cổng host của container schema-registry (labs/03-cluster)
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        # Mặc định của Confluent là true: serializer tự đăng ký schema nếu qua được kiểm tra compatibility.
+        # Ghi tường minh để thấy. Ở production nhiều nơi tắt và đăng ký qua CI (research/0008, chưa có câu docs khuyến nghị chung).
+        "[auto.register.schemas]": true
+    consumer:
+      group-id: g-schema
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Bọc deserializer Avro: lỗi giải mã (schema không có, payload sai) không làm hỏng vòng poll() (Bài 6)
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        "[spring.deserializer.value.delegate.class]": io.confluent.kafka.serializers.KafkaAvroDeserializer
+logging:
+  level:
+    org.apache.kafka: WARN
+    io.confluent: WARN

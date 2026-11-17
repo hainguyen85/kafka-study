@@ -20,7 +20,8 @@ const PARTS = [
   { title: 'Phần 1 · Nền tảng', lessons: ['0001-kafka-big-picture', '0002-key-partition-offset', '0003-build-cluster'] },
   { title: 'Phần 2 · Producer', lessons: ['0004-producer-durability', '0010-idempotent-producer'] },
   { title: 'Phần 3 · Consumer và xử lý lỗi', lessons: ['0005-consumer-offset-commit', '0011-rebalance', '0012-delivery-semantics', '0006-error-handling-dlt', '0007-idempotent-consumer-transactions'] },
-  { title: 'Phần 4 · Thiết kế và kiểm tra cuối', lessons: ['0008-topic-design', '0009-final-design-test'] },
+  { title: 'Phần 4 · Thiết kế và kiểm tra cuối', lessons: ['0008-topic-design', '0014-throughput-latency', '0015-replay-retention', '0016-schema-evolution', '0009-final-design-test'] },
+  { title: 'Phần 5 · Tổng kết', lessons: ['0013-core-80-20'] },
 ];
 
 // Mô phỏng: tập trung một nhóm. `lessons` = bài dùng mô phỏng này (để bài hiện lối tắt).

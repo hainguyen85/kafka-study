@@ -192,11 +192,15 @@ Mở đáp án gợi ý
 - **Phía đọc:** consumer cần `isolation.level=read_committed` (mặc định `read_uncommitted`) và `enable.auto.commit=false`. `read_committed` chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. `transaction.timeout.ms` mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[KIP-890]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense)
 - **Phạm vi:** transaction của Kafka không bao gồm DB của bạn. `ChainedKafkaTransactionManager` đã deprecated từ 2.7; khuyến nghị dùng `KafkaTransactionManager` ở container và `@Transactional` cho DB, *không* phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". [[Transactions]](https://docs.spring.io/spring-kafka/reference/kafka/transactions.html)
 
-## 5. Usecase oái oăm
+## 5. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Đặt vé: ghi DB rồi gửi Kafka (dual write)
 
 Dịch vụ lưu đơn vào DB rồi `send` sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. **Outbox**: ghi sự kiện vào bảng `outbox` *cùng transaction DB* với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.
+
+**Xử lý:** outbox: ghi sự kiện vào bảng outbox trong cùng transaction DB với dữ liệu, relay gửi lên Kafka; consumer vẫn phải idempotent.
 
 ```mermaid
 flowchart LR
@@ -226,6 +230,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 Consume "đơn mới" → produce "đã giữ hàng" trong một transaction Kafka là exactly-once *trong Kafka*. Nhưng bước "trừ tồn kho trong DB" ở giữa nằm ngoài. Nếu bạn nói trong họp "bên mình có exactly-once", câu hỏi kế tiếp sẽ là "với DB thì sao?". Câu trả lời trung thực: at-least-once + idempotent consumer cho DB; transaction Kafka dùng khi cả đầu vào và đầu ra đều là topic.
 
+**Xử lý:** at-least-once cộng idempotent consumer cho bước ghi DB; transaction Kafka chỉ dùng cho luồng topic → topic.
+
 ```mermaid
 flowchart TB
 I["Topic: đơn mới"] --> C["Consumer"]
@@ -250,6 +256,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 Producer transactional bị kill -9 khi transaction đang mở. Consumer `read_committed` không đọc qua LSO cho tới khi coordinator đóng transaction (sau `transaction.timeout.ms`, mặc định 60 giây). Tức là một sự cố nhỏ ở producer biến thành độ trễ cho mọi consumer `read_committed` của partition đó. Hạ `transaction.timeout.ms` nếu nghiệp vụ không cho phép chờ lâu; transaction chưa tới 60 giây thì đừng hạ quá thấp. (Chưa có lab cho tình huống này.)
 
+**Xử lý:** hạ `transaction.timeout.ms` nếu nghiệp vụ không chờ được lâu, nhưng không thấp hơn thời gian một transaction thật.
+
 ```mermaid
 sequenceDiagram
 participant P as Producer transactional
@@ -272,6 +280,8 @@ T-->>C: đọc tiếp, bỏ qua m1, m2
 ### (d) `transactional.id` trùng giữa hai instance
 
 Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trước (`ProducerFencedException`, lỗi fatal chỉ còn `close()`). Hệ quả vận hành: prefix cần khác nhau mỗi instance, nhưng ổn định qua restart nếu muốn giữ tính chống trùng qua restart. Điều này xung đột với autoscaling kiểu "pod tên ngẫu nhiên": cần một cách đặt tên ổn định (ví dụ StatefulSet). Ghi vào danh sách câu hỏi cho platform team.
+
+**Xử lý:** prefix `transactional.id` khác nhau mỗi instance và ổn định qua restart (ví dụ tên pod của StatefulSet).
 
 ```mermaid
 sequenceDiagram

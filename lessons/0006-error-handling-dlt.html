@@ -124,9 +124,11 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s8        # ~25 giây</code></
 <li><b>Docs Apache không định nghĩa DLQ cho consumer thường.</b> DLQ chính thức chỉ có ở Kafka Connect (<code>errors.tolerance</code>, <code>errors.deadletterqueue.topic.name</code>) và Share Groups. Retry topic và DLT trong consumer là <em>pattern ứng dụng</em>; Spring Kafka hiện thực nó cho bạn. <a href="https://kafka.apache.org/44/kafka-connect/user-guide/">[Connect guide]</a> <a href="../research/0001-curriculum-coverage.md">[research/0001, mục 1.1]</a></li>
 </ul>
 
-<h2>5. Usecase oái oăm</h2>
-<h3>(a) Cổng thanh toán: một message JSON thiếu trường chặn cả partition</h3>
+<h2>5. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Cổng thanh toán: một message JSON thiếu trường chặn cả partition</h3>
 <p>Nếu bạn tự viết consumer thuần mà không xử lý, <code>poll</code> ném <code>RecordDeserializationException</code> (có <code>offset()</code> của record hỏng) và, nếu không bỏ qua record đó, lần <code>poll</code> kế tiếp lặp lại lỗi tại cùng offset, lag tăng mãi (đây là suy luận, docs không mô tả cách bỏ qua). Với Spring Kafka thì ngược lại: hành vi mặc định <em>không chặn</em> nhưng <em>mất im lặng</em> (Bước 1). Hai thái cực. Thiết kế đúng nằm giữa: retry có giới hạn, rồi DLT, rồi cảnh báo trên độ sâu DLT.</p>
+<p><b>Xử lý:</b> retry có giới hạn, rồi DLT, rồi cảnh báo theo độ sâu DLT.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -146,8 +148,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: cùng một record hỏng, ba cách xử lý cho ba kết quả: chặn mãi, mất im lặng, hoặc vào DLT có cảnh báo.</figcaption>
 </figure>
-<h3>(b) Lỗi tạm thời và lỗi vĩnh viễn cần cách xử lý khác nhau</h3>
+<h3 id="uc-b">(b) Lỗi tạm thời và lỗi vĩnh viễn cần cách xử lý khác nhau</h3>
 <p>Dịch vụ phụ trợ chết 2 giây (tạm thời) khác với dữ liệu sai định dạng (vĩnh viễn). Retry 3 lần × 300ms chữa được loại đầu; loại sau nên thành "không retry" để khỏi lãng phí. Nếu lỗi tạm thời kéo dài phút thì blocking retry làm partition đứng và có nguy cơ vượt <code>max.poll.interval.ms</code>: đó là lúc cân nhắc <code>@RetryableTopic</code>, đổi lại <b>thứ tự</b> message cùng key không còn được đảm bảo (record lỗi đi sang topic khác trong khi record sau chạy tiếp). Hệ quả thiết kế: nếu thứ tự theo key là bắt buộc (ví dụ chuyển trạng thái đơn), chọn blocking retry hoặc xử lý bất biến theo thứ tự ở tầng nghiệp vụ.</p>
+<p><b>Xử lý:</b> lỗi tạm thời ngắn thì retry có back-off; lỗi vĩnh viễn thì không retry, đưa thẳng sang DLT; lỗi tạm thời kéo dài thì cân nhắc <code>@RetryableTopic</code> nếu không cần thứ tự theo key.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -164,8 +167,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: chọn cách retry theo loại lỗi và theo yêu cầu thứ tự. Nếu thứ tự theo key là bắt buộc, cũng có thể làm tầng nghiệp vụ chịu được sai thứ tự.</figcaption>
 </figure>
-<h3>(c) DLT không phải thùng rác</h3>
+<h3 id="uc-c">(c) DLT không phải thùng rác</h3>
 <p>Có DLT mà không ai nhìn nó là mất message có tên đẹp. Cần: cảnh báo khi DLT có record, quy trình "replay" (đưa record về topic gốc sau khi sửa lỗi), và giữ <code>retention</code> của DLT đủ dài. Docs Spring Kafka không quy định quy trình này: đó là quyết định thiết kế của bạn.</p>
+<p><b>Xử lý:</b> cảnh báo khi DLT có record, có quy trình replay về topic gốc, và giữ retention của DLT đủ dài.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -182,8 +186,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: DLT chỉ có giá trị khi có cảnh báo, người xử lý và đường replay về topic gốc.</figcaption>
 </figure>
-<h3>(d) DLT cùng số partition: bẫy khi tăng partition</h3>
+<h3 id="uc-d">(d) DLT cùng số partition: bẫy khi tăng partition</h3>
 <p>Bài 2 đã nói thêm partition làm đổi mapping key. Hệ quả mới ở đây: topic gốc tăng partition mà quên tăng DLT thì recoverer không gửi được record có partition vượt (nó kiểm tra và đặt partition là null theo docs). Khi đó phải chọn lại: để Kafka chọn partition của DLT, hay bắt buộc cùng partition.</p>
+<p><b>Xử lý:</b> tăng partition của DLT cùng lúc với topic gốc, hoặc chủ động để Kafka tự chọn partition của DLT.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -206,7 +211,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: topic gốc tăng partition mà DLT thì không; recoverer đặt partition là null và Kafka tự chọn.</figcaption>
 </figure>
-<h3>(e) Nếu là ngân hàng</h3>
+<h3 id="uc-e">(e) Nếu là ngân hàng</h3>
 <p>Mặc định "10 lần rồi bỏ" là không thể chấp nhận cho sự kiện tiền. Cấu hình tối thiểu: <code>DefaultErrorHandler</code> + DLT có <code>min.insync.replicas=2</code> + cảnh báo + quy trình replay, và listener idempotent (Bài 7) vì retry nghĩa là giao nhiều lần.</p>
 <figure class="diagram">
 <script type="text/mermaid">

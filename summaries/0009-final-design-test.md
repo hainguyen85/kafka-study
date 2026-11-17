@@ -1,6 +1,6 @@
 # Tóm tắt Bài 9: Bài kiểm tra cuối
 
-[← Tóm tắt Bài 8](0008-topic-design.md) · [Bài học](../lessons/0009-final-design-test.html)
+[← Tóm tắt Bài 8d](0016-schema-evolution.md) · [Bài học](../lessons/0009-final-design-test.html) · [Tóm tắt Bài 10 →](0013-core-80-20.md)
 
 *Bài nói 1-2 phút để giải thích cho người khác. Cấu hình chi tiết và câu hỏi hay gặp nằm trong bài học.*
 

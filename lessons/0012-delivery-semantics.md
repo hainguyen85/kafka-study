@@ -152,7 +152,9 @@ Mở đáp án gợi ý
 3. **At-least-once + idempotent consumer** (khoá duy nhất theo mã sự kiện trong cùng transaction DB với bút toán), phía phát dùng outbox. Chỗ phá: dedup trong RAM, ack trước khi commit DB, hoặc khoá dedup là offset thay vì mã sự kiện.
 4. **Exactly-once trong Kafka**: transaction + `read_committed` ở consumer của `positions`. Chỗ phá: listener vừa ghi topic vừa gọi API ngoài (API không nằm trong transaction); consumer phía sau quên `read_committed` nên thấy cả dữ liệu đã abort.
 
-## 5. Usecase oái oăm
+## 5. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) "Exactly-once" mà khách nhận hai SMS
 
@@ -180,6 +182,8 @@ Note over K,O: Sửa: tách việc gửi SMS sang consumer riêng đọc topic �
 
 Team nghĩ mình đang at-least-once vì cấu hình producer chuẩn, nhưng listener giao việc cho thread pool rồi return (chế độ B ở Bài 5). Offset đi trước việc xử lý; crash là mất. Ngữ nghĩa của chuỗi do nửa yếu nhất quyết định.
 
+**Xử lý:** ack sau khi xử lý xong (chế độ C ở Bài 5), và kiểm cả nửa đọc chứ không chỉ cấu hình producer.
+
 ```mermaid
 flowchart TB
 P["Producer: acks=all, idempotence<br/>nửa ghi: at-least-once"] --> T["Kafka"]
@@ -198,6 +202,8 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ### (c) At-least-once với consumer không idempotent
 
 Rebalance (Bài 5b) giao lại 300 record đã xử lý chưa commit; consumer cộng tiền lần nữa. Không có lỗi nào trong log. At-least-once không sai; thiếu là nửa "chịu được trùng".
+
+**Xử lý:** chống trùng theo `eventId` trong cùng transaction DB với tác dụng phụ (Bài 7).
 
 ```mermaid
 sequenceDiagram

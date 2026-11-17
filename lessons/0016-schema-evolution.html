@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 8d: Hợp đồng sự kiện (schema)</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0015-replay-retention.html">Bài 8c</a> / Bài 8d · <a href="0009-final-design-test.html">Bài 9</a> · <a href="../reference/0005-usecase-index.html">Tổng hợp usecase</a></nav>
+
+<h1>Bài 8d: Hợp đồng sự kiện (schema)</h1>
+<p class="lede">Kafka chỉ lưu byte. Khi năm team cùng đọc sự kiện thanh toán của một team khác, cái giữ cho họ không vỡ khi định dạng thay đổi là một hợp đồng: schema, cùng một registry kiểm tra mọi thay đổi trước khi nó lên production.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mảng mở rộng thứ ba của mission: hợp đồng sự kiện giữa nhiều team. Câu bạn sẽ gặp: "thêm field vào sự kiện thanh toán có làm hỏng team khác không?", "registry nào, ai được đăng ký schema?". Sau bài này bạn phân biệt được thay đổi an toàn và thay đổi phá vỡ, và biết thứ tự nâng cấp producer, consumer.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn chạy Schema Registry trên cụm của mình, gửi sự kiện Avro bằng Spring Boot với ba phiên bản schema, tận mắt thấy registry nhận thay đổi an toàn và từ chối thay đổi phá vỡ, và đọc được schema id nằm trong từng message.</p>
+
+<h2>1. Bốn khái niệm</h2>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P as Producer (KafkaAvroSerializer)
+participant R as Schema Registry
+participant K as Kafka (chỉ lưu byte)
+participant C as Consumer (KafkaAvroDeserializer)
+P->>R: đăng ký schema cho subject payments-avro-value
+R-->>P: kiểm tra compatibility, trả schema id (ví dụ 2)
+P->>K: byte = magic 0 + schema id 2 + dữ liệu Avro
+K->>C: byte nguyên vẹn
+C->>R: lấy schema theo id 2 (lần đầu, sau đó cache)
+R-->>C: schema v2
+C->>C: giải mã thành record
+</script>
+<figcaption>Sequence: schema không đi qua Kafka; mỗi message chỉ mang schema id, registry giữ hợp đồng.</figcaption>
+</figure>
+
+<h3>1.1. Kafka chỉ lưu byte</h3>
+<ul class="tight">
+<li><b>Một event là key, value, timestamp, header</b>; serializer là "An interface for converting objects to bytes". Broker Apache không đọc nội dung value, không kiểm tra schema. <a href="https://kafka.apache.org/44/getting-started/introduction/">[Introduction]</a> <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/common/serialization/Serializer.html">[Serializer]</a></li>
+<li><b>Không có registry thì hợp đồng chỉ là thoả thuận miệng</b>: team phát đổi định dạng tuỳ ý thì "it becomes very difficult to ensure that all downstream consumers will (continue to) be able to interpret the data". <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/index.html">[Schema Registry concepts]</a></li>
+<li><b>Wire format của Confluent:</b> byte 0 là magic <code>0</code>, byte 1 tới 4 là schema id, sau đó mới là dữ liệu. Mọi consumer của topic phải dùng deserializer cùng hệ registry. <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html">[Serdes: wire format]</a></li>
+</ul>
+
+<h3>1.2. Subject, version, schema id</h3>
+<ul class="tight">
+<li><b>Subject</b> là "a named scope for schema evolution": một chuỗi version có cấu hình compatibility riêng. Mặc định (<code>TopicNameStrategy</code>) subject là <code>&lt;topic&gt;-value</code> và <code>&lt;topic&gt;-key</code>. <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/index.html">[Concepts]</a></li>
+<li><b>Schema id</b> là định danh toàn cục của một định nghĩa schema; producer nhúng id vào từng message, consumer dùng id để lấy schema.</li>
+<li><b>Mặc định một topic chỉ một loại record</b>: <code>TopicNameStrategy</code> "Not generally" chứa nhiều loại; muốn nhiều loại event trong một topic thì đổi sang <code>TopicRecordNameStrategy</code>. <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html">[Serdes]</a></li>
+</ul>
+
+<h3>1.3. Compatibility: thay đổi nào được phép</h3>
+<ul class="tight">
+<li><b>Mặc định là <code>BACKWARD</code>, không transitive</b>: consumer dùng schema mới đọc được dữ liệu của version <em>liền trước</em>. Nghĩa là <b>nâng consumer trước, producer sau</b>: "upgrade all consumers before you start producing new events". <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html">[Schema evolution]</a></li>
+<li><b>Luật vàng:</b> thêm hoặc bỏ field <em>tuỳ chọn có default</em> (Avro: <code>["null", T]</code>, <code>"default": null</code>) an toàn ở mọi mode. Thêm field bắt buộc không default thì phá vỡ <code>BACKWARD</code>. Đổi kiểu (ví dụ số sang chuỗi) thì phá vỡ; docs khuyên "create a brand-new topic".</li>
+<li><b>Muốn đọc lại toàn bộ lịch sử bằng code mới</b> (Bài 8c) thì dùng <code>BACKWARD_TRANSITIVE</code>: kiểm với <em>mọi</em> version trước, không chỉ version liền trước.</li>
+</ul>
+
+<h3>1.4. Registry nào, cấu hình trong Spring ra sao</h3>
+<ul class="tight">
+<li><b>Confluent Schema Registry</b>: chạy ngoài broker, lưu schema trong topic compact <code>_schemas</code>; serializer mặc định <b>tự đăng ký</b> schema (<code>auto.register.schemas=true</code>). <a href="https://docs.confluent.io/platform/current/schema-registry/connect.html">[Configuration options]</a></li>
+<li><b>AWS Glue Schema Registry</b> (thường đi với MSK): miễn phí, xác thực bằng IAM, 8 mode (thêm <code>DISABLED</code>, <code>_ALL</code> tương ứng transitive), và serializer mặc định <b>không</b> tự đăng ký. <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html">[Glue Schema Registry]</a></li>
+<li><b>Spring Boot</b> không có trang riêng cho Schema Registry: cấu hình qua <code>spring.kafka.*.properties[...]</code>, bọc deserializer bằng <code>ErrorHandlingDeserializer</code>; lỗi giải mã là lỗi fatal, không retry (Bài 6). <a href="https://docs.spring.io/spring-boot/reference/messaging/kafka.html">[Spring Boot: Kafka]</a></li>
+</ul>
+
+<h3>Bảng thay đổi schema (Avro, theo docs Confluent)</h3>
+<table>
+<tr><th>Thay đổi</th><th>BACKWARD (mặc định)</th><th>FORWARD</th><th>FULL</th></tr>
+<tr><td>Thêm field tuỳ chọn có default</td><td>✔</td><td>✔</td><td>✔</td></tr>
+<tr><td>Bỏ field tuỳ chọn</td><td>✔</td><td>✔</td><td>✔</td></tr>
+<tr><td>Thêm field bắt buộc (không default)</td><td>✘</td><td>✔</td><td>✘</td></tr>
+<tr><td>Bỏ field bắt buộc</td><td>✔ (nhưng consumer cũ vỡ)</td><td>✘</td><td>✘</td></tr>
+<tr><td>Đổi kiểu field</td><td>✘</td><td>✘</td><td>✘</td></tr>
+</table>
+<p><a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html">[Schema evolution]</a> Đổi tên field không có trong các trang đã đọc; về kiểm tra nó tương đương bỏ field cũ cộng thêm field mới (chưa kiểm chứng).</p>
+
+<h2>2. Thực hành trên cụm</h2>
+<p>Cụm của Bài 3 giờ có thêm service <code>schema-registry</code> (image <code>confluentinc/cp-schema-registry:8.3.2</code>) trong compose profile <code>schema</code>, REST ở <code>http://localhost:18081</code> (cổng 8081 trên máy bạn đang bị load balancer của k3d dùng). Lab Spring Boot: <code>labs/08d-schema</code>.</p>
+<pre><code># labs/08d-schema/src/main/resources/application.yml (rút gọn)
+spring:
+  kafka:
+    properties:
+      "[schema.registry.url]": http://localhost:18081
+    producer:
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      properties:
+        "[auto.register.schemas]": true      # mặc định của Confluent, ghi ra cho rõ
+    consumer:
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        "[spring.deserializer.value.delegate.class]": io.confluent.kafka.serializers.KafkaAvroDeserializer</code></pre>
+<pre><code>// schemas/payment-v2.avsc: v1 + một field TUỲ CHỌN
+{"name": "channel", "type": ["null", "string"], "default": null}
+// schemas/payment-v3.avsc: v2 + một field BẮT BUỘC, không default
+{"name": "branchCode", "type": "string"}</code></pre>
+
+<div class="step">
+<h3>Bước 1. Bật Schema Registry</h3>
+<pre><code># trong terminal Ubuntu (WSL)
+cd /mnt/d/Workspace/study/kafka/labs/03-cluster
+docker compose --profile schema up -d schema-registry
+curl -s http://localhost:18081/config</code></pre>
+<div class="expect">Đã chạy thật: <code>{"compatibilityLevel":"BACKWARD"}</code>: mặc định BACKWARD đúng như docs. Registry tự tạo topic <code>_schemas</code> (1 partition, <code>cleanup.policy=compact</code>).</div>
+<label class="tick"><input type="checkbox" data-step="1"> Registry đã chạy</label>
+</div>
+
+<div class="step">
+<h3>Bước 2. Gửi ba phiên bản schema</h3>
+<pre><code>cd labs/08d-schema
+mvn -q -DskipTests package
+J="java -jar target/schema-0.0.1-SNAPSHOT.jar"
+$J --spring.profiles.active=produce --lab.schema=v1
+$J --spring.profiles.active=produce --lab.schema=v2
+$J --spring.profiles.active=produce --lab.schema=v3</code></pre>
+<p>Dự đoán trước: phiên bản nào bị từ chối, và lý do?</p>
+<div class="expect">Đã chạy thật (rút gọn):
+<pre><code>[produce] schema v1, field: [eventId, accountId, amount, currency]
+[produce] ACC-000 -&gt; partition=0 offset=0
+[produce] schema v2, field: [eventId, accountId, amount, currency, channel]
+[produce] ACC-000 -&gt; partition=0 offset=2
+[produce] schema v3, field: [eventId, accountId, amount, currency, channel, branchCode]
+[produce] GỬI LỖI (RestClientException): Schema being registered is incompatible with an earlier schema
+  for subject "payments-avro-value", details: [{errorType:'READER_FIELD_MISSING_DEFAULT_VALUE',
+  description:'The field 'branchCode' at path '/fields/5' in the new schema has no default value ...</code></pre>
+v2 được đăng ký thành version 2; v3 bị từ chối <em>trước khi</em> có byte nào vào Kafka: hợp đồng chặn thay đổi phá vỡ ngay ở producer.</div>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã thấy registry nhận v2 và từ chối v3</label>
+</div>
+
+<div class="step">
+<h3>Bước 3. Đọc lẫn message v1 và v2</h3>
+<pre><code>$J --spring.profiles.active=consume</code></pre>
+<div class="expect">Đã chạy thật (rút gọn):
+<pre><code>[consume] partition=0 offset=0 schema field=[eventId, accountId, amount, currency] value={...}
+[consume] partition=0 offset=2 schema field=[eventId, accountId, amount, currency, channel] value={...}</code></pre>
+Hai phiên bản nằm chung một topic; consumer đọc được cả hai vì mỗi message mang schema id của chính nó.</div>
+</div>
+
+<div class="step">
+<h3>Bước 4. Nhìn byte và hỏi registry trước khi đổi schema</h3>
+<pre><code># 16 byte đầu của một message
+docker exec kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-1:19092 \
+  --topic payments-avro --partition 1 --offset 0 --max-messages 1 | head -c 16 | xxd
+
+# kiểm tra v3 với version mới nhất, KHÔNG đăng ký
+python3 -c "import json;print(json.dumps({'schema':open('src/main/resources/schemas/payment-v3.avsc').read()}))" &gt; /tmp/v3.json
+curl -s -X POST -H 'Content-Type: application/vnd.schemaregistry.v1+json' --data @/tmp/v3.json \
+  'http://localhost:18081/compatibility/subjects/payments-avro-value/versions/latest?verbose=true'</code></pre>
+<div class="expect">Đã chạy thật:
+<pre><code>00000000: 0000 0000 0148 3336 6631 6635 6161 2d33  .....H36f1f5aa-3
+{"is_compatible":false,"messages":["{errorType:'READER_FIELD_MISSING_DEFAULT_VALUE', ...}", ... "{validateFields: 'false', compatibility: 'BACKWARD'}"]}</code></pre>
+Byte <code>00</code> là magic, bốn byte <code>00 00 00 01</code> là schema id 1, phần sau là dữ liệu Avro. Endpoint <code>/compatibility</code> cho phép kiểm tra trong CI trước khi deploy, không cần gửi message.</div>
+<label class="tick"><input type="checkbox" data-step="4"> Tôi đã đọc được schema id trong byte</label>
+</div>
+
+<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<h3>Subject và đăng ký schema</h3>
+<ul class="tight">
+<li>Ba strategy: <code>TopicNameStrategy</code> (mặc định, <code>&lt;topic&gt;-value</code>), <code>RecordNameStrategy</code> (theo tên record, kiểm tra <em>trên mọi topic</em>), <code>TopicRecordNameStrategy</code> (<code>&lt;topic&gt;-&lt;record&gt;</code>). <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html">[Serdes]</a></li>
+<li><code>use.latest.version</code> (mặc định false) chỉ có tác dụng khi <code>auto.register.schemas=false</code>: producer dùng version mới nhất của subject. Nhiều nơi tắt tự đăng ký ở production và đăng ký qua CI; docs không có câu khuyến nghị chung (chưa kiểm chứng).</li>
+<li>Avro cần schema cả khi đọc, nên payload gọn ("field names don't have to be explicitly encoded"). Docs khuyên "Use specific records for production applications"; lab dùng <code>GenericRecord</code> cho dễ thấy schema. <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/serdes-avro.html">[Avro serdes]</a></li>
+</ul>
+
+<h3>Compatibility</h3>
+<ul class="tight">
+<li>Lý do mặc định là BACKWARD: "so that you can rewind consumers to the beginning of the topic. With FORWARD compatibility mode, you aren't guaranteed the ability to read old messages." <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html">[Schema evolution]</a></li>
+<li>FORWARD: nâng producer trước. FULL: producer và consumer nâng độc lập. Protobuf: docs khuyên <code>BACKWARD_TRANSITIVE</code> "as adding new message types is not forward compatible".</li>
+<li>Đặt compatibility theo subject: <code>PUT /config/{subject}</code> với <code>{"compatibility":"BACKWARD_TRANSITIVE"}</code> (đã chạy thử trên cụm lab).</li>
+</ul>
+
+<h3>AWS Glue Schema Registry</h3>
+<ul class="tight">
+<li>Hỗ trợ Avro, JSON Schema, Protobuf; registry là "a logical container of schemas"; compatibility gắn theo schema, không có khái niệm subject; giới hạn 10000 schema version mỗi region. <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html">[Glue Schema Registry]</a></li>
+<li>Client Java: <code>GlueSchemaRegistryKafkaSerializer</code>; mặc định <code>SCHEMA_AUTO_REGISTRATION_SETTING</code> "If not passed, uses "false""; <code>COMPATIBILITY_SETTING</code> mặc định BACKWARD; schema name mặc định là tên topic. <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry-gs-serde-java.html">[Glue Java serde]</a></li>
+<li>Chuyển registry: consumer dùng deserializer Glue với <code>SECONDARY_DESERIALIZER</code> cho định dạng cũ; nâng consumer trước, producer sau. <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations-migration.html">[Glue migration]</a></li>
+</ul>
+
+<h2>4. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Ngân hàng: thêm kênh giao dịch vào sự kiện thanh toán</h3>
+<p>Team Core Banking phát <code>PaymentCompleted</code> cho năm team khác. Nghiệp vụ cần thêm <code>channel</code> (mobile, web, quầy). Nếu thêm như field bắt buộc, registry từ chối (Bước 2 với v3); nếu không có registry, consumer của năm team sẽ vỡ ở những chỗ không ai lường trước.</p>
+<p><b>Xử lý:</b> thêm <code>channel</code> là field tuỳ chọn <code>["null","string"]</code> với <code>"default": null</code>: an toàn ở mọi mode, consumer cũ bỏ qua field mới, consumer mới đọc message cũ với giá trị null.</p>
+
+<h3 id="uc-b">(b) Ngân hàng: bỏ một field "không ai dùng" làm vỡ team khác</h3>
+<p>Team Core muốn bỏ <code>branchCode</code> (đang bắt buộc) vì nghĩ không ai dùng. BACKWARD cho phép thay đổi này, nên registry nhận. Nhưng một team báo cáo chưa nâng cấp vẫn chạy consumer với schema cũ, cần <code>branchCode</code>, và vỡ khi đọc message mới: BACKWARD chỉ bảo đảm consumer <em>mới</em> đọc được dữ liệu <em>cũ</em>.</p>
+<p><b>Xử lý:</b> với BACKWARD, nâng mọi consumer trước rồi mới nâng producer; trước khi bỏ field, hỏi các team đang đọc subject đó, hoặc dùng FULL để registry chặn cả chiều này.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant Core as Team Core (producer)
+participant R as Schema Registry (BACKWARD)
+participant Rep as Team báo cáo (consumer cũ)
+Core->>R: schema mới bỏ field bắt buộc branchCode
+R-->>Core: được (BACKWARD cho phép)
+Core->>Rep: message mới không có branchCode
+Rep->>Rep: giải mã bằng schema cũ: thiếu field bắt buộc, lỗi
+Note over Core,Rep: BACKWARD = consumer mới đọc dữ liệu cũ. Nâng consumer trước, producer sau
+</script>
+<figcaption>Sequence: thay đổi được registry nhận vẫn làm vỡ consumer chưa nâng cấp, vì BACKWARD chỉ bảo đảm một chiều.</figcaption>
+</figure>
+
+<h3 id="uc-c">(c) Ngân hàng: nhiều loại sự kiện tài khoản trong một topic</h3>
+<p><code>AccountOpened</code>, <code>Deposited</code>, <code>Withdrawn</code>, <code>AccountClosed</code> phải cùng một topic, cùng key là số tài khoản để giữ thứ tự (Bài 2). Với <code>TopicNameStrategy</code> mặc định, subject <code>accounts-value</code> chỉ chứa một chuỗi version; đăng ký loại record thứ hai sẽ bị coi là "thay đổi" của loại thứ nhất và vỡ kiểm tra compatibility.</p>
+<p><b>Xử lý:</b> dùng <code>TopicRecordNameStrategy</code> (mỗi loại record một subject trong phạm vi topic), hoặc schema references; tránh <code>RecordNameStrategy</code> nếu tên record có thể trùng giữa các topic, vì nó kiểm tra trên mọi topic.</p>
+
+<h3 id="uc-d">(d) Chứng khoán: đổi kiểu giá từ số nguyên sang số thập phân</h3>
+<p>Topic lệnh chứng khoán đang có <code>price</code> kiểu <code>long</code> (đơn vị đồng). Sàn chuyển sang giá có phần lẻ, team muốn đổi sang kiểu khác. Đổi kiểu là thay đổi phá vỡ ở mọi mode: không consumer nào đọc được cả dữ liệu cũ lẫn mới qua cùng một field.</p>
+<p><b>Xử lý:</b> thêm field mới tuỳ chọn có default cho giá kiểu mới và giữ field cũ trong giai đoạn chuyển; nếu bắt buộc đổi hẳn thì làm theo docs: "create a brand-new topic" và chuyển consumer sang topic mới.</p>
+
+<h3 id="uc-e">(e) Consumer đọc topic Avro bằng deserializer chuỗi</h3>
+<p>Một team viết consumer nhanh bằng <code>StringDeserializer</code> để "xem thử" topic thanh toán. Mỗi message có 5 byte đầu là magic và schema id, rồi tới dữ liệu Avro nhị phân: chuỗi đọc ra là rác. Nếu dùng <code>JsonDeserializer</code> thì giải mã lỗi ngay trong <code>poll()</code>.</p>
+<p><b>Xử lý:</b> mọi consumer của topic dùng deserializer cùng hệ registry, bọc bằng <code>ErrorHandlingDeserializer</code> để lỗi giải mã đi thẳng vào DLT (Bài 6) thay vì chặn vòng <code>poll()</code>.</p>
+
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Có registry rồi thì cần idempotent consumer nữa không?</b> Có: registry giữ định dạng, không chống trùng.</li>
+<li><b>Ai được đăng ký schema?</b> Câu hỏi cho platform team: registry nào (Glue hay Confluent), quyền đăng ký (IAM hay RBAC), compatibility mặc định của tổ chức, có cho tự đăng ký trên production không.</li>
+<li><b>Đọc lại một năm dữ liệu bằng code mới có chắc đọc được không?</b> Chỉ chắc khi subject dùng <code>BACKWARD_TRANSITIVE</code> hoặc <code>FULL_TRANSITIVE</code>.</li>
+</ul>
+
+<h2>5. Tự nói thành lời</h2>
+<p>Trong 60 giây: <i>"Kafka chỉ lưu ..., hợp đồng nằm ở ... Mỗi message mang ..., consumer lấy schema từ ... Mặc định compatibility là ..., nghĩa là nâng ... trước. Thay đổi an toàn nhất là ...; đổi kiểu thì ... Trên MSK thường dùng ..., khác Confluent ở chỗ ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0016-schema-evolution.md">tóm tắt Bài 8d</a> (đọc sau khi đã tự nói).</p>
+
+<h2>6. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html">Schema Evolution and Compatibility</a> (khoảng 20 phút): bảng thay đổi, thứ tự nâng cấp, lý do mặc định BACKWARD.<br>
+<b>Cho MSK:</b> <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html">AWS Glue Schema Registry</a>. Nguồn đầy đủ: <code>research/0008-schema-evolution.md</code>.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0009-final-design-test.html">Bài 9: bài kiểm tra cuối</a>, rồi <a href="0013-core-80-20.html">Bài 10: tổng kết 80/20</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "đổi tên một field thì làm sao?", "JSON Schema có khác Avro nhiều không?". Dán thông báo lỗi của registry nếu bạn thử schema khác.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/diagram.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Subject đang ở compatibility mặc định. Team thêm một field bắt buộc, không có default, vào schema Avro. Registry làm gì?',
+    options: ['Nhận và tạo version mới', 'Từ chối vì phá vỡ BACKWARD', 'Nhận nhưng cảnh báo trong log', 'Tự thêm default rồi nhận'],
+    answer: 1, why: 'BACKWARD: consumer dùng schema mới phải đọc được message cũ; message cũ thiếu field bắt buộc nên không đọc được. Lab cho lỗi READER_FIELD_MISSING_DEFAULT_VALUE.' },
+  { q: 'Với compatibility BACKWARD, thứ tự nâng cấp đúng là?',
+    options: ['Nâng producer trước, consumer sau', 'Nâng cả hai cùng một lúc', 'Nâng consumer trước, producer sau', 'Thứ tự nào cũng như nhau'],
+    answer: 2, why: 'Docs: "upgrade all consumers before you start producing new events". BACKWARD bảo đảm consumer mới đọc được dữ liệu cũ, không bảo đảm chiều ngược lại.' },
+  { q: 'Thay đổi nào an toàn ở cả BACKWARD, FORWARD và FULL?',
+    options: ['Thêm field tuỳ chọn có default', 'Thêm field bắt buộc không default', 'Đổi kiểu field từ số sang chuỗi', 'Bỏ một field đang bắt buộc'],
+    answer: 0, why: 'Docs: "adding or removing a field with a default value is a fully compatible change".' },
+  { q: 'Mỗi message do KafkaAvroSerializer của Confluent ghi ra chứa gì ở 5 byte đầu?',
+    options: ['Toàn bộ schema dạng JSON', 'Tên topic và số version', 'Checksum của payload Avro', 'Magic byte 0 và schema id'],
+    answer: 3, why: 'Wire format: byte 0 là magic 0, byte 1 tới 4 là schema id (big-endian), rồi tới dữ liệu. Lab đọc được 00 00 00 00 01.' },
+  { q: 'Ngân hàng dùng MSK với AWS Glue Schema Registry. Điều nào khác Confluent theo mặc định?',
+    options: ['Glue không hỗ trợ Avro', 'Serializer Glue không tự đăng ký schema', 'Glue không có kiểm tra compatibility', 'Glue bắt buộc dùng FULL'],
+    answer: 1, why: 'Glue: SCHEMA_AUTO_REGISTRATION_SETTING "If not passed, uses false"; Confluent: auto.register.schemas mặc định true. Cả hai mặc định BACKWARD.' }
+]);
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tổng hợp usecase</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+main { max-width: 64rem; }
+table.uc { font-size: .82rem; }
+table.uc td:first-child { width: 26%; font-weight: 600; }
+table.uc td:last-child { width: 30%; }
+#ucFilter { font: inherit; font-size: .9rem; width: 100%; max-width: 28rem; padding: .4rem .6rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · <a href="0003-tricky-scenarios.html">Sổ tay usecase (triệu chứng, nguyên nhân, code)</a></nav>
+<h1>Tổng hợp usecase</h1>
+<p class="lede">48 usecase từ 12 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.</p>
+<p><input id="ucFilter" type="search" placeholder="Lọc theo từ khoá: thanh toán, rebalance, acks, DLT..." aria-label="Lọc usecase"></p>
+<p>Trang này do <code>scripts/build_usecases.py</code> sinh từ các bài học; cột "Cách xử lý" lấy câu bắt đầu bằng "Xử lý" hoặc "Sửa" trong usecase.</p>
+
+<h2>Bài 2: Key, partition, offset</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0002-key-partition-offset.html#uc-a">(a) Gọi xe: tài xế "nhảy lùi" trên bản đồ</a></td><td>Mỗi vài giây, app tài xế gửi DriverLocationUpdated vào topic driver-locations (3 partition). Team làm bản đồ muốn hiển thị vị trí mới nhất của từng tài xế, nhưng lại dùng mã cuốc xe làm key (và giữa hai cuốc, key trống).</td><td>key = mã tài xế.</td></tr>
+<tr><td><a href="../lessons/0002-key-partition-offset.html#uc-b">(b) Flash sale: một shop làm nghẽn một partition</a></td><td>Topic orders dùng mã shop làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition.</td><td>chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8).</td></tr>
+</table>
+<h2>Bài 3: Dựng cụm 3 broker</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0003-build-cluster.html#uc-a">(a) Kho lạnh mất điện cả giá đỡ (IoT)</a></td><td>Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt.</td><td>đặt các node ở các khu vực mất điện khác nhau, và ở môi trường quan trọng thì tách controller khỏi broker.</td></tr>
+<tr><td><a href="../lessons/0003-build-cluster.html#uc-b">(b) Topic "ma" do gõ sai tên (microservices dùng chung cụm)</a></td><td>Service A gửi vào order-evnts (gõ nhầm), service B đọc order-events. Không ai báo lỗi vì broker tự tạo order-evnts với 1 partition và RF=1 (giá trị mặc định ở mục 1).</td><td>tắt auto.create.topics.enable và tạo topic có chủ đích (lab của bạn đã làm đúng việc này; Stage 5 của wizard có kiểm tra).</td></tr>
+</table>
+<h2>Bài 4: Producer và độ bền</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0004-producer-durability.html#uc-a">(a) Flash sale: "đơn đã nhận" rồi biến mất</a></td><td>Giao diện báo đặt hàng thành công vì producer nhận ack. Sau sự cố một broker, kho đếm thiếu đơn.</td><td>acks=all + RF=3 + minISR=2 ở cấp topic, kiểm bằng --describe.</td></tr>
+<tr><td><a href="../lessons/0004-producer-durability.html#uc-b">(b) Telemetry kho lạnh: cụm sống mà không ghi được</a></td><td>Topic cảm biến RF=3, minISR=2, acks=all. Hai broker giữ partition đó chết (giả sử cụm có controller riêng nên vẫn bầu được leader).</td><td>chọn theo loại dữ liệu: telemetry mất vài điểm không sao thì min.insync.replicas=1; sổ cái, thanh toán giữ min.insync.replicas=2 và báo lỗi cho người dùng.</td></tr>
+<tr><td><a href="../lessons/0004-producer-durability.html#uc-c">(c) Spring: lỗi gửi nằm im trong log</a></td><td>Service gọi template.send(...) không đọc future. Topic bị từ chối (ISR thấp), ứng dụng vẫn trả 200 cho người dùng.</td><td>whenComplete hoặc .get(timeout) khi cần chắc chắn, và quyết định ứng dụng làm gì khi lỗi (trả lỗi cho người dùng, hoặc ghi outbox, Bài 7).</td></tr>
+<tr><td><a href="../lessons/0004-producer-durability.html#uc-d">(d) API thanh toán treo 60 giây khi cụm có sự cố</a></td><td>Controller REST nhận yêu cầu, gọi template.send(...) rồi trả 202. Một sáng, mạng tới cụm Kafka đứt.</td><td>Hạ max.block.ms xuống mức API chịu được (vài giây) để lỗi nhanh thay vì treo lâu.</td></tr>
+<tr><td><a href="../lessons/0004-producer-durability.html#uc-e">(e) Nếu là ngân hàng</a></td><td>Cấu hình tham chiếu cho sự kiện tiền.</td><td>Một dòng cho buổi họp: "Topic giao dịch: RF=3, minISR=2, acks=all, idempotence bật, unclean.leader.election.enable=false, và producer đọc kết quả gửi". Đó là câu trả lời chuẩn cho "không mất"; phần còn lại (trùng) giải ở consumer.</td></tr>
+</table>
+<h2>Bài 4b: Idempotent producer</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0010-idempotent-producer.html#uc-a">(a) Logistics: DELIVERED đến trước PICKED_UP</a></td><td>Team giao hàng đặt acks: "1" cho nhanh. Idempotence tắt âm thầm (điều kiện 1 bị vi phạm).</td><td>acks=all và ghi tường minh enable.idempotence=true.</td></tr>
+<tr><td><a href="../lessons/0010-idempotent-producer.html#uc-b">(b) Đặt vé: restart rồi gửi lại</a></td><td>Service đặt vé gửi BookingCreated, bị deploy lại trước khi nhận kết quả. Lúc khởi động nó gửi lại các booking "chưa chắc đã gửi".</td><td>eventId sinh một lần cho mỗi booking, consumer chống trùng theo nó (Bài 7), hoặc outbox để chỉ một tiến trình chịu trách nhiệm gửi.</td></tr>
+<tr><td><a href="../lessons/0010-idempotent-producer.html#uc-c">(c) "Ta tăng max.in.flight lên 10 cho throughput"</a></td><td>Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo.</td><td>giữ max.in.flight.requests.per.connection ≤ 5 và ghi tường minh enable.idempotence=true, để cấu hình sai lộ ra ngay lúc khởi động.</td></tr>
+</table>
+<h2>Bài 5: Consumer, offset, commit, rebalance</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0005-consumer-offset-commit.html#uc-a">(a) Gửi email/SMS thông báo: vừa mất vừa trùng</a></td><td>Listener đẩy việc gửi email sang thread pool rồi return để "nhanh". Auto-commit đẩy offset đi; crash giữa chừng làm vài email không bao giờ đi (mất), và nếu bạn commit cuối lô thì vài cái khác đi hai lần.</td><td>ack sau khi xong (Thử 3), nhưng nếu việc gửi cần song song thì phải đợi worker xong trước khi ack (hoặc quản lý offset theo worker).</td></tr>
+<tr><td><a href="../lessons/0005-consumer-offset-commit.html#uc-b">(b) OCR chứng từ: bị đá khỏi group</a></td><td>Mỗi tài liệu 12 giây, max.poll.records=500 mặc định, max.poll.interval.ms 5 phút: một lô 500 record cần 100 phút. Consumer bị coi là chết, rebalance, và cả lô bị xử lý lại bởi người khác: "xử lý lặp liên hồi".</td><td>hạ max.poll.records cho vừa với thời gian xử lý, hoặc tăng max.poll.interval.ms (đánh đổi: phát hiện consumer thật sự chết chậm hơn).</td></tr>
+<tr><td><a href="../lessons/0005-consumer-offset-commit.html#uc-c">(c) ETL báo cáo tuần: nghỉ lễ quay lại thì "không có gì để đọc"</a></td><td>Group rỗng quá 7 ngày: offset đã commit bị xoá; auto.offset.reset=latest làm job nhảy tới cuối và bỏ qua mọi thứ đã tích. Xử lý: earliest (đọc lại hết) hoặc none (ném lỗi cho bạn biết); tăng offsets.retention.minutes theo chu kỳ job.</td><td>earliest (đọc lại hết) hoặc none (ném lỗi cho bạn biết); tăng offsets.retention.minutes theo chu kỳ job.</td></tr>
+<tr><td><a href="../lessons/0005-consumer-offset-commit.html#uc-d">(d) Gọi xe: deploy làm cả đội điều phối đứng hình</a></td><td>Rolling restart 10 instance, mỗi lần một instance rời/vào là một lần rebalance; giao thức classic có rào chắn toàn group. Xử lý theo mức: static membership (instance về lại đúng chỗ cũ, đừng để trùng group.instance.id), cooperative assignor, …</td><td>static membership (instance về lại đúng chỗ cũ, đừng để trùng group.instance.id), cooperative assignor, group.protocol=consumer (cần broker hỗ trợ; Kafka Connect chưa dùng được).</td></tr>
+<tr><td><a href="../lessons/0005-consumer-offset-commit.html#uc-e">(e) Nếu là ngân hàng</a></td><td>Cấu hình tham chiếu cho sự kiện tiền.</td><td>"Service nhận sự kiện chuyển tiền: tắt auto-commit, ack sau khi ghi DB xong, chống trùng bằng mã sự kiện": ba cụm từ này là câu trả lời đầy đủ cho "restart có sao không".</td></tr>
+</table>
+<h2>Bài 5b: Rebalance</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0011-rebalance.html#uc-a">(a) Gọi xe: rolling deploy 10 pod làm điều phối đứng hình</a></td><td>Deploy thay lần lượt 10 pod. Mỗi pod tắt rồi bật là hai lần rebalance; với eager, mỗi lần cả group dừng.</td><td>cooperative (chỉ partition đổi chủ dừng), static membership với tên pod ổn định (restart nhanh không rebalance), hoặc giao thức consumer nếu broker hỗ trợ.</td></tr>
+<tr><td><a href="../lessons/0011-rebalance.html#uc-b">(b) Autoscale theo lag thành "bão rebalance"</a></td><td>Lag tăng, autoscaler thêm pod; thêm pod gây rebalance, lag tăng tiếp; lag giảm thì bớt pod, lại rebalance. Group dành nhiều thời gian chia lại hơn là đọc.</td><td>ngưỡng scale có độ trễ (cooldown), không scale vượt số partition (consumer thừa chỉ ngồi chờ, Bài 1), dùng cooperative.</td></tr>
+<tr><td><a href="../lessons/0011-rebalance.html#uc-c">(c) Consumer chết đột ngột: 45 giây im lặng rồi xử lý trùng</a></td><td>Pod bị OOM kill. Coordinator không nhận heartbeat nhưng chỉ loại nó sau session.timeout.ms.</td><td>consumer phải idempotent (Bài 7); chỉ hạ session.timeout.ms khi chấp nhận rủi ro rebalance oan do GC pause.</td></tr>
+<tr><td><a href="../lessons/0011-rebalance.html#uc-d">(d) Nếu là ngân hàng</a></td><td>Cấu hình tham chiếu cho sự kiện tiền.</td><td>"Service đọc giao dịch dùng cooperative + static membership, commit khi bị thu hồi partition, và consumer idempotent vì rebalance vẫn có thể gây xử lý lại." Câu cuối quan trọng nhất: giảm rebalance là tối ưu, chống trùng mới là bảo đảm.</td></tr>
+</table>
+<h2>Bài 5c: At-most-once, at-least-once, exactly-once</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0012-delivery-semantics.html#uc-a">(a) "Exactly-once" mà khách nhận hai SMS</a></td><td>Listener chạy trong transaction Kafka, gửi SMS rồi ghi sự kiện ra topic. Lần đầu ghi topic lỗi, transaction abort, record được giao lại, SMS đi lần hai.</td><td>tách việc gửi SMS sang consumer riêng đọc topic đã commit, và cho nó chống trùng.</td></tr>
+<tr><td><a href="../lessons/0012-delivery-semantics.html#uc-b">(b) At-most-once ngoài ý muốn</a></td><td>Team nghĩ mình đang at-least-once vì cấu hình producer chuẩn, nhưng listener giao việc cho thread pool rồi return (chế độ B ở Bài 5). Offset đi trước việc xử lý; crash là mất.</td><td>ack sau khi xử lý xong (chế độ C ở Bài 5), và kiểm cả nửa đọc chứ không chỉ cấu hình producer.</td></tr>
+<tr><td><a href="../lessons/0012-delivery-semantics.html#uc-c">(c) At-least-once với consumer không idempotent</a></td><td>Rebalance (Bài 5b) giao lại 300 record đã xử lý chưa commit; consumer cộng tiền lần nữa. Không có lỗi nào trong log.</td><td>chống trùng theo eventId trong cùng transaction DB với tác dụng phụ (Bài 7).</td></tr>
+</table>
+<h2>Bài 6: Poison pill, retry, DLT</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0006-error-handling-dlt.html#uc-a">(a) Cổng thanh toán: một message JSON thiếu trường chặn cả partition</a></td><td>Nếu bạn tự viết consumer thuần mà không xử lý, poll ném RecordDeserializationException (có offset() của record hỏng) và, nếu không bỏ qua record đó, lần poll kế tiếp lặp lại lỗi tại cùng offset, lag tăng mãi (đây là suy luận, docs không mô tả cách bỏ qua). …</td><td>retry có giới hạn, rồi DLT, rồi cảnh báo theo độ sâu DLT.</td></tr>
+<tr><td><a href="../lessons/0006-error-handling-dlt.html#uc-b">(b) Lỗi tạm thời và lỗi vĩnh viễn cần cách xử lý khác nhau</a></td><td>Dịch vụ phụ trợ chết 2 giây (tạm thời) khác với dữ liệu sai định dạng (vĩnh viễn). Retry 3 lần × 300ms chữa được loại đầu; loại sau nên thành "không retry" để khỏi lãng phí.</td><td>lỗi tạm thời ngắn thì retry có back-off; lỗi vĩnh viễn thì không retry, đưa thẳng sang DLT; lỗi tạm thời kéo dài thì cân nhắc @RetryableTopic nếu không cần thứ tự theo key.</td></tr>
+<tr><td><a href="../lessons/0006-error-handling-dlt.html#uc-c">(c) DLT không phải thùng rác</a></td><td>Có DLT mà không ai nhìn nó là mất message có tên đẹp. Cần: cảnh báo khi DLT có record, quy trình "replay" (đưa record về topic gốc sau khi sửa lỗi), và giữ retention của DLT đủ dài.</td><td>cảnh báo khi DLT có record, có quy trình replay về topic gốc, và giữ retention của DLT đủ dài.</td></tr>
+<tr><td><a href="../lessons/0006-error-handling-dlt.html#uc-d">(d) DLT cùng số partition: bẫy khi tăng partition</a></td><td>Bài 2 đã nói thêm partition làm đổi mapping key. Hệ quả mới ở đây: topic gốc tăng partition mà quên tăng DLT thì recoverer không gửi được record có partition vượt (nó kiểm tra và đặt partition là null theo docs).</td><td>tăng partition của DLT cùng lúc với topic gốc, hoặc chủ động để Kafka tự chọn partition của DLT.</td></tr>
+<tr><td><a href="../lessons/0006-error-handling-dlt.html#uc-e">(e) Nếu là ngân hàng</a></td><td>Cấu hình tham chiếu cho sự kiện tiền.</td><td>Mặc định "10 lần rồi bỏ" là không thể chấp nhận cho sự kiện tiền. Cấu hình tối thiểu: DefaultErrorHandler + DLT có min.insync.replicas=2 + cảnh báo + quy trình replay, và listener idempotent (Bài 7) vì retry nghĩa là giao nhiều lần.</td></tr>
+</table>
+<h2>Bài 7: Idempotent consumer, outbox, transaction</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0007-idempotent-consumer-transactions.html#uc-a">(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</a></td><td>Dịch vụ lưu đơn vào DB rồi send sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước.</td><td>outbox: ghi sự kiện vào bảng outbox trong cùng transaction DB với dữ liệu, relay gửi lên Kafka; consumer vẫn phải idempotent.</td></tr>
+<tr><td><a href="../lessons/0007-idempotent-consumer-transactions.html#uc-b">(b) Kho + đơn hàng: transaction chỉ phủ trong Kafka</a></td><td>Consume "đơn mới" → produce "đã giữ hàng" trong một transaction Kafka là exactly-once trong Kafka. Nhưng bước "trừ tồn kho trong DB" ở giữa nằm ngoài.</td><td>at-least-once cộng idempotent consumer cho bước ghi DB; transaction Kafka chỉ dùng cho luồng topic → topic.</td></tr>
+<tr><td><a href="../lessons/0007-idempotent-consumer-transactions.html#uc-c">(c) Producer chết giữa transaction: consumer đứng yên</a></td><td>Producer transactional bị kill -9 khi transaction đang mở. Consumer read_committed không đọc qua LSO cho tới khi coordinator đóng transaction (sau transaction.timeout.ms, mặc định 60 giây).</td><td>hạ transaction.timeout.ms nếu nghiệp vụ không chờ được lâu, nhưng không thấp hơn thời gian một transaction thật.</td></tr>
+<tr><td><a href="../lessons/0007-idempotent-consumer-transactions.html#uc-d">(d) transactional.id trùng giữa hai instance</a></td><td>Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trước (ProducerFencedException, lỗi fatal chỉ còn close()). Hệ quả vận hành: prefix cần khác nhau mỗi instance, nhưng ổn định qua restart nếu muốn giữ tính chống trùng qua restart.</td><td>prefix transactional.id khác nhau mỗi instance và ổn định qua restart (ví dụ tên pod của StatefulSet).</td></tr>
+<tr><td><a href="../lessons/0007-idempotent-consumer-transactions.html#uc-e">(e) Nếu là ngân hàng</a></td><td>Cấu hình tham chiếu cho sự kiện tiền.</td><td>"At-least-once + idempotent consumer với UNIQUE(eventId) trong cùng transaction DB, kèm outbox ở phía phát" là thiết kế mặc định cho sự kiện tiền. Transaction Kafka chỉ thêm khi có luồng topic → topic thật sự.</td></tr>
+</table>
+<h2>Bài 8b: Quá tải, thông lượng, độ trễ</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0014-throughput-latency.html#uc-a">(a) Chứng khoán: một mã vốn hoá lớn làm nghẽn bảng giá</a></td><td>Topic giá dùng mã chứng khoán làm key để giữ thứ tự tick theo mã. Phiên có tin tức, một mã chiếm phần lớn tick, nên một partition và một consumer gánh gần hết tải; thêm consumer không giúp vì mỗi partition chỉ một consumer trong group đọc.</td><td>consumer hiển thị giá tụt quá ngưỡng thì seekToEnd để nhảy tới giá mới nhất (tick cũ không còn giá trị); bật nén để tăng thông lượng; muốn chia tải của mã nóng thì phải tách key (ví dụ mã + loại dữ liệu), đổi lại mất …</td></tr>
+<tr><td><a href="../lessons/0014-throughput-latency.html#uc-b">(b) Chứng khoán: mở cửa phiên, luồng lệnh tăng gấp nhiều lần</a></td><td>Lúc mở cửa, lệnh đặt dồn trong vài phút; consumer chuyển lệnh sang hệ thống khớp lệnh không theo kịp, lag tăng. Có người đề xuất hạ acks=1 "cho nhanh".</td><td>giữ acks=all và idempotence; tăng thông lượng bằng gom lô và nén; cảnh báo theo thời gian để đọc hết (EstimatedMaxTimeLag trên MSK) thay vì số offset; khi hệ thống khớp lệnh chậm thì pause() container thay vì để …</td></tr>
+<tr><td><a href="../lessons/0014-throughput-latency.html#uc-c">(c) Ngân hàng: API chuyển tiền treo khi broker bị throttle</a></td><td>API chuyển tiền gọi KafkaTemplate.send() trên thread HTTP. Một ngày cụm managed chạm trần quota, broker làm chậm producer chứ không báo lỗi; bộ đệm 32 MB đầy dần, rồi mỗi send() chặn thread tới 60 giây.</td><td>hạ max.block.ms xuống mức API chịu được; quyết định trước khi Kafka không nhận thì trả 503 hay ghi outbox (Bài 7); theo dõi bufferpool-wait-ratio và produce-throttle-time-avg để thấy throttle trước khi API treo.</td></tr>
+<tr><td><a href="../lessons/0014-throughput-latency.html#uc-d">(d) Nhiều team chung cụm: một team đọc lại cả tuần làm chậm mọi người</a></td><td>Team báo cáo reset offset để đọc lại dữ liệu cả tuần. Dữ liệu cũ không còn trong page cache nên broker phải đọc đĩa, và group đó kéo hết băng thông; consumer của team khác bắt đầu có lag dù tải của họ không đổi.</td><td>đặt consumer_byte_rate cho principal của team đọc lại (quota tính theo từng broker), theo dõi throttle-time để thấy quota có tác dụng; trên MSK, việc đặt quota thường do platform team giữ quyền.</td></tr>
+</table>
+<h2>Bài 8c: Đọc lại, audit, giữ dữ liệu</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0015-replay-retention.html#uc-a">(a) Ngân hàng: bug tính phí chạy 3 ngày, dựng lại số dư</a></td><td>Phát hiện service tính phí sai từ 00:00 ngày 14/11. Topic account-transactions (key = số tài khoản, retention 30 ngày) vẫn còn đủ dữ liệu.</td><td>dừng group, --reset-offsets --to-datetime 2026-11-14T00:00:00.000+07:00 --dry-run, kiểm tra offset mới, rồi --execute; consumer phải idempotent theo eventId (Bài 7) để đọc lại không trừ phí hai lần.</td></tr>
+<tr><td><a href="../lessons/0015-replay-retention.html#uc-b">(b) Ngân hàng: nạp lại lịch sử 2 năm, dữ liệu biến mất sau vài phút</a></td><td>Team migrate nạp giao dịch 2 năm trước vào một topic retention 7 ngày, giữ nguyên CreateTime gốc của từng giao dịch. Mọi segment có timestamp lớn nhất đã quá 7 ngày, nên ngay khi segment đóng và broker kiểm tra (mỗi 5 phút), cả segment bị xoá.</td><td>đặt message.timestamp.type=LogAppendTime cho topic nạp lại (timestamp là giờ ghi, giờ nghiệp vụ để trong payload), hoặc đặt retention.ms phù hợp với dữ liệu lịch sử.</td></tr>
+<tr><td><a href="../lessons/0015-replay-retention.html#uc-c">(c) Ngân hàng: tài khoản đã đóng vẫn hiện trong cache</a></td><td>Topic account-balance (compact) ghi tombstone khi tài khoản đóng. Một service dựng cache từ topic này chạy chậm hơn 1 ngày (ví dụ chỉ chạy mỗi tuần): tombstone đã bị dọn sau delete.retention.ms, nên service có thể không bao giờ thấy lệnh xoá, và cache còn giữ …</td><td>tăng delete.retention.ms của topic lớn hơn khoảng thời gian chậm nhất của consumer, hoặc cho service dựng cache đọc lại từ đầu mỗi lần khởi động (seekToBeginning).</td></tr>
+<tr><td><a href="../lessons/0015-replay-retention.html#uc-d">(d) Chứng khoán: chạy lại phiên 14/11 nhưng bắt đầu nhầm 7 tiếng</a></td><td>Team quant muốn chạy lại thuật toán trên dữ liệu phiên 14/11 (09:00 tới 15:00 giờ Việt Nam). Lệnh reset ghi --to-datetime 2026-11-14T09:00:00.000, không có múi giờ: công cụ hiểu là 09:00 UTC, tức 16:00 giờ Việt Nam, nên bỏ qua cả phiên.</td><td>luôn ghi +07:00 và chạy --dry-run trước; dừng ở 15:00 bằng offsetsForTimes (tìm offset của mốc 15:00 ở từng partition) hoặc logic ứng dụng dừng khi gặp timestamp sau 15:00, vì CLI không có tuỳ chọn "dừng ở thời điểm".</td></tr>
+<tr><td><a href="../lessons/0015-replay-retention.html#uc-e">(e) Audit: "Kafka là bất biến, không ai sửa được"</a></td><td>Trong họp, có người đề xuất dùng Kafka làm audit trail vì "log bất biến". Đúng là Kafka chỉ ghi thêm, không có API sửa record, offset không đổi.</td><td>chỉ cấp quyền Delete trên Topic cho vai trò quản trị; giám sát thay đổi cleanup.policy và retention.ms; dùng LogAppendTime nếu cần giờ ghi do broker đặt; retention dài theo chính sách lưu trữ của ngân hàng (hỏi platform …</td></tr>
+</table>
+<h2>Bài 8d: Hợp đồng sự kiện (schema)</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0016-schema-evolution.html#uc-a">(a) Ngân hàng: thêm kênh giao dịch vào sự kiện thanh toán</a></td><td>Team Core Banking phát PaymentCompleted cho năm team khác. Nghiệp vụ cần thêm channel (mobile, web, quầy).</td><td>thêm channel là field tuỳ chọn ["null","string"] với "default": null: an toàn ở mọi mode, consumer cũ bỏ qua field mới, consumer mới đọc message cũ với giá trị null.</td></tr>
+<tr><td><a href="../lessons/0016-schema-evolution.html#uc-b">(b) Ngân hàng: bỏ một field "không ai dùng" làm vỡ team khác</a></td><td>Team Core muốn bỏ branchCode (đang bắt buộc) vì nghĩ không ai dùng. BACKWARD cho phép thay đổi này, nên registry nhận.</td><td>với BACKWARD, nâng mọi consumer trước rồi mới nâng producer; trước khi bỏ field, hỏi các team đang đọc subject đó, hoặc dùng FULL để registry chặn cả chiều này.</td></tr>
+<tr><td><a href="../lessons/0016-schema-evolution.html#uc-c">(c) Ngân hàng: nhiều loại sự kiện tài khoản trong một topic</a></td><td>AccountOpened, Deposited, Withdrawn, AccountClosed phải cùng một topic, cùng key là số tài khoản để giữ thứ tự (Bài 2). Với TopicNameStrategy mặc định, subject accounts-value chỉ chứa một chuỗi version; đăng ký loại record thứ hai sẽ bị coi là "thay đổi" của …</td><td>dùng TopicRecordNameStrategy (mỗi loại record một subject trong phạm vi topic), hoặc schema references; tránh RecordNameStrategy nếu tên record có thể trùng giữa các topic, vì nó kiểm tra trên mọi topic.</td></tr>
+<tr><td><a href="../lessons/0016-schema-evolution.html#uc-d">(d) Chứng khoán: đổi kiểu giá từ số nguyên sang số thập phân</a></td><td>Topic lệnh chứng khoán đang có price kiểu long (đơn vị đồng). Sàn chuyển sang giá có phần lẻ, team muốn đổi sang kiểu khác.</td><td>thêm field mới tuỳ chọn có default cho giá kiểu mới và giữ field cũ trong giai đoạn chuyển; nếu bắt buộc đổi hẳn thì làm theo docs: "create a brand-new topic" và chuyển consumer sang topic mới.</td></tr>
+<tr><td><a href="../lessons/0016-schema-evolution.html#uc-e">(e) Consumer đọc topic Avro bằng deserializer chuỗi</a></td><td>Một team viết consumer nhanh bằng StringDeserializer để "xem thử" topic thanh toán. Mỗi message có 5 byte đầu là magic và schema id, rồi tới dữ liệu Avro nhị phân: chuỗi đọc ra là rác.</td><td>mọi consumer của topic dùng deserializer cùng hệ registry, bọc bằng ErrorHandlingDeserializer để lỗi giải mã đi thẳng vào DLT (Bài 6) thay vì chặn vòng poll().</td></tr>
+</table>
+</main>
+<script>
+(function () {
+  var box = document.getElementById('ucFilter'); if (!box) return;
+  box.addEventListener('input', function () {
+    var q = box.value.trim().toLowerCase();
+    document.querySelectorAll('table.uc tr').forEach(function (tr, i) {
+      if (!tr.querySelector('td')) return;
+      tr.hidden = q && tr.textContent.toLowerCase().indexOf(q) < 0;
+    });
+  });
+})();
+</script>
+</body>
+</html>

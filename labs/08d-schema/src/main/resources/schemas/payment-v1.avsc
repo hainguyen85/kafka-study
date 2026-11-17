@@ -1,0 +1,11 @@
+{
+  "type": "record",
+  "name": "PaymentCompleted",
+  "namespace": "lab.bank",
+  "fields": [
+    {"name": "eventId", "type": "string"},
+    {"name": "accountId", "type": "string"},
+    {"name": "amount", "type": "long"},
+    {"name": "currency", "type": "string"}
+  ]
+}

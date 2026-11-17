@@ -253,8 +253,9 @@ $J --spring.profiles.active=consumer --lab.instance=c1 --lab.group=g1     # đ�
 <label class="tick"><input type="checkbox" data-step="3"> Tôi đã xem lag và reset offset bằng CLI</label>
 </div>
 
-<h2>5. Usecase oái oăm (mỗi cái một miền)</h2>
-<h3>(a) Gửi email/SMS thông báo: vừa mất vừa trùng</h3>
+<h2>5. Usecase (mỗi cái một miền)</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Gửi email/SMS thông báo: vừa mất vừa trùng</h3>
 <p>Listener đẩy việc gửi email sang thread pool rồi return để "nhanh". Auto-commit đẩy offset đi; crash giữa chừng làm vài email không bao giờ đi (mất), và nếu bạn commit cuối lô thì vài cái khác đi hai lần. Xử lý: ack sau khi xong (Thử 3), nhưng nếu việc gửi cần song song thì phải <em>đợi</em> worker xong trước khi ack (hoặc quản lý offset theo worker). Đánh đổi: tốc độ lấy an toàn.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -275,7 +276,7 @@ Note over K,E: Sửa: ack sau khi worker xong việc (chế độ C)
 </script>
 <figcaption>Sequence: listener return trước khi worker gửi xong, auto-commit đẩy offset đi trước; crash là mất.</figcaption>
 </figure>
-<h3>(b) OCR chứng từ: bị đá khỏi group</h3>
+<h3 id="uc-b">(b) OCR chứng từ: bị đá khỏi group</h3>
 <p>Mỗi tài liệu 12 giây, <code>max.poll.records=500</code> mặc định, <code>max.poll.interval.ms</code> 5 phút: một lô 500 record cần 100 phút. Consumer bị coi là chết, rebalance, và cả lô bị xử lý lại bởi người khác: "xử lý lặp liên hồi". Xử lý: hạ <code>max.poll.records</code> cho vừa với thời gian xử lý, hoặc tăng <code>max.poll.interval.ms</code> (đánh đổi: phát hiện consumer thật sự chết chậm hơn).</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -293,7 +294,7 @@ Note over C1,C2: Sửa: hạ max.poll.records (10 × 12 giây = 2 phút), hoặc
 </script>
 <figcaption>Sequence: một lô 500 tài liệu cần 100 phút, vượt max.poll.interval.ms 5 phút, nên lô bị xử lý lại mãi.</figcaption>
 </figure>
-<h3>(c) ETL báo cáo tuần: nghỉ lễ quay lại thì "không có gì để đọc"</h3>
+<h3 id="uc-c">(c) ETL báo cáo tuần: nghỉ lễ quay lại thì "không có gì để đọc"</h3>
 <p>Group rỗng quá 7 ngày: offset đã commit bị xoá; <code>auto.offset.reset=latest</code> làm job nhảy tới cuối và bỏ qua mọi thứ đã tích. Xử lý: <code>earliest</code> (đọc lại hết) hoặc <code>none</code> (ném lỗi cho bạn biết); tăng <code>offsets.retention.minutes</code> theo chu kỳ job. Đừng quên <code>retention.ms</code> của chính topic cũng có thể đã xoá dữ liệu.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -314,7 +315,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: offset đã commit hết hạn sau 7 ngày; auto.offset.reset quyết định job đọc lại hay bỏ qua.</figcaption>
 </figure>
-<h3>(d) Gọi xe: deploy làm cả đội điều phối đứng hình</h3>
+<h3 id="uc-d">(d) Gọi xe: deploy làm cả đội điều phối đứng hình</h3>
 <p>Rolling restart 10 instance, mỗi lần một instance rời/vào là một lần rebalance; giao thức classic có rào chắn toàn group. Xử lý theo mức: static membership (instance về lại đúng chỗ cũ, đừng để trùng <code>group.instance.id</code>), cooperative assignor, <code>group.protocol=consumer</code> (cần broker hỗ trợ; Kafka Connect chưa dùng được). Trên MSK, AWS khuyên luôn đặt <code>group.instance.id</code>.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -333,7 +334,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: mỗi instance rời hoặc vào là một lần rebalance; ba mức xử lý. Dòng thời gian chi tiết ở Bài 5b.</figcaption>
 </figure>
-<h3>(e) Nếu là ngân hàng</h3>
+<h3 id="uc-e">(e) Nếu là ngân hàng</h3>
 <p>"Service nhận sự kiện chuyển tiền: tắt auto-commit, ack sau khi ghi DB xong, chống trùng bằng mã sự kiện": ba cụm từ này là câu trả lời đầy đủ cho "restart có sao không".</p>
 <figure class="diagram">
 <script type="text/mermaid">

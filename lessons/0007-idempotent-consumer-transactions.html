@@ -139,9 +139,11 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
 </ul>
 
-<h2>5. Usecase oái oăm</h2>
-<h3>(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
+<h2>5. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
 <p>Dịch vụ lưu đơn vào DB rồi <code>send</code> sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. <b>Outbox</b>: ghi sự kiện vào bảng <code>outbox</code> <em>cùng transaction DB</em> với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.</p>
+<p><b>Xử lý:</b> outbox: ghi sự kiện vào bảng outbox trong cùng transaction DB với dữ liệu, relay gửi lên Kafka; consumer vẫn phải idempotent.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart LR
@@ -166,8 +168,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Kiến trúc: dual write có khe hở giữa DB và Kafka; outbox gộp hai việc ghi vào một transaction DB.</figcaption>
 </figure>
-<h3>(b) Kho + đơn hàng: transaction chỉ phủ trong Kafka</h3>
+<h3 id="uc-b">(b) Kho + đơn hàng: transaction chỉ phủ trong Kafka</h3>
 <p>Consume "đơn mới" → produce "đã giữ hàng" trong một transaction Kafka là exactly-once <em>trong Kafka</em>. Nhưng bước "trừ tồn kho trong DB" ở giữa nằm ngoài. Nếu bạn nói trong họp "bên mình có exactly-once", câu hỏi kế tiếp sẽ là "với DB thì sao?". Câu trả lời trung thực: at-least-once + idempotent consumer cho DB; transaction Kafka dùng khi cả đầu vào và đầu ra đều là topic.</p>
+<p><b>Xử lý:</b> at-least-once cộng idempotent consumer cho bước ghi DB; transaction Kafka chỉ dùng cho luồng topic → topic.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -188,8 +191,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: transaction Kafka phủ topic đầu ra và offset đầu vào, không phủ bước ghi DB ở giữa.</figcaption>
 </figure>
-<h3>(c) Producer chết giữa transaction: consumer đứng yên</h3>
+<h3 id="uc-c">(c) Producer chết giữa transaction: consumer đứng yên</h3>
 <p>Producer transactional bị kill -9 khi transaction đang mở. Consumer <code>read_committed</code> không đọc qua LSO cho tới khi coordinator đóng transaction (sau <code>transaction.timeout.ms</code>, mặc định 60 giây). Tức là một sự cố nhỏ ở producer biến thành độ trễ cho mọi consumer <code>read_committed</code> của partition đó. Hạ <code>transaction.timeout.ms</code> nếu nghiệp vụ không cho phép chờ lâu; transaction chưa tới 60 giây thì đừng hạ quá thấp. (Chưa có lab cho tình huống này.)</p>
+<p><b>Xử lý:</b> hạ <code>transaction.timeout.ms</code> nếu nghiệp vụ không chờ được lâu, nhưng không thấp hơn thời gian một transaction thật.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 sequenceDiagram
@@ -209,8 +213,9 @@ T-->>C: đọc tiếp, bỏ qua m1, m2
 </script>
 <figcaption>Sequence: transaction mở dở chặn consumer read_committed ở LSO cho tới khi coordinator abort.</figcaption>
 </figure>
-<h3>(d) <code>transactional.id</code> trùng giữa hai instance</h3>
+<h3 id="uc-d">(d) <code>transactional.id</code> trùng giữa hai instance</h3>
 <p>Hai pod cùng prefix: producer nào khởi tạo sau sẽ "fence" producer trước (<code>ProducerFencedException</code>, lỗi fatal chỉ còn <code>close()</code>). Hệ quả vận hành: prefix cần khác nhau mỗi instance, nhưng ổn định qua restart nếu muốn giữ tính chống trùng qua restart. Điều này xung đột với autoscaling kiểu "pod tên ngẫu nhiên": cần một cách đặt tên ổn định (ví dụ StatefulSet). Ghi vào danh sách câu hỏi cho platform team.</p>
+<p><b>Xử lý:</b> prefix <code>transactional.id</code> khác nhau mỗi instance và ổn định qua restart (ví dụ tên pod của StatefulSet).</p>
 <figure class="diagram">
 <script type="text/mermaid">
 sequenceDiagram
@@ -228,7 +233,7 @@ Note over A,B: Sửa: prefix khác nhau mỗi instance, ổn định qua restart
 </script>
 <figcaption>Sequence: hai instance cùng transactional.id; producer khởi tạo sau fence producer trước.</figcaption>
 </figure>
-<h3>(e) Nếu là ngân hàng</h3>
+<h3 id="uc-e">(e) Nếu là ngân hàng</h3>
 <p>"At-least-once + idempotent consumer với <code>UNIQUE(eventId)</code> trong cùng transaction DB, kèm outbox ở phía phát" là thiết kế mặc định cho sự kiện tiền. Transaction Kafka chỉ thêm khi có luồng topic → topic thật sự.</p>
 <figure class="diagram">
 <script type="text/mermaid">

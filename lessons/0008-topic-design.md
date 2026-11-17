@@ -2,15 +2,17 @@
 
 [Kafka](../README.md) / [Bài 7](0007-idempotent-consumer-transactions.md) / Bài 8 · [Sổ tay tình huống](../reference/0003-tricky-scenarios.md) · [Managed trên AWS](../reference/0004-managed-kafka-msk-vs-confluent.md)
 
-# Bài 8: Bạn là người tạo topic. Bảy quyết định không sửa lại được dễ dàng
+# Bài 8: Thiết kế topic
 
-Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.
+Bạn là người tạo topic, và có bảy quyết định không sửa lại được dễ dàng. Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.
 
 > **Liên quan tới mission** Bạn tự tạo và cấu hình topic ở nơi mới. Đây là phần thiết kế ảnh hưởng lớn nhất và khó đảo ngược nhất. Bài kiểm tra cuối (Bài 9) đòi bạn đưa ra các quyết định này trong 30 phút cho một bài toán lạ.
 
 **Thắng lợi của bài này:** với một bài toán, bạn điền được "thẻ thiết kế topic" (key, số partition, RF/minISR, retention hay compaction, kích thước message, tên, schema) kèm lý do và đánh đổi, và biết quyết định nào gần như không đổi lại được.
 
-## 1. Kiến thức tối thiểu (có nguồn)
+## 1. Bảy quyết định khi tạo topic
+
+Mỗi ý dưới đây là một quyết định: số partition, mức song song, retention, compaction, kích thước message, độ bền, tên và cách tạo topic. Thẻ thiết kế ở mục 3 gom chúng lại thành một mẫu điền.
 
 1. **Số partition chỉ tăng, không giảm; tăng làm key đổi partition.** Docs: sau khi mở rộng "messages with the same key may be routed to different partitions"; Kafka không phân phối lại dữ liệu cũ. Với consumer `auto.offset.reset=latest`, thêm partition "may cause silent message loss". [[Basic operations]](https://kafka.apache.org/44/operations/basic-kafka-operations/) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
 2. **Song song hoá bị chặn bởi số partition:** trong một group, mỗi partition chỉ có một consumer; thêm consumer vượt số partition là consumer nhàn rỗi. [[Design]](https://kafka.apache.org/44/design/design/)
@@ -195,6 +197,6 @@ Theo bảng managed: MSK Standard mặc định unclean.leader.election.enable=t
 >
 > **Mã nguồn bài này:** `labs/05-scenarios` (`TopicsConfig`, `S11`, `S12`, `S13`). **Tra nhanh:** [Sổ tay](../reference/0003-tricky-scenarios.md), nhóm D.
 
-**Bài tiếp theo:** [Bài 9: bài kiểm tra cuối](0009-final-design-test.md).
+**Bài tiếp theo:** [Bài 8b: quá tải, thông lượng, độ trễ](0014-throughput-latency.md), rồi 8c (đọc lại, audit) và 8d (schema) trước [Bài 9: bài kiểm tra cuối](0009-final-design-test.md).
 
 > **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "chọn bao nhiêu partition cho topic này?", "key nóng xử lý thế nào?". Dán kết quả quiz và thẻ thiết kế bạn tự điền để mình chấm.

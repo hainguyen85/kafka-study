@@ -231,9 +231,11 @@ docker start kafka-2 kafka-3</code></pre>
   </ul></li>
 </ul>
 
-<h2>4. Usecase oái oăm</h2>
-<h3>(a) Kho lạnh mất điện cả giá đỡ (IoT)</h3>
+<h2>4. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Kho lạnh mất điện cả giá đỡ (IoT)</h3>
 <p>Hệ thống cảm biến kho lạnh chạy 3 node Kafka combined. Hai node cắm chung một ổ điện và cùng tắt. Còn đúng một node "sống", nhưng dashboard trống và không cảm biến nào ghi được. Lý do: mất đa số controller thì cụm không đổi được metadata, không bầu được leader. Sống một node không có nghĩa là cụm còn dùng được. Cách giảm đau (khái niệm): đặt các node ở các khu vực mất điện khác nhau, và tách controller khỏi broker ở môi trường quan trọng (tài liệu khuyến nghị tránh combined mode).</p>
+<p><b>Xử lý:</b> đặt các node ở các khu vực mất điện khác nhau, và ở môi trường quan trọng thì tách controller khỏi broker.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB
@@ -257,7 +259,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Kiến trúc: còn một node sống nhưng quorum controller mất đa số, nên cụm không dùng được.</figcaption>
 </figure>
-<h3>(b) Topic "ma" do gõ sai tên (microservices dùng chung cụm)</h3>
+<h3 id="uc-b">(b) Topic "ma" do gõ sai tên (microservices dùng chung cụm)</h3>
 <p>Service A gửi vào <code>order-evnts</code> (gõ nhầm), service B đọc <code>order-events</code>. Không ai báo lỗi vì broker tự tạo <code>order-evnts</code> với 1 partition và RF=1 (giá trị mặc định ở mục 1). Message không mất, nhưng không ai đọc, và topic đó không chịu nổi việc broker chết. Cách xử lý: tắt <code>auto.create.topics.enable</code> và tạo topic có chủ đích (lab của bạn đã làm đúng việc này; Stage 5 của wizard có kiểm tra).</p>
 <figure class="diagram">
 <script type="text/mermaid">

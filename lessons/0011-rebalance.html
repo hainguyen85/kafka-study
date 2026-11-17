@@ -187,8 +187,9 @@ spring:
 <li><b>Spring Kafka.</b> Boot không có property riêng cho <code>group.instance.id</code> hay <code>partition.assignment.strategy</code>; đặt qua <code>spring.kafka.consumer.properties[...]</code>. Với <code>concurrency</code> &gt; 1, container tự thêm hậu tố <code>-n</code> vào <code>group.instance.id</code> cho từng consumer. Muốn chạy code khi bị thu hồi partition: khai báo bean <code>ConsumerAwareRebalanceListener</code>, Boot tự gắn vào container. <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html">[Message listener container]</a> <a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/rebalance-listeners.html">[Rebalance listeners]</a></li>
 </ul>
 
-<h2>5. Usecase oái oăm</h2>
-<h3>(a) Gọi xe: rolling deploy 10 pod làm điều phối đứng hình</h3>
+<h2>5. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Gọi xe: rolling deploy 10 pod làm điều phối đứng hình</h3>
 <p>Deploy thay lần lượt 10 pod. Mỗi pod tắt rồi bật là hai lần rebalance; với eager, mỗi lần cả group dừng. Hai mươi lần dừng trong vài phút, lag tăng vọt, tài xế nhận cuốc trễ. Xử lý theo mức: cooperative (chỉ partition đổi chủ dừng), static membership với tên pod ổn định (restart nhanh không rebalance), hoặc giao thức consumer nếu broker hỗ trợ. Trên MSK, AWS khuyên luôn đặt <code>group.instance.id</code>.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -208,7 +209,7 @@ Note over P1,O: Static (group.instance.id = tên pod): về trước session.tim
 </script>
 <figcaption>Sequence: với eager, mỗi pod restart là hai lần cả group dừng; static membership giữ chỗ cũ nếu pod về kịp.</figcaption>
 </figure>
-<h3>(b) Autoscale theo lag thành "bão rebalance"</h3>
+<h3 id="uc-b">(b) Autoscale theo lag thành "bão rebalance"</h3>
 <p>Lag tăng, autoscaler thêm pod; thêm pod gây rebalance, lag tăng tiếp; lag giảm thì bớt pod, lại rebalance. Group dành nhiều thời gian chia lại hơn là đọc. Xử lý: ngưỡng scale có độ trễ (cooldown), không scale vượt số partition (consumer thừa chỉ ngồi chờ, Bài 1), dùng cooperative.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -227,8 +228,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </script>
 <figcaption>Flow: scale theo lag tạo vòng lặp, vì chính việc thêm hoặc bớt pod gây rebalance.</figcaption>
 </figure>
-<h3>(c) Consumer chết đột ngột: 45 giây im lặng rồi xử lý trùng</h3>
+<h3 id="uc-c">(c) Consumer chết đột ngột: 45 giây im lặng rồi xử lý trùng</h3>
 <p>Pod bị OOM kill. Coordinator không nhận heartbeat nhưng chỉ loại nó sau <code>session.timeout.ms</code>. Trong lúc đó partition của nó không ai đọc; sau đó consumer mới đọc từ offset đã commit và xử lý lại phần chưa commit. Hạ <code>session.timeout.ms</code> giúp phát hiện nhanh hơn, nhưng một lần GC pause dài cũng có thể bị coi là chết và gây rebalance oan. Không có giá trị đúng cho mọi nơi; thứ cố định là consumer phải idempotent (Bài 7).</p>
+<p><b>Xử lý:</b> consumer phải idempotent (Bài 7); chỉ hạ <code>session.timeout.ms</code> khi chấp nhận rủi ro rebalance oan do GC pause.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 sequenceDiagram
@@ -245,7 +247,7 @@ Note over C1,C2: Hạ session.timeout.ms thì phát hiện nhanh hơn, nhưng GC
 </script>
 <figcaption>Sequence: consumer chết đột ngột; partition im lặng tới hết session.timeout.ms, rồi phần chưa commit bị xử lý lại.</figcaption>
 </figure>
-<h3>(d) Nếu là ngân hàng</h3>
+<h3 id="uc-d">(d) Nếu là ngân hàng</h3>
 <p>"Service đọc giao dịch dùng cooperative + static membership, commit khi bị thu hồi partition, và consumer idempotent vì rebalance vẫn có thể gây xử lý lại." Câu cuối quan trọng nhất: giảm rebalance là tối ưu, chống trùng mới là bảo đảm.</p>
 
 <h3>Hỏi nhanh, đáp gọn</h3>

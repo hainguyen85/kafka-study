@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 10: Tổng kết 80/20</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0009-final-design-test.html">Bài 9</a> / Bài 10 · <a href="../reference/0005-usecase-index.html">Tổng hợp usecase</a> · <a href="../reference/0001-core-concepts.html">Bảng tra</a></nav>
+
+<h1>Bài 10: Tổng kết 80/20</h1>
+<p class="lede">Phần 20% của Kafka giải thích 80% những gì bạn sẽ gặp trong họp thiết kế và khi gỡ sự cố, cùng những ngộ nhận phổ biến nhất về chính phần 20% đó.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mục tiêu cuối của khoá học là: cho một bài toán mới, bạn đề xuất được thiết kế và nói được đánh đổi. Bài này gom cả khoá học thành tám ý và sáu câu hỏi thiết kế, để bạn mang vào họp mà không cần mở lại từng bài.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn nói được tám ý cốt lõi trong 2 phút, chỉ ra được ngộ nhận khi đồng nghiệp nói sai, và với một loại dữ liệu bất kỳ (tiền, lệnh, giá, thông báo) chọn được cấu hình bằng sáu câu hỏi.</p>
+
+<h2>1. 20% cốt lõi: tám ý</h2>
+<p>Đọc theo đường đi của một message: producer ghi, broker giữ, consumer đọc và xử lý. Mỗi ý có link về bài chi tiết.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+P["Producer<br/>ý 3: acks, idempotence"] -->|"key → partition (ý 2)"| T["Partition leader + ISR<br/>ý 3: RF, min.insync.replicas"]
+T --> LOG[("Log chỉ ghi thêm<br/>ý 1, ý 8: retention, compaction")]
+LOG --> G["Consumer group<br/>ý 4: offset commit<br/>ý 6: rebalance"]
+G --> X["Xử lý<br/>ý 5: chống trùng<br/>ý 7: retry, DLT"]
+class T,LOG ok
+class X warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Kiến trúc: tám ý cốt lõi đặt trên đường đi của một message.</figcaption>
+</figure>
+<ol class="steps">
+<li><b>Kafka là một log chỉ ghi thêm, không phải hàng đợi.</b> Đọc không xoá dữ liệu; dữ liệu được giữ theo retention. Mỗi consumer group tự nhớ mình đọc tới đâu, nên nhiều group đọc cùng topic độc lập, và có thể đọc lại. <a href="https://kafka.apache.org/intro">[Introduction]</a> · <a href="0001-kafka-big-picture.html">Bài 1</a></li>
+<li><b>Partition là đơn vị của mọi thứ.</b> Thứ tự chỉ có trong một partition. Song song tối đa bằng số partition (mỗi partition một consumer trong group). Key quyết định partition, nên key quyết định thứ tự và phân tải. Số partition chỉ tăng, và tăng thì key đổi partition. <a href="https://kafka.apache.org/44/design/design/">[Design]</a> · <a href="0002-key-partition-offset.html">Bài 2</a>, <a href="0008-topic-design.html">Bài 8</a></li>
+<li><b>Độ bền là bốn núm vặn, và ack là lời hứa trên ISR hiện tại.</b> <code>acks=all</code> chờ mọi replica trong ISR; <code>min.insync.replicas</code> là cái sàn chặn ghi khi ISR quá nhỏ; retry trong <code>delivery.timeout.ms</code>; idempotence chống trùng do retry. Thiếu replica thì phải chọn giữa sẵn sàng và bền. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a> · <a href="0003-build-cluster.html">Bài 3</a>, <a href="0004-producer-durability.html">Bài 4</a>, <a href="0010-idempotent-producer.html">Bài 4b</a></li>
+<li><b>Offset commit là lời hứa của consumer.</b> Commit trước khi xử lý xong thì crash là mất; xử lý xong mới commit thì crash là xử lý lại. <a href="https://kafka.apache.org/44/design/design/">[Design: consumer position]</a> · <a href="0005-consumer-offset-commit.html">Bài 5</a></li>
+<li><b>Mặc định là at-least-once, nên trùng là bình thường.</b> Exactly-once của Kafka chỉ phủ luồng topic → topic (transaction). Ra DB hay API thì dùng idempotent consumer (khoá <code>eventId</code> trong cùng transaction DB) và outbox ở phía phát. <a href="https://kafka.apache.org/44/design/design/">[Design: Message Delivery Semantics]</a> · <a href="0012-delivery-semantics.html">Bài 5c</a>, <a href="0007-idempotent-consumer-transactions.html">Bài 7</a></li>
+<li><b>Rebalance là cái giá của group động.</b> Mỗi lần consumer vào, rời, chết hay xử lý quá chậm, partition đổi chủ phải dừng, và phần chưa commit bị xử lý lại. Cooperative và static membership giảm số lần dừng, không loại bỏ trùng. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/ConsumerRebalanceListener.html">[ConsumerRebalanceListener]</a> · <a href="0011-rebalance.html">Bài 5b</a></li>
+<li><b>Lỗi không tự biến mất, và mặc định của Spring là bỏ qua.</b> Hết lượt retry thì Spring Kafka mặc định chỉ log rồi commit. Thiết kế đúng: retry có giới hạn, phân biệt lỗi tạm thời và lỗi dữ liệu, DLT có cảnh báo và quy trình replay. <a href="https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html">[Spring: handling exceptions]</a> · <a href="0006-error-handling-dlt.html">Bài 6</a></li>
+<li><b>Thiết kế topic là quyết định khó đổi.</b> Key, số partition và định dạng message (schema) khó đổi nhất. Retention hay compaction quyết định ai còn đọc lại được và đọc lại được gì. Mặc định của broker rất mỏng (1 bản sao, tự tạo topic): người tạo topic phải tự đặt. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> · <a href="0008-topic-design.html">Bài 8</a></li>
+</ol>
+
+<h2>2. Ngộ nhận phổ biến về phần 20% đó</h2>
+<p>Mỗi dòng là một câu bạn sẽ nghe trong họp, kèm điều tài liệu thật sự nói.</p>
+<table>
+<tr><th>Ngộ nhận</th><th>Thực tế</th><th>Ý / bài</th></tr>
+<tr><td>"Kafka giữ thứ tự cho cả topic."</td><td>Chỉ trong một partition. Muốn thứ tự theo tài khoản thì lấy mã tài khoản làm key.</td><td>2 · Bài 2</td></tr>
+<tr><td>"Đọc xong thì message biến mất, như hàng đợi."</td><td>Message nằm lại tới hết retention; group khác, hoặc chính group đó sau khi reset offset, đọc lại được.</td><td>1 · Bài 1</td></tr>
+<tr><td>"Chậm thì thêm consumer."</td><td>Chỉ có tác dụng tới số partition; consumer thừa ngồi chờ, và mỗi lần thêm bớt là một lần rebalance.</td><td>2, 6 · Bài 1, 5b</td></tr>
+<tr><td>"Thiếu partition thì sau này tăng thêm."</td><td>Tăng được nhưng không giảm được, và key đổi partition nên thứ tự theo key vỡ qua điểm tăng.</td><td>2 · Bài 8</td></tr>
+<tr><td>"<code>acks=all</code> nghĩa là cả 3 replica đã có."</td><td>Là mọi replica trong ISR hiện tại. ISR co còn leader thì ack khi mới có 1 bản sao; cần <code>min.insync.replicas=2</code>.</td><td>3 · Bài 4</td></tr>
+<tr><td>"Đã nhận ack là không thể mất."</td><td>Vẫn mất được với <code>acks=1</code>, với <code>min.insync.replicas=1</code>, hoặc khi <code>unclean.leader.election.enable=true</code> (mặc định trên MSK Standard).</td><td>3 · Bài 4</td></tr>
+<tr><td>"Bật idempotence ở producer là hết trùng."</td><td>Chỉ hết trùng do retry trong một session. Service restart rồi gửi lại, hoặc consumer xử lý lại, vẫn trùng.</td><td>3, 5 · Bài 4b, 7</td></tr>
+<tr><td>"Auto-commit là mất message."</td><td>Auto-commit chỉ commit trong <code>poll()</code>. Xử lý trong cùng thread thì là at-least-once; chỉ mất khi giao việc cho thread khác rồi <code>poll()</code> tiếp.</td><td>4 · Bài 5</td></tr>
+<tr><td>"Bật exactly-once của Kafka là hết trùng ở DB."</td><td>Transaction Kafka không bao DB hay API ngoài. Ra DB thì at-least-once cộng chống trùng theo <code>eventId</code>.</td><td>5 · Bài 5c, 7</td></tr>
+<tr><td>"Rebalance chỉ xảy ra khi consumer chết."</td><td>Còn khi consumer vào, tắt êm, không <code>poll()</code> trong <code>max.poll.interval.ms</code>, hoặc topic thêm partition.</td><td>6 · Bài 5b</td></tr>
+<tr><td>"Spring Kafka không bao giờ bỏ message lỗi."</td><td>Mặc định giao tối đa 10 lần rồi chỉ log ERROR và commit offset: mất im lặng.</td><td>7 · Bài 6</td></tr>
+<tr><td>"Có DLT là xong."</td><td>DLT không ai xem là mất message có tên đẹp. Cần cảnh báo, người xử lý và quy trình replay.</td><td>7 · Bài 6</td></tr>
+<tr><td>"Compaction giữ đúng một bản ghi mỗi key, ngay lập tức."</td><td>Compaction chạy ngầm, thời điểm không cứng; consumer có thể thấy nhiều bản ghi cùng key.</td><td>8 · Bài 8</td></tr>
+<tr><td>"Hạ <code>acks=1</code> để consumer thấy dữ liệu nhanh hơn."</td><td>Consumer chỉ thấy message khi mọi replica trong ISR đã có, bất kể <code>acks</code>. Muốn nhanh thì gom lô và nén.</td><td>Bài 8b</td></tr>
+<tr><td>"Muốn độ trễ thấp thì đặt <code>linger.ms=0</code>."</td><td>Mặc định đã là 5 từ Kafka 4.0, vì lô lớn hơn thường cho độ trễ tương đương hoặc thấp hơn; khi quá tải, độ trễ chủ yếu là xếp hàng.</td><td>Bài 8b</td></tr>
+<tr><td>"<code>--to-datetime</code> hiểu theo giờ máy mình."</td><td>Không ghi múi giờ thì là UTC. Ở Việt Nam phải ghi <code>+07:00</code>, nếu không sẽ lệch 7 tiếng.</td><td>Bài 8c</td></tr>
+<tr><td>"Kafka log là bất biến, làm audit là yên tâm."</td><td>Chỉ ghi thêm và offset không đổi, nhưng vẫn xoá được: retention, compaction, <code>deleteRecords</code>, xoá topic.</td><td>Bài 8c</td></tr>
+<tr><td>"Registry nhận schema mới là mọi consumer an toàn."</td><td>BACKWARD (mặc định) chỉ bảo đảm consumer mới đọc dữ liệu cũ. Phải nâng consumer trước, producer sau.</td><td>Bài 8d</td></tr>
+</table>
+
+<h2>3. Sáu câu hỏi thiết kế</h2>
+<p>Gặp bài toán mới, hỏi đủ sáu câu theo thứ tự. Mỗi câu trả lời dẫn tới một nhóm cấu hình.</p>
+<table>
+<tr><th>Câu hỏi</th><th>Quyết định</th><th>Ý / bài</th></tr>
+<tr><td>1. Thứ tự theo đối tượng nào?</td><td>Key = mã đối tượng đó (tài khoản, lệnh, mã chứng khoán); tránh key nóng</td><td>2 · Bài 2, 8</td></tr>
+<tr><td>2. Mất có chấp nhận được không?</td><td>Không: RF=3, <code>min.insync.replicas=2</code>, <code>acks=all</code>, unclean=false, đọc kết quả gửi. Có: nới để đổi lấy sẵn sàng và độ trễ</td><td>3 · Bài 4</td></tr>
+<tr><td>3. Trùng có chấp nhận được không?</td><td>Không với tác dụng phụ: idempotent consumer + outbox; Kafka → Kafka: transaction</td><td>5 · Bài 5c, 7</td></tr>
+<tr><td>4. Commit lúc nào?</td><td>Sau khi xử lý xong; với tiền thì ack thủ công sau khi DB commit</td><td>4 · Bài 5</td></tr>
+<tr><td>5. Tải bao nhiêu, cần song song bao nhiêu?</td><td>Số partition theo số consumer cần chạy song song lúc đỉnh tải, cộng dư địa</td><td>2 · Bài 8</td></tr>
+<tr><td>6. Lỗi và dữ liệu cũ xử lý ra sao?</td><td>Retry có giới hạn, DLT, cảnh báo, replay; retention hay compaction theo nhu cầu đọc lại</td><td>7, 8 · Bài 6, 8</td></tr>
+</table>
+
+<h2>4. Loại dữ liệu → cấu hình (ngân hàng và chứng khoán)</h2>
+<p>Ba dòng đầu dựa trên các bài đã học. Hai dòng chứng khoán là <b>lập luận của giáo viên từ cùng các nguyên lý</b>, chưa có nguồn chuẩn ngành: kiểm lại với team ở nơi mới.</p>
+<table>
+<tr><th>Loại dữ liệu</th><th>Thứ tự theo</th><th>Ngữ nghĩa</th><th>Độ bền</th><th>Chống trùng</th></tr>
+<tr><td>Chuyển tiền, bút toán sổ cái</td><td>Mã tài khoản</td><td>At-least-once</td><td>RF=3, minISR=2, <code>acks=all</code>, unclean=false</td><td><code>UNIQUE(eventId)</code> trong transaction DB; outbox ở phía phát</td></tr>
+<tr><td>Thông báo email/SMS</td><td>Thường không cần</td><td>At-least-once, ít trùng</td><td>Như tiền nếu là xác nhận giao dịch</td><td>Dedup theo mã thông báo; gửi ở consumer riêng, ngoài transaction</td></tr>
+<tr><td>Log, telemetry</td><td>Không cần</td><td>Mất vài điểm được</td><td>Có thể nới <code>min.insync.replicas</code>, <code>acks</code></td><td>Không cần</td></tr>
+<tr><td>Lệnh đặt/huỷ chứng khoán <i>(lập luận)</i></td><td>Tài khoản hoặc mã lệnh</td><td>At-least-once</td><td>Như tiền</td><td>Theo mã lệnh; huỷ lệnh phải đến sau đặt lệnh, nên cùng key</td></tr>
+<tr><td>Giá thị trường hiển thị <i>(lập luận)</i></td><td>Mã chứng khoán</td><td>At-most-once chấp nhận được: tick mới thay tick cũ</td><td>Có thể nới</td><td>Không cần; topic "giá mới nhất" hợp với compaction</td></tr>
+</table>
+
+<h2>5. Ba mảng mở rộng: mỗi mảng một ý cốt lõi</h2>
+<p>Tám ý trên phủ trục "không mất". Ba mảng mở rộng của mission, mỗi mảng gói trong một ý:</p>
+<ul class="tight">
+<li><b>Quá tải là dữ liệu chờ, không phải hệ thống sập.</b> Chờ ở bộ đệm producer (<code>send()</code> bị chặn) hoặc chờ trên đĩa (lag). Tăng thông lượng bằng gom lô và nén; lag là tín hiệu số một; số partition là trần song song. Mảng quan trọng nhất cho market data. · <a href="0014-throughput-latency.html">Bài 8b</a></li>
+<li><b>Giữ được thì đọc lại được, nhưng giữ có hạn.</b> Retention là SLA cho consumer; compaction giữ trạng thái mới nhất, không phải lịch sử; đọc lại theo thời điểm luôn ghi <code>+07:00</code>; audit dựa vào thứ tự trong partition và quyền xoá chặt. · <a href="0015-replay-retention.html">Bài 8c</a></li>
+<li><b>Kafka chỉ lưu byte, hợp đồng nằm ở registry.</b> Thêm field tuỳ chọn có default là an toàn; BACKWARD nghĩa là nâng consumer trước; đổi kiểu thì làm topic mới. · <a href="0016-schema-evolution.html">Bài 8d</a></li>
+</ul>
+
+<h2>6. Kiểm tra (xen kẽ mọi chủ đề)</h2>
+<p>Các câu cố tình trộn chủ đề, để bạn phải tự nhận ra câu đang hỏi ý nào. Làm không nhìn bài, rồi đọc giải thích.</p>
+<div id="quiz"></div>
+
+<h2>7. Tự nói thành lời</h2>
+<p>Trong 2 phút, không nhìn: <i>"Kafka là ... Partition quyết định ... Không mất cần ... Commit phải ... Trùng là bình thường nên ... Rebalance gây ... Lỗi thì ... Khi tạo topic, ba thứ khó đổi nhất là ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0013-core-80-20.md">tóm tắt Bài 10</a> (đọc sau khi đã tự nói).</p>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> <a href="https://kafka.apache.org/44/design/design/">Kafka Design</a>: gần như cả tám ý đều có gốc trong tài liệu này (persistence, consumer position, replication, delivery semantics).<br>
+<b>Tra cứu:</b> <a href="../reference/0005-usecase-index.html">Tổng hợp usecase</a> để xem mỗi ý xuất hiện trong tình huống thật nào.</div>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "ngộ nhận nào hay gây sự cố nhất ở production?", "bài toán X của team mình trả lời sáu câu hỏi thế nào?". Dán kết quả quiz để biết ý nào cần ôn lại.</div>
+</main>
+
+<script src="../assets/diagram.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Đồng nghiệp đề xuất: "lag cao thì nhân đôi số pod consumer". Topic có 6 partition, đang chạy 6 pod. Điều gì xảy ra?',
+    options: ['Đọc nhanh gấp đôi ngay lập tức', 'Lag giảm dần theo số pod mới', '6 pod mới ngồi chờ, thêm một lần rebalance', 'Kafka tự tách partition thành 12'],
+    answer: 2, why: 'Ý 2 và 6: mỗi partition chỉ một consumer trong group; consumer thừa không có partition, và việc thêm pod gây rebalance.' },
+  { q: 'Topic RF=3, min.insync.replicas=1, acks=all. Hai follower đã bị loại khỏi ISR. Producer nhận ack cho message mới nghĩa là gì?',
+    options: ['Message mới có ở một bản sao', 'Message đã có ở cả ba replica', 'Message chưa được ghi vào log', 'Broker đã từ chối message này'],
+    answer: 0, why: 'Ý 3: acks=all chờ ISR hiện tại; ISR chỉ còn leader nên ack khi mới có 1 bản sao. min.insync.replicas=2 sẽ chặn trường hợp này.' },
+  { q: 'Listener Spring Boot ghi bút toán vào DB rồi return, ack-mode mặc định. Pod bị kill giữa lô 500 record. Khi chạy lại?',
+    options: ['Mất các record đang xử lý dở', 'Không mất, nhưng một phần lô bị xử lý lại', 'Không mất và không trùng nhờ Spring', 'Phải reset offset bằng tay mới đọc tiếp'],
+    answer: 1, why: 'Ý 4 và 5: AckMode BATCH commit sau khi xử lý xong lô; crash giữa lô thì chạy lại từ offset đã commit, nên phần đã làm bị xử lý lại. Vì vậy bút toán phải chống trùng theo eventId.' },
+  { q: 'Team nói: "bên mình bật transaction Kafka nên ghi DB đúng một lần". Câu trả lời trung thực?',
+    options: ['Đúng, transaction phủ cả DB đó', 'Đúng nếu đặt read_committed ở consumer', 'Đúng nếu producer bật idempotence', 'Sai, cần chống trùng trong transaction DB'],
+    answer: 3, why: 'Ý 5: exactly-once của Kafka chỉ phủ topic → topic. Đầu ra là DB thì vẫn là at-least-once, cần idempotent consumer.' },
+  { q: 'Job đối soát chạy hàng tuần, group nghỉ 10 ngày, auto.offset.reset mặc định. Lần chạy tiếp theo đọc gì?',
+    options: ['Mọi dữ liệu từ lần chạy trước', 'Chỉ dữ liệu mới đến sau lúc khởi động', 'Báo lỗi và dừng, chờ người xử lý', 'Đọc lại toàn bộ topic từ offset 0'],
+    answer: 1, why: 'Ý 1 và 4: offset đã commit hết hạn sau 7 ngày group rỗng; mặc định latest nhảy tới cuối log, bỏ qua dữ liệu tồn.' },
+  { q: 'Message JSON thiếu trường làm listener ném lỗi. Không cấu hình error handler. Số phận message?',
+    options: ['Bị bỏ qua sau 10 lần, chỉ còn log', 'Chặn partition mãi tới khi sửa code', 'Tự chuyển sang topic tên -dlt', 'Được giữ lại chờ người xử lý tay'],
+    answer: 0, why: 'Ý 7: DefaultErrorHandler mặc định giao tối đa 10 lần rồi log ERROR và commit offset: mất im lặng. DLT phải tự cấu hình.' },
+  { q: 'Topic sự kiện tài khoản 3 partition, key là mã tài khoản. Team muốn tăng lên 12 partition khi hệ thống đang chạy. Rủi ro chính?',
+    options: ['Dữ liệu cũ bị Kafka chia lại', 'Producer phải đổi tên topic mới', 'Không có rủi ro, Kafka tự cân bằng', 'Sự kiện cũ và mới của một tài khoản lệch partition'],
+    answer: 3, why: 'Ý 2 và 8: tăng partition làm key đổi partition, dữ liệu cũ không được chia lại; thứ tự theo tài khoản vỡ qua điểm tăng.' },
+  { q: 'Service gửi sự kiện, crash trước khi nhận ack, khởi động lại và gửi lại. Producer bật idempotence. Kết quả?',
+    options: ['Broker nhận ra và bỏ bản gửi lại', 'Có thể có hai bản ghi trong topic', 'Producer báo lỗi trùng lúc khởi động', 'Broker giữ bản sau, xoá bản trước'],
+    answer: 1, why: 'Ý 3 và 5: idempotence chỉ phủ retry trong một session; restart là producer mới, broker không nhận ra bản gửi lại. Chống trùng ở consumer bằng eventId.' }
+]);
+</script>
+</body>
+</html>

@@ -73,8 +73,9 @@ java -jar target/producer-durability-0.0.1-SNAPSHOT.jar --spring.profiles.active
 <li><b>"Producer restart, ứng dụng gửi lại đơn cuối"</b>: PID mới, sequence về 0. Bật hay tắt đều <b>trùng</b>: đây là giới hạn "single session".</li>
 </ol>
 
-<h2>4. Usecase oái oăm</h2>
-<h3>(a) Logistics: DELIVERED đến trước PICKED_UP</h3>
+<h2>4. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Logistics: DELIVERED đến trước PICKED_UP</h3>
 <p>Team giao hàng đặt <code>acks: "1"</code> cho nhanh. Idempotence tắt âm thầm (điều kiện 1 bị vi phạm). Một ngày broker chập chờn, batch PICKED_UP lỗi tạm thời, batch DELIVERED đi trước, PICKED_UP được retry sau. Consumer thấy đơn "đã giao" rồi mới "đã lấy hàng". Không ai đổi cấu hình idempotence, không có lỗi nào trong log. Xử lý: <code>acks=all</code> và ghi tường minh <code>enable.idempotence=true</code>.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -94,7 +95,7 @@ Note over P,C: Sửa: acks=all + enable.idempotence=true tường minh. Broker g
 </script>
 <figcaption>Sequence: idempotence tắt âm thầm; một batch retry đi sau batch kế tiếp nên thứ tự trong log bị đảo.</figcaption>
 </figure>
-<h3>(b) Đặt vé: restart rồi gửi lại</h3>
+<h3 id="uc-b">(b) Đặt vé: restart rồi gửi lại</h3>
 <p>Service đặt vé gửi <code>BookingCreated</code>, bị deploy lại trước khi nhận kết quả. Lúc khởi động nó gửi lại các booking "chưa chắc đã gửi". Producer mới, PID mới: hai bản ghi, idempotence không giúp được. Xử lý: <code>eventId</code> sinh một lần cho mỗi booking, consumer chống trùng theo nó (Bài 7), hoặc outbox để chỉ một tiến trình chịu trách nhiệm gửi.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -112,8 +113,9 @@ Note over P1,C: Sửa: eventId sinh một lần cho mỗi booking, consumer ch�
 </script>
 <figcaption>Sequence: producer mới có PID mới, nên broker không nhận ra bản gửi lại là trùng.</figcaption>
 </figure>
-<h3>(c) "Ta tăng max.in.flight lên 10 cho throughput"</h3>
+<h3 id="uc-c">(c) "Ta tăng max.in.flight lên 10 cho throughput"</h3>
 <p>Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo. Một dòng cấu hình "tối ưu hiệu năng" lấy đi hai bảo đảm. Đây là ví dụ tốt cho lý do review cấu hình producer cũng quan trọng như review code.</p>
+<p><b>Xử lý:</b> giữ <code>max.in.flight.requests.per.connection</code> ≤ 5 và ghi tường minh <code>enable.idempotence=true</code>, để cấu hình sai lộ ra ngay lúc khởi động.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 flowchart TB

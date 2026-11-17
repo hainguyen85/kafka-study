@@ -220,8 +220,9 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=verify -Dspring-boot.run.argum
 <label class="tick"><input type="checkbox" data-step="3"> Tôi đã chạy strict và ghi lại các loại lỗi</label>
 </div>
 
-<h2>5. Usecase oái oăm (mỗi cái một miền)</h2>
-<h3>(a) Flash sale: "đơn đã nhận" rồi biến mất</h3>
+<h2>5. Usecase (mỗi cái một miền)</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Flash sale: "đơn đã nhận" rồi biến mất</h3>
 <p>Giao diện báo đặt hàng thành công vì producer nhận ack. Sau sự cố một broker, kho đếm thiếu đơn. Nguyên nhân thường gặp: <code>acks=1</code>, hoặc <code>acks=all</code> nhưng topic <code>min.insync.replicas=1</code> và ISR đã co còn leader (Thử 3). Cách xử lý: <code>acks=all</code> + RF=3 + minISR=2 <em>ở cấp topic</em>, kiểm bằng <code>--describe</code>. Từ Kafka 4.1 docs nói giá trị đặt ở cấp broker "sẽ bị gỡ" và ELR đổi nghĩa của config này, nên đừng dựa vào default broker. <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -244,7 +245,7 @@ Note over UI,K: Sửa: acks=all + RF=3 + minISR=2 ở cấp topic. Ack chỉ v�
 </script>
 <figcaption>Sequence: với acks=1, ack về khi mới có một bản sao; leader chết trước khi follower fetch thì đơn biến mất.</figcaption>
 </figure>
-<h3>(b) Telemetry kho lạnh: cụm sống mà không ghi được</h3>
+<h3 id="uc-b">(b) Telemetry kho lạnh: cụm sống mà không ghi được</h3>
 <p>Topic cảm biến RF=3, minISR=2, <code>acks=all</code>. Hai broker giữ partition đó chết (giả sử cụm có controller riêng nên vẫn bầu được leader). Diễn biến:</p>
 <ol class="tight">
 <li>Ngay sau khi hai broker chết: danh sách ISR vẫn còn đủ 3 tên nên leader còn chờ hai follower không bao giờ trả lời, ghi bị treo.</li>
@@ -257,6 +258,7 @@ Note over UI,K: Sửa: acks=all + RF=3 + minISR=2 ở cấp topic. Ack chỉ v�
 <li>Sổ cái, thanh toán: giữ minISR=2; thà ngừng ghi và báo lỗi cho người dùng còn hơn báo thành công rồi mất.</li>
 </ul>
 <p>Trong họp bạn sẽ phải nói được lựa chọn này, kèm hệ quả cho người dùng cuối (lỗi gì, trong bao lâu).</p>
+<p><b>Xử lý:</b> chọn theo loại dữ liệu: telemetry mất vài điểm không sao thì <code>min.insync.replicas=1</code>; sổ cái, thanh toán giữ <code>min.insync.replicas=2</code> và báo lỗi cho người dùng.</p>
 <figure class="diagram">
 <script type="text/mermaid">
 sequenceDiagram
@@ -277,7 +279,7 @@ Note over P,F2: minISR=2 (sổ cái): ngừng ghi, báo lỗi. minISR=1 (telemet
 </script>
 <figcaption>Sequence: hai follower chết; ghi treo tới khi ISR co lại, rồi bị từ chối và producer thử lại tới hết delivery.timeout.ms.</figcaption>
 </figure>
-<h3>(c) Spring: lỗi gửi nằm im trong log</h3>
+<h3 id="uc-c">(c) Spring: lỗi gửi nằm im trong log</h3>
 <p>Service gọi <code>template.send(...)</code> không đọc future. Topic bị từ chối (ISR thấp), ứng dụng vẫn trả 200 cho người dùng. Đây là mất message <em>phía ứng dụng</em>, không phải phía Kafka. Xử lý: <code>whenComplete</code> hoặc <code>.get(timeout)</code> khi cần chắc chắn, và quyết định ứng dụng làm gì khi lỗi (trả lỗi cho người dùng, hoặc ghi outbox, Bài 7). Xem cách <code>SenderRunner</code> làm.</p>
 <figure class="diagram">
 <script type="text/mermaid">
@@ -297,7 +299,7 @@ Note over S,T: Sửa: whenComplete hoặc .get(timeout), quyết định trả l
 </script>
 <figcaption>Sequence: không đọc future thì người dùng nhận 200 trong khi message không tới Kafka.</figcaption>
 </figure>
-<h3>(d) API thanh toán treo 60 giây khi cụm có sự cố</h3>
+<h3 id="uc-d">(d) API thanh toán treo 60 giây khi cụm có sự cố</h3>
 <p>Controller REST nhận yêu cầu, gọi <code>template.send(...)</code> rồi trả 202. Một sáng, mạng tới cụm Kafka đứt. Không có exception nào ngay; mọi request treo khoảng 60 giây rồi mới lỗi, thread pool của web server cạn, cả service ngừng trả lời, kể cả các API không dính tới Kafka. Nguyên nhân: <code>send()</code> chờ metadata tới hết <code>max.block.ms</code>. Tương tự khi producer gửi nhanh hơn khả năng giao: bộ đệm <code>buffer.memory</code> đầy và <code>send()</code> chờ. Cách xử lý:</p>
 <ul class="tight">
 <li>Hạ <code>max.block.ms</code> xuống mức API chịu được (vài giây) để lỗi nhanh thay vì treo lâu.</li>
@@ -323,7 +325,7 @@ Note over U,K: Sửa: max.block.ms vài giây, khi lỗi trả 503 hoặc ghi ou
 </script>
 <figcaption>Sequence: send() chờ metadata tới hết max.block.ms, làm cạn thread pool của cả service.</figcaption>
 </figure>
-<h3>(e) Nếu là ngân hàng</h3>
+<h3 id="uc-e">(e) Nếu là ngân hàng</h3>
 <p>Một dòng cho buổi họp: "Topic giao dịch: RF=3, minISR=2, <code>acks=all</code>, idempotence bật, <code>unclean.leader.election.enable=false</code>, và producer đọc kết quả gửi". Đó là câu trả lời chuẩn cho "không mất"; phần còn lại (trùng) giải ở consumer.</p>
 <figure class="diagram">
 <script type="text/mermaid">

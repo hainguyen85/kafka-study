@@ -2,7 +2,7 @@
 
 [Kafka](../README.md) / Bảng tra · [Kafka managed trên AWS](0004-managed-kafka-msk-vs-confluent.md) · [Lab 05](../labs/05-scenarios/README.md) · [Lab 04](../labs/04-producer-durability/README.md)
 
-# Sổ tay: usecase oái oăm và cách xử lý
+# Sổ tay: usecase và cách xử lý
 
 Triệu chứng, nguyên nhân, cấu hình hoặc thiết kế để xử lý, code để thử, và **trạng thái kiểm chứng trung thực**. Cập nhật 2026-11-11. Danh mục gốc (16 tình huống, có nguồn) nằm ở [research/0001, mục 2](../research/0001-curriculum-coverage.md).
 

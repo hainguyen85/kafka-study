@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "PaymentCompleted",
+  "namespace": "lab.bank",
+  "doc": "v2: thêm field TUỲ CHỌN channel, có default null. An toàn ở BACKWARD, FORWARD và FULL.",
+  "fields": [
+    {"name": "eventId", "type": "string"},
+    {"name": "accountId", "type": "string"},
+    {"name": "amount", "type": "long"},
+    {"name": "currency", "type": "string"},
+    {"name": "channel", "type": ["null", "string"], "default": null}
+  ]
+}

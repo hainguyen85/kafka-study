@@ -66,7 +66,9 @@ Một partition, xem log broker ghi gì. Mô phỏng theo mô hình ở mục 1,
 2. **"Gửi 2 batch, batch đầu lỗi tạm thời"**: batch sau tới trước. Bật: broker từ chối batch nhảy cóc, thứ tự giữ nguyên. Tắt: đảo thứ tự.
 3. **"Producer restart, ứng dụng gửi lại đơn cuối"**: PID mới, sequence về 0. Bật hay tắt đều **trùng**: đây là giới hạn "single session".
 
-## 4. Usecase oái oăm
+## 4. Usecase
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
 ### (a) Logistics: DELIVERED đến trước PICKED_UP
 
@@ -113,6 +115,8 @@ Note over P1,C: Sửa: eventId sinh một lần cho mỗi booking, consumer ch�
 ### (c) "Ta tăng max.in.flight lên 10 cho throughput"
 
 Nếu đặt tường minh idempotence: lỗi khởi động. Nếu không: idempotence tắt âm thầm, và với retry thì thứ tự không còn được đảm bảo. Một dòng cấu hình "tối ưu hiệu năng" lấy đi hai bảo đảm. Đây là ví dụ tốt cho lý do review cấu hình producer cũng quan trọng như review code.
+
+**Xử lý:** giữ `max.in.flight.requests.per.connection` ≤ 5 và ghi tường minh `enable.idempotence=true`, để cấu hình sai lộ ra ngay lúc khởi động.
 
 ```mermaid
 flowchart TB

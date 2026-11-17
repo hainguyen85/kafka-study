@@ -15,13 +15,14 @@ Yêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất messa
 | 1 · Nền tảng | 1, 2, 3 | Kể đường đi của một message; chọn key; dựng cụm và đọc leader, ISR |
 | 2 · Producer | 4, 4b | Cấu hình "không mất" phía ghi và biết nó đổi lấy gì; idempotent producer |
 | 3 · Consumer và xử lý lỗi | 5, 5b, 5c, 6, 7 | Commit đúng lúc; rebalance; chọn at-most/at-least/exactly-once; poison pill và DLT; idempotent consumer, outbox, transaction |
-| 4 · Thiết kế và kiểm tra cuối | 8, 9 | Thẻ thiết kế topic; bài thi thiết kế 30 phút |
+| 4 · Thiết kế và kiểm tra cuối | 8, 8b, 8c, 8d, 9 | Thẻ thiết kế topic; quá tải, thông lượng, độ trễ; đọc lại, audit, giữ dữ liệu; hợp đồng sự kiện (schema); bài thi thiết kế 30 phút |
+| 5 · Tổng kết | 10 | Tám ý cốt lõi theo nguyên tắc 80/20, các ngộ nhận phổ biến, sáu câu hỏi thiết kế |
 
 Ngoài bài học còn có ba nhóm hỗ trợ ở thanh bên:
 
 - **Mô phỏng**: năm mô phỏng tương tác (key → partition, độ bền, idempotent producer, commit offset, rebalance). Mô phỏng chạy theo mô hình mà tài liệu Kafka mô tả, không phải broker thật.
 - **Tóm tắt ôn nhanh**: mỗi bài một đoạn tóm tắt bằng lời, khoảng một phút, để ôn trước buổi họp.
-- **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống "oái oăm", câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.
+- **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống, câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.
 
 ## Cách học một bài
 
@@ -40,6 +41,7 @@ Bảo mật (SASL/SSL/ACL), vận hành cụm, Kafka Connect và Kafka Streams, 
 ## Mã nguồn đi kèm
 
 - `labs/03-cluster`: cụm 3 broker KRaft (Docker Compose), dựng bằng `scripts/wizard-03-docker-kafka.sh`.
-- `labs/03-spring-clients`: producer và consumer Spring Boot tối giản (gửi, nhận, xem rebalance) cho các bước thực hành của Bài 3, 5, 5b.
+- `labs/03-spring-clients`: producer và consumer Spring Boot tối giản (gửi, nhận, xem rebalance, đo thông lượng, đọc lại theo thời gian) cho các bước thực hành của Bài 3, 5, 5b, 8b, 8c.
+- `labs/08d-schema`: Spring Boot + Avro + Schema Registry (ba phiên bản schema) cho Bài 8d.
 - `labs/04-producer-durability`: Spring Boot, ba cấu hình độ bền và bộ đối chiếu "mất bao nhiêu".
 - `labs/05-scenarios`: các tình huống consumer, lỗi, transaction, thiết kế topic, mỗi tình huống một profile.

@@ -50,6 +50,28 @@
 - [Spring Kafka 4.1.2 source: KafkaMessageListenerContainer](https://github.com/spring-projects/spring-kafka/blob/v4.1.2/spring-kafka/src/main/java/org/springframework/kafka/listener/KafkaMessageListenerContainer.java)
   Source code (primary). `ackCurrent` ghi nhận offset sau khi xử lý từng record (BATCH); `wrapUp` gọi `commitPendingAcks()` trước `consumer.close()` khi dừng bình thường, không có khi lỗi fatal hoặc có `KafkaTransactionManager`. Use for: Spring có commit khi tắt ứng dụng không. Đọc ngày 2026-11-13.
 
+- Báo cáo nội bộ (2026-11-17): `research/0006-throughput-latency.md` (batching, `linger.ms` 5 từ 4.0, nén, `acks` và độ trễ, fetch, partition và song song, lag, backpressure Spring, quota/throttle), `research/0007-replay-retention-audit.md` (retention theo segment, compaction, tiered storage, reset offset, seek theo timestamp, CreateTime/LogAppendTime, giới hạn khi làm audit log), `research/0008-schema-evolution.md` (Schema Registry, compatibility, wire format, AWS Glue Schema Registry, Spring). Use for: bài quá tải, bài replay/audit, bài schema.
+- [Monitoring (4.4)](https://kafka.apache.org/44/operations/monitoring/)
+  Bảng metric JMX của broker, producer, consumer: `records-lag-max` (theo vị trí hiện tại, không theo offset đã commit), `bufferpool-wait-ratio`, `produce-throttle-time-*`, `fetch-throttle-time-*`, `throttle-time` của quota. Use for: quan sát quá tải, lag, throttling.
+- [Design: Efficiency, Log Compaction, Quotas (4.4)](https://kafka.apache.org/44/design/design/)
+  Cùng trang Design ở trên, các mục khác: batching và nén end-to-end, `sendfile` không dùng khi bật SSL, 4 đảm bảo của compaction, quota tính theo broker và cách broker throttle (mute channel). Use for: bài thông lượng, compaction, quota.
+- [Implementation: Log (4.4)](https://kafka.apache.org/44/implementation/log/)
+  Xoá theo segment, retention theo timestamp lớn nhất của segment, `OutOfRangeException`, CRC khi khôi phục. Use for: giải thích retention chính xác, bẫy timestamp cũ.
+- [Tiered Storage (4.4)](https://kafka.apache.org/44/operations/tiered-storage/), [KIP-405](https://cwiki.apache.org/confluence/display/KAFKA/KIP-405%3A+Kafka+Tiered+Storage) và [Tiered Storage GA Release Notes](https://cwiki.apache.org/confluence/x/9xDOEg)
+  "production-ready since Kafka 3.9", không có RemoteStorageManager sẵn, không hỗ trợ topic compact, một partition remote mỗi fetch. Use for: câu hỏi giữ dữ liệu lâu, audit nhiều năm.
+- [ProducerRecord Javadoc (4.4)](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/producer/ProducerRecord.html)
+  CreateTime (producer gán) và LogAppendTime (broker ghi đè). Use for: bài timestamp, audit.
+- [apache/kafka 4.4.0 source: GroupOffsetsResetter, Utils.getDateTime](https://github.com/apache/kafka/blob/4.4.0/tools/src/main/java/org/apache/kafka/tools/GroupOffsetsResetter.java)
+  Source code (primary). `--to-datetime` không có múi giờ thì hiểu là UTC; partition không có offset theo timestamp thì về log end. Use for: replay theo giờ Việt Nam. Đọc ngày 2026-11-17.
+- [Spring Kafka: Seeking to a Specific Offset](https://docs.spring.io/spring-kafka/reference/kafka/seek.html), [Pausing and Resuming Listener Containers](https://docs.spring.io/spring-kafka/reference/kafka/pause-resume.html), [Pausing and Resuming Partitions](https://docs.spring.io/spring-kafka/reference/kafka/pause-resume-partitions.html), [Listener Container Properties](https://docs.spring.io/spring-kafka/reference/kafka/container-props.html)
+  `ConsumerSeekAware`, `seekToTimestamp`, `AbstractConsumerSeekAware`; `pause()` vẫn `poll()` nên không rebalance; `pauseImmediate`, `idleBetweenPolls`. Use for: replay và backpressure trong Spring.
+- [Confluent Schema Registry: Concepts](https://docs.confluent.io/platform/current/schema-registry/fundamentals/index.html), [Schema Evolution and Compatibility](https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html), [Formats, Serializers, and Deserializers](https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html)
+  Docs chính thức của Confluent (chỉ dùng cho Schema Registry). Subject, schema ID, compatibility (default BACKWARD, không transitive), bảng thay đổi được phép theo Avro/Protobuf/JSON Schema, subject name strategy, wire format (magic byte + 4 byte ID, hoặc GUID trong header từ CP 8.1.1), `auto.register.schemas` mặc định true. Use for: bài schema, thiết kế event nhiều team.
+- [AWS Glue Schema Registry](https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html) và [Java implementation](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-gs-serde-java.html)
+  8 compatibility mode (`_ALL` = transitive, `DISABLED`), IAM, miễn phí; serializer mặc định không auto-register, compatibility BACKWARD. Use for: nếu nơi mới dùng MSK + Glue.
+- [Amazon MSK: Best practices for Apache Kafka clients](https://docs.aws.amazon.com/msk/latest/developerguide/bestpractices-kafka-client.html), [Monitor consumer lags](https://docs.aws.amazon.com/msk/latest/developerguide/consumer-lag.html), [Tiered storage](https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html)
+  Khuyến nghị của AWS (không phải default Apache): `linger.ms` >= 5 (25 cho đa số), `batch.size` 64-128 KB, nén lz4/zstd; điều kiện metric lag biến mất; tiered tối thiểu 3 ngày ở tầng rẻ. Use for: đối chiếu cấu hình client với môi trường MSK.
+
 ## Wisdom (Communities)
 
 - [Apache Kafka mailing lists (users@, dev@)](https://kafka.apache.org/community/contact/)
@@ -61,5 +83,6 @@
 ## Gaps
 
 - Docs Apache không mô tả retry topic/DLQ cho consumer thường, outbox, claim-check: đây là pattern ứng dụng. Cần nguồn tin cậy khác, hoặc ghi rõ "pattern tự dựng" trong lesson (trước bài 6 và 7).
-- Chưa kiểm chứng: Schema Registry/Avro (cần trước bài 8); cấu hình client SASL/SSL và tên config quota (trước bài bảo mật); Spring Kafka và Confluent (chỉ cần nếu nơi mới dùng); biến môi trường của image `apache/kafka` cho `min.insync.replicas` (kiểm bằng thực nghiệm ở bài 3).
+- Đã có nguồn (2026-11-17): Schema Registry/Avro (`research/0008`), tên config quota `producer_byte_rate`/`consumer_byte_rate`/`request_percentage` (`research/0006`). Còn thiếu: quy tắc đổi tên field (Avro aliases, spec Avro chưa nằm trong danh sách nguồn), wire format chi tiết của AWS Glue.
+- Chưa kiểm chứng: cấu hình client SASL/SSL (trước bài bảo mật); Spring Kafka và Confluent (chỉ cần nếu nơi mới dùng); biến môi trường của image `apache/kafka` cho `min.insync.replicas` (kiểm bằng thực nghiệm ở bài 3).
 - Chưa hỏi người học có muốn tham gia cộng đồng hay không.

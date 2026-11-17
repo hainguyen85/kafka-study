@@ -1,6 +1,6 @@
 # Tóm tắt Bài 8: Thiết kế topic
 
-[← Tóm tắt Bài 7](0007-idempotent-consumer-transactions.md) · [Bài học](../lessons/0008-topic-design.html) · [Tóm tắt Bài 9 →](0009-final-design-test.md)
+[← Tóm tắt Bài 7](0007-idempotent-consumer-transactions.md) · [Bài học](../lessons/0008-topic-design.html) · [Tóm tắt Bài 8b →](0014-throughput-latency.md)
 
 *Bài nói 1-2 phút để giải thích cho người khác. Cấu hình chi tiết và câu hỏi hay gặp nằm trong bài học.*
 

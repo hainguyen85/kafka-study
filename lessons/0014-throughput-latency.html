@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bài 8b: Quá tải, thông lượng, độ trễ</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+<nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0008-topic-design.html">Bài 8</a> / Bài 8b · <a href="0015-replay-retention.html">Bài 8c</a> · <a href="../reference/0005-usecase-index.html">Tổng hợp usecase</a></nav>
+
+<h1>Bài 8b: Quá tải, thông lượng, độ trễ</h1>
+<p class="lede">Kafka không sập khi quá tải: nó để dữ liệu chờ. Chờ ở bộ đệm của producer thì thread gửi bị chặn; chờ trên đĩa broker thì consumer tụt lại (lag). Bài này dạy bạn đọc và điều khiển hai chỗ chờ đó.</p>
+
+<div class="mission"><b>Liên quan tới mission</b>
+Mission đã mở rộng sang mảng quá tải và độ trễ. Câu bạn sẽ gặp: "giờ mở cửa phiên lệnh dồn gấp 10, hệ thống chịu được không?", "bảng giá cần độ trễ thấp, cấu hình sao?". Sau bài này bạn trả lời bằng ba thứ: gom lô và nén ở producer, số partition là trần song song, và lag là tín hiệu quá tải.</div>
+
+<p class="win"><b>Thắng lợi của bài này:</b> bạn tự đo được thông lượng của producer với ba cấu hình trên cụm 3 broker, đọc được lag của một group, và giải thích được vì sao hạ <code>acks</code> không làm consumer thấy dữ liệu sớm hơn.</p>
+
+<h2>1. Bốn khái niệm</h2>
+<p>Đường đi của một record khi tải cao: <code>send()</code> đưa record vào bộ đệm, producer gom thành lô theo partition, nén cả lô, gửi một request; broker lưu nguyên dạng nén; consumer kéo về và giải nén. Mỗi chặng có một chỗ có thể nghẽn.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart TB
+A["send() của ứng dụng"] --> B["Bộ đệm buffer.memory (32 MB)<br/>đầy thì send() chặn tới max.block.ms"]
+B --> C["Lô theo partition: batch.size, linger.ms<br/>nén cả lô: compression.type"]
+C -->|"một request, nhiều lô"| D["Broker: lưu nguyên dạng nén<br/>quota vượt thì làm chậm client"]
+D --> E["Consumer kéo về theo tốc độ của nó<br/>chậm hơn producer thì lag tăng"]
+class B,E warn
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: đường đi của record khi tải cao, và hai chỗ dữ liệu chờ (bộ đệm producer, lag ở consumer).</figcaption>
+</figure>
+
+<h3>1.1. Thông lượng: gom lô và nén</h3>
+<ul class="tight">
+<li><b>Gom lô là đòn bẩy chính.</b> Docs gọi batching là "one of the big drivers of efficiency": producer gom record trong bộ nhớ để gửi lô lớn, "to trade off a small amount of additional latency for better throughput". <a href="https://kafka.apache.org/44/design/design/">[Design: Efficiency]</a></li>
+<li><b><code>batch.size</code></b> (16384 byte) là trần của một lô <em>cho mỗi partition</em>; <b><code>linger.ms</code></b> là thời gian chờ để gom thêm. <b>Từ Kafka 4.0, <code>linger.ms</code> mặc định là 5</b> (trước đó 0), vì lô lớn hơn "typically result in similar or lower producer latency despite the increased linger". Tài liệu cũ ghi 0 là đã lỗi thời. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://kafka.apache.org/44/getting-started/upgrade/">[Upgrade notes]</a></li>
+<li><b>Nén do producer làm, theo cả lô</b> (mặc định <code>compression.type=none</code>). Broker lưu nguyên dạng nén, consumer tự giải nén; lô càng to thì nén càng tốt. Topic mặc định <code>compression.type=producer</code>, tức giữ codec producer chọn. <a href="https://kafka.apache.org/44/design/design/">[Design: End-to-end Batch Compression]</a></li>
+</ul>
+
+<h3>1.2. Độ trễ: thứ <code>acks</code> không mua được</h3>
+<ul class="tight">
+<li><b>Hạ <code>acks</code> không làm consumer thấy dữ liệu sớm hơn.</b> "Regardless of the acks setting, the messages will not be visible to the consumers" cho tới khi mọi replica trong ISR đã có. <code>acks=1</code> chỉ rút ngắn thời gian producer chờ, đổi lại rủi ro mất (Bài 4). <a href="https://kafka.apache.org/44/design/design/">[Design: Replicated Logs]</a></li>
+<li><b>Khi quá tải, độ trễ chủ yếu là thời gian xếp hàng</b> trong bộ đệm producer, không phải thời gian mạng. Lab ở mục 2 cho thấy rõ: cùng một cụm, độ trễ p50 từ vài giây xuống vài chục ms chỉ nhờ gom lô và nén.</li>
+</ul>
+
+<h3>1.3. Song song: partition là trần</h3>
+<ul class="tight">
+<li><b>Mỗi partition chỉ một consumer trong group đọc</b>, nên "the partition count impacts the maximum parallelism of your consumers". Thêm consumer quá số partition thì consumer thừa ngồi không. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
+<li><b>Partition nóng không giải được bằng cách thêm consumer:</b> một key chiếm phần lớn tải thì một partition (và một consumer) gánh phần lớn tải (Bài 2).</li>
+<li>Docs Apache không đưa công thức chọn số partition theo thông lượng; con số cụ thể chỉ có ở nhà cung cấp, ví dụ MSK Standard ghi "Throughput per-partition: Max 15 MB/s". <a href="https://docs.aws.amazon.com/msk/latest/developerguide/limits.html">[MSK quotas]</a></li>
+</ul>
+
+<h3>1.4. Quá tải: lag và backpressure</h3>
+<ul class="tight">
+<li><b>Lag là tín hiệu quá tải số một.</b> Consumer chậm thì "simply falls behind and catches up when it can": dữ liệu chờ trên đĩa trong giới hạn retention. Lag tăng đều nghĩa là tốc độ đọc nhỏ hơn tốc độ ghi. <a href="https://kafka.apache.org/44/design/design/">[Design: Push vs. pull]</a></li>
+<li><b>Hai cách đo khác nhau:</b> cột LAG của <code>kafka-consumer-groups.sh --describe</code> tính từ offset đã commit; metric client <code>records-lag-max</code> "is based on current offset and not committed offset". <a href="https://kafka.apache.org/44/operations/monitoring/">[Monitoring]</a></li>
+<li><b>Backpressure phía producer</b>: bộ đệm <code>buffer.memory</code> đầy thì <code>send()</code> chặn thread gọi tới <code>max.block.ms</code> (60 giây) rồi ném lỗi. <b>Phía consumer Spring</b>: <code>pause()</code>/<code>resume()</code> container (vẫn <code>poll()</code> nên không rebalance), <code>pausePartition()</code>, <code>idleBetweenPolls</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/pause-resume.html">[Spring: pause/resume]</a></li>
+<li><b>Quota:</b> Apache mặc định không giới hạn ("By default, clients receive an unlimited quota"); vượt quota thì broker <em>làm chậm</em> client (mute channel, fetch trả về rỗng), không báo lỗi. <a href="https://kafka.apache.org/44/design/design/">[Design: Quotas]</a></li>
+</ul>
+
+<h3>Tám giá trị cần nhớ</h3>
+<table>
+<tr><th>Cấu hình</th><th>Mặc định 4.4</th><th>Ý nghĩa</th><th>Khái niệm</th></tr>
+<tr><td><code>batch.size</code> (producer)</td><td>16384</td><td>Trần một lô, cho mỗi partition</td><td>1.1</td></tr>
+<tr><td><code>linger.ms</code> (producer)</td><td>5 (từ 4.0; trước là 0)</td><td>Chờ gom thêm record</td><td>1.1</td></tr>
+<tr><td><code>compression.type</code> (producer)</td><td><code>none</code></td><td>Nén cả lô: <code>gzip</code>, <code>snappy</code>, <code>lz4</code>, <code>zstd</code></td><td>1.1</td></tr>
+<tr><td><code>buffer.memory</code> (producer)</td><td>33554432 (32 MB)</td><td>Bộ đệm chờ gửi; đầy thì <code>send()</code> chặn</td><td>1.4</td></tr>
+<tr><td><code>max.block.ms</code> (producer)</td><td>60000</td><td>Thời gian <code>send()</code> được phép chặn</td><td>1.4</td></tr>
+<tr><td><code>fetch.min.bytes</code> (consumer)</td><td>1</td><td>Broker chờ đủ bấy nhiêu byte mới trả</td><td>1.2</td></tr>
+<tr><td><code>max.poll.records</code> (consumer)</td><td>500</td><td>Số record mỗi <code>poll()</code>, không đổi cách fetch</td><td>1.4</td></tr>
+<tr><td>Client quota</td><td>không giới hạn</td><td>Vượt thì bị làm chậm, không lỗi</td><td>1.4</td></tr>
+</table>
+<p><a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></p>
+
+<h2>2. Thực hành trên cụm</h2>
+<p>Dùng lab Spring Boot <code>labs/03-spring-clients</code> (profile mới <code>perf</code>) và cụm 3 broker của Bài 3. Profile <code>perf</code> gửi 200.000 message, mỗi message 200 byte, nhanh nhất có thể, rồi in thông lượng và độ trễ gửi (từ lúc gọi <code>send()</code> tới lúc broker ack).</p>
+<pre><code>// labs/03-spring-clients/src/main/java/lab/PerfRunner.java (rút gọn)
+long t0 = System.nanoTime();
+// send() có thể CHẶN thread này khi buffer.memory đầy, tối đa max.block.ms (backpressure phía producer)
+template.send(topic, "k-" + (i % keyCount), payload).whenComplete((r, ex) -&gt; {
+    latencyNs[idx] = System.nanoTime() - t0;   // độ trễ gửi = xếp hàng trong bộ đệm + mạng + chờ ISR
+    done.countDown();
+});</code></pre>
+
+<div class="step">
+<h3>Bước 1. Đo ba cấu hình producer</h3>
+<pre><code>cd labs/03-spring-clients
+mvn -q -DskipTests package          # JAVA_HOME phải là JDK 17+
+J="java -jar target/spring-clients-0.0.1-SNAPSHOT.jar --spring.profiles.active=perf --lab.topic=lab-perf"
+
+$J                                                       # mặc định 4.x: linger.ms=5
+$J --spring.kafka.producer.properties[linger.ms]=0       # mặc định cũ
+$J --spring.kafka.producer.compression-type=lz4          # thêm nén
+$J --spring.kafka.producer.properties[linger.ms]=25 --spring.kafka.producer.batch-size=131072 --spring.kafka.producer.compression-type=lz4</code></pre>
+<p>Dự đoán trước khi chạy: cấu hình nào nhanh nhất, và độ trễ p50 của cấu hình mặc định là vài ms hay vài giây?</p>
+<div class="expect">Đã chạy thật trên máy của bạn (2026-11-17, Spring Boot trên Windows gửi vào cụm trong WSL; số tuyệt đối sẽ khác ở máy khác, tỷ lệ mới đáng nhìn):
+<table>
+<tr><th>Cấu hình</th><th>Message/giây</th><th>Độ trễ gửi p50</th><th>p99</th></tr>
+<tr><td><code>linger.ms=0</code> (mặc định cũ)</td><td>15.289</td><td>4.484 ms</td><td>9.763 ms</td></tr>
+<tr><td>Mặc định 4.x (<code>linger.ms=5</code>)</td><td>20.640</td><td>3.280 ms</td><td>5.730 ms</td></tr>
+<tr><td>Thêm <code>lz4</code></td><td>58.738</td><td>76 ms</td><td>250 ms</td></tr>
+<tr><td><code>linger.ms=25</code>, batch 128 KB, <code>lz4</code></td><td>72.199</td><td>60 ms</td><td>139 ms</td></tr>
+</table>
+Đọc kết quả: độ trễ vài giây không phải do mạng, mà do 200.000 record xếp hàng trong bộ đệm. Khi thông lượng tăng gấp ba, hàng đợi gần như biến mất và p50 giảm từ giây xuống chục ms. Với tải nhẹ (2.000 message) thì mặc định và <code>linger.ms=0</code> gần như ngang nhau (p50 26 ms và 48 ms), đúng lý do docs đổi mặc định. <b>Lưu ý trung thực:</b> payload của lab là một ký tự lặp lại nên nén cực tốt; dữ liệu JSON thật sẽ không được gấp ba như vậy.</div>
+<label class="tick"><input type="checkbox" data-step="1"> Tôi đã chạy và so sánh bốn cấu hình</label>
+</div>
+
+<div class="step">
+<h3>Bước 2. Thấy lag của một consumer chậm</h3>
+<pre><code># consumer xử lý mỗi record 1 ms, chạy khoảng 30 giây rồi tắt (Ctrl+C)
+java -jar target/spring-clients-0.0.1-SNAPSHOT.jar --spring.profiles.active=consumer \
+  --lab.topic=lab-perf --lab.group=g-lag --lab.instance=c1 --lab.process-ms=1
+
+# trong terminal Ubuntu (WSL)
+docker exec kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka-1:19092 --describe --group g-lag</code></pre>
+<div class="expect">Đã chạy thật (rút gọn):
+<pre><code>GROUP  TOPIC     PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG     CONSUMER-ID
+g-lag  lab-perf  0          4805            220428          215623  consumer-g-lag-1-...
+g-lag  lab-perf  1          -               263952          -       consumer-g-lag-1-...
+g-lag  lab-perf  5          4195            241488          237293  consumer-g-lag-1-...</code></pre>
+Ba điều cần thấy: (1) LAG tính từ offset <em>đã commit</em>; (2) partition chưa commit lần nào hiện <code>-</code>, không phải 0; (3) consumer đã tắt bằng Ctrl+C vẫn còn trong danh sách tới khi hết session timeout (Bài 5b). Một consumer không thể đọc kịp 6 partition: chạy thêm consumer cùng <code>g-lag</code> (tối đa 6) để chia việc.</div>
+<label class="tick"><input type="checkbox" data-step="2"> Tôi đã đọc được lag và thử thêm consumer</label>
+</div>
+
+<div class="step">
+<h3>Bước 3 (đọc code). Backpressure phía consumer trong Spring</h3>
+<p>Khi hệ thống phía sau (core banking, máy khớp lệnh) báo quá tải, dừng nhận thay vì để listener lỗi liên tục. Đoạn dưới ghép từ docs Spring, <b>chưa chạy thử</b>:</p>
+<pre><code>@KafkaListener(id = "orders", topics = "orders")
+void onOrder(String order) { matchingEngine.submit(order); }
+
+// khi circuit breaker của matchingEngine mở:
+registry.getListenerContainer("orders").pause();   // dừng trước poll() kế tiếp, vẫn poll() nên không rebalance
+// khi hồi phục:
+registry.getListenerContainer("orders").resume();</code></pre>
+<p>Trong lúc pause, lag tăng là chủ đích chứ không phải sự cố. Mẫu "pause khi circuit breaker mở" là thiết kế tự dựng; docs Spring chỉ mô tả <code>pause()</code>/<code>resume()</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/pause-resume.html">[Spring: pause/resume]</a></p>
+</div>
+
+<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<p>Đọc sau khi đã chạy lab.</p>
+
+<h3>Producer và khuyến nghị của AWS cho MSK</h3>
+<ul class="tight">
+<li>Khuyến nghị nhà cung cấp, không phải mặc định Apache: <code>linger.ms</code> tối thiểu 5, "higher value of 25ms, for most use cases", và "against ever using a value of zero in low latency use cases"; <code>batch.size</code> 64 KB hoặc 128 KB; <code>buffer.memory</code> 64 MB; nén <code>lz4</code> hoặc <code>zstd</code>. <a href="https://docs.aws.amazon.com/msk/latest/developerguide/bestpractices-kafka-client.html">[MSK client best practices]</a></li>
+<li>Metric phát hiện bộ đệm đầy: <code>bufferpool-wait-ratio</code>, <code>waiting-threads</code>, <code>record-queue-time-avg</code>, <code>batch-size-avg</code>, <code>compression-rate-avg</code>. <a href="https://kafka.apache.org/44/operations/monitoring/">[Monitoring]</a></li>
+<li><code>max.request.size</code> (1 MB) cũng là trần của lô chưa nén; trần ở broker/topic tính trên lô <em>sau</em> nén. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a></li>
+</ul>
+
+<h3>Consumer: fetch và poll là hai núm khác nhau</h3>
+<ul class="tight">
+<li><code>fetch.min.bytes</code> (1), <code>fetch.max.wait.ms</code> (500), <code>max.partition.fetch.bytes</code> (1 MB), <code>fetch.max.bytes</code> (50 MB) điều khiển mạng và broker; <code>max.poll.records</code> "does not impact the underlying fetching behavior", nó điều khiển vòng xử lý của ứng dụng. <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
+<li>Xử lý lâu và không đều: javadoc khuyên chuyển xử lý sang thread khác, tắt auto commit, commit sau khi xong, và "pause the partition so that no new records are received from poll until after thread has finished". <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
+</ul>
+
+<h3>Lag trên dịch vụ managed</h3>
+<ul class="tight">
+<li>MSK: <code>EstimatedMaxTimeLag</code> ("Time estimate (in seconds) to drain MaxOffsetLag"), <code>MaxOffsetLag</code>, <code>SumOffsetLag</code>. Bẫy: metric chỉ phát khi group ở trạng thái STABLE hoặc EMPTY, và không phát nếu tên group có dấu <code>:</code>, ký tự không phải ASCII, hoặc chưa commit offset nào. <a href="https://docs.aws.amazon.com/msk/latest/developerguide/consumer-lag.html">[MSK consumer lag]</a></li>
+<li>Cảnh báo theo thời gian để đọc hết (<code>EstimatedMaxTimeLag</code>) có ý nghĩa nghiệp vụ hơn cảnh báo theo số offset tuyệt đối.</li>
+</ul>
+
+<h3>Quota và một bất ngờ cho ngân hàng</h3>
+<ul class="tight">
+<li>Quota theo nhóm (user, client-id), tính <b>trên từng broker</b>: <code>producer_byte_rate</code>, <code>consumer_byte_rate</code>, <code>request_percentage</code>, đặt bằng <code>kafka-configs.sh --alter --entity-type users ...</code>. Metric: <code>produce-throttle-time-avg</code>, <code>fetch-throttle-time-avg</code>. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations: quotas]</a></li>
+<li>MSK Express và Serverless có trần thông lượng cứng, vượt thì bị throttle. <a href="https://docs.aws.amazon.com/msk/latest/developerguide/limits.html">[MSK quotas]</a></li>
+<li><b>Bật SSL thì Kafka không dùng zero-copy:</b> "sendfile is not used when SSL is enabled". Cụm TLS/mTLS của ngân hàng tốn CPU hơn cho đường đọc; đừng so với số benchmark plaintext. <a href="https://kafka.apache.org/44/design/design/">[Design: Efficiency]</a></li>
+</ul>
+
+<h2>4. Usecase</h2>
+<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
+<h3 id="uc-a">(a) Chứng khoán: một mã vốn hoá lớn làm nghẽn bảng giá</h3>
+<p>Topic giá dùng mã chứng khoán làm key để giữ thứ tự tick theo mã. Phiên có tin tức, một mã chiếm phần lớn tick, nên một partition và một consumer gánh gần hết tải; thêm consumer không giúp vì mỗi partition chỉ một consumer trong group đọc. Bảng giá của mã đó trễ dần trong khi các mã khác vẫn mượt. Với dữ liệu hiển thị, javadoc mô tả đúng cách xử lý: consumer tụt quá xa thì "skip to the most recent records" thay vì đọc hết.</p>
+<p><b>Xử lý:</b> consumer hiển thị giá tụt quá ngưỡng thì <code>seekToEnd</code> để nhảy tới giá mới nhất (tick cũ không còn giá trị); bật nén để tăng thông lượng; muốn chia tải của mã nóng thì phải tách key (ví dụ mã + loại dữ liệu), đổi lại mất thứ tự giữa các key con.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+flowchart LR
+T["Tick giá, key = mã chứng khoán"] --> P0["P0: mã nóng<br/>phần lớn tick"]
+T --> P1["P1: các mã khác"]
+T --> P2["P2: các mã khác"]
+P0 --> C0["Consumer 0: quá tải<br/>lag tăng, giá trễ"]
+P1 --> C1["Consumer 1: rảnh"]
+P2 --> C2["Consumer 2: rảnh"]
+C0 -.-> F["Xử lý: seekToEnd khi tụt xa<br/>nén, hoặc tách key"]
+class P0,C0 bad
+class F ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+</script>
+<figcaption>Flow: một key nóng dồn tải vào một partition; consumer của nó trễ trong khi consumer khác rảnh.</figcaption>
+</figure>
+
+<h3 id="uc-b">(b) Chứng khoán: mở cửa phiên, luồng lệnh tăng gấp nhiều lần</h3>
+<p>Lúc mở cửa, lệnh đặt dồn trong vài phút; consumer chuyển lệnh sang hệ thống khớp lệnh không theo kịp, lag tăng. Có người đề xuất hạ <code>acks=1</code> "cho nhanh". Nhưng lệnh là dữ liệu không được mất, và consumer vẫn chỉ thấy lệnh khi đã đủ ISR, nên hạ <code>acks</code> không giúp phía khớp lệnh. Lag tăng trong cao điểm là bình thường nếu nó giảm lại sau đó.</p>
+<p><b>Xử lý:</b> giữ <code>acks=all</code> và idempotence; tăng thông lượng bằng gom lô và nén; cảnh báo theo thời gian để đọc hết (<code>EstimatedMaxTimeLag</code> trên MSK) thay vì số offset; khi hệ thống khớp lệnh chậm thì <code>pause()</code> container thay vì để listener lỗi liên tục.</p>
+<figure class="diagram">
+<script type="text/mermaid">
+sequenceDiagram
+participant P as Producer lệnh
+participant K as Kafka (acks=all)
+participant C as Consumer chuyển lệnh
+participant M as Hệ thống khớp lệnh
+Note over P,M: 09:00 mở cửa phiên, lệnh tăng gấp nhiều lần
+P->>K: lệnh dồn, gom lô + nén
+K->>C: poll() theo tốc độ của consumer
+C->>M: gửi lệnh
+M-->>C: chậm, circuit breaker mở
+C->>C: container.pause(): vẫn poll() nên không rebalance
+Note over K,C: lag tăng có chủ đích, dữ liệu chờ an toàn trên đĩa
+M-->>C: hồi phục
+C->>C: container.resume(), lag giảm dần
+</script>
+<figcaption>Sequence: cao điểm mở cửa phiên; pause khi hệ thống phía sau chậm, lag tăng có chủ đích rồi giảm.</figcaption>
+</figure>
+
+<h3 id="uc-c">(c) Ngân hàng: API chuyển tiền treo khi broker bị throttle</h3>
+<p>API chuyển tiền gọi <code>KafkaTemplate.send()</code> trên thread HTTP. Một ngày cụm managed chạm trần quota, broker làm chậm producer chứ không báo lỗi; bộ đệm 32 MB đầy dần, rồi mỗi <code>send()</code> chặn thread tới 60 giây. Thread pool web cạn, cả service ngừng trả lời. Log không có exception nào cho tới khi hết 60 giây.</p>
+<p><b>Xử lý:</b> hạ <code>max.block.ms</code> xuống mức API chịu được; quyết định trước khi Kafka không nhận thì trả 503 hay ghi outbox (Bài 7); theo dõi <code>bufferpool-wait-ratio</code> và <code>produce-throttle-time-avg</code> để thấy throttle trước khi API treo.</p>
+
+<h3 id="uc-d">(d) Nhiều team chung cụm: một team đọc lại cả tuần làm chậm mọi người</h3>
+<p>Team báo cáo reset offset để đọc lại dữ liệu cả tuần. Dữ liệu cũ không còn trong page cache nên broker phải đọc đĩa, và group đó kéo hết băng thông; consumer của team khác bắt đầu có lag dù tải của họ không đổi.</p>
+<p><b>Xử lý:</b> đặt <code>consumer_byte_rate</code> cho principal của team đọc lại (quota tính theo từng broker), theo dõi <code>throttle-time</code> để thấy quota có tác dụng; trên MSK, việc đặt quota thường do platform team giữ quyền.</p>
+
+<h3>Hỏi nhanh, đáp gọn</h3>
+<ul class="tight">
+<li><b>Muốn độ trễ thấp thì đặt <code>linger.ms=0</code>?</b> Thường không cần: mặc định 5 cho độ trễ tương đương hoặc thấp hơn nhờ lô lớn hơn; AWS còn khuyên không dùng 0.</li>
+<li><b>Nén có làm broker tốn CPU?</b> Broker giải nén để kiểm tra lô rồi lưu nguyên dạng nén; nén là việc của producer. Đặt codec ở topic khác codec producer có thể khiến broker nén lại (chưa kiểm chứng trong docs).</li>
+<li><b>Lag bao nhiêu là quá nhiều?</b> Không có con số chung; lag vượt retention là mất dữ liệu chưa đọc, nên ngưỡng phải nhỏ hơn retention nhiều.</li>
+</ul>
+
+<h2>5. Tự nói thành lời</h2>
+<p>Trong 60 giây: <i>"Thông lượng tăng nhờ ... và ...; mặc định linger.ms đã là ... từ 4.0. Hạ acks không giúp consumer vì ... Khi quá tải, dữ liệu chờ ở hai chỗ: ... và ... Tín hiệu số một là ..., đo bằng ..."</i></p>
+<p><b>Ôn nhanh:</b> <a href="../summaries/0014-throughput-latency.md">tóm tắt Bài 8b</a> (đọc sau khi đã tự nói).</p>
+
+<h2>6. Kiểm tra</h2>
+<div id="quiz"></div>
+
+<h2>Nguồn nên đọc</h2>
+<div class="source"><b>Chính:</b> mục "Efficiency", "End-to-end Batch Compression" và "Quotas" trong <a href="https://kafka.apache.org/44/design/design/">Kafka Design</a> (khoảng 20 phút).<br>
+<b>Cho MSK:</b> <a href="https://docs.aws.amazon.com/msk/latest/developerguide/bestpractices-kafka-client.html">Best practices for Apache Kafka clients</a>. Nguồn đầy đủ: <code>research/0006-throughput-latency.md</code>.</div>
+
+<p><b>Bài tiếp theo:</b> <a href="0015-replay-retention.html">Bài 8c: đọc lại, audit, giữ dữ liệu</a>.</p>
+
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "bảng giá cần độ trễ dưới 100 ms thì cấu hình thế nào?", "đặt quota cho team khác trên MSK ai làm?". Dán kết quả lab của bạn để so sánh.</div>
+</main>
+
+<script src="../assets/checklist.js"></script>
+<script src="../assets/diagram.js"></script>
+<script src="../assets/quiz.js"></script>
+<script>
+Quiz.mount(document.getElementById('quiz'), [
+  { q: 'Đồng nghiệp đề xuất hạ acks từ all xuống 1 để bảng giá phía consumer cập nhật nhanh hơn. Điều nào đúng?',
+    options: ['Consumer thấy dữ liệu sớm hơn hẳn', 'Consumer vẫn chỉ thấy khi đủ ISR', 'Consumer đọc trực tiếp từ follower', 'Broker bỏ qua bước chép sang ISR'],
+    answer: 1, why: 'Docs: "Regardless of the acks setting, the messages will not be visible to the consumers" cho tới khi mọi replica trong ISR đã có. acks=1 chỉ rút ngắn thời gian producer chờ.' },
+  { q: 'Client Kafka 4.x, không cấu hình gì về linger.ms. Producer chờ tối đa bao lâu để gom lô?',
+    options: ['5 ms, mặc định từ Kafka 4.0', '0 ms, gửi ngay từng record', '100 ms, theo mặc định cũ', 'Chờ tới khi đủ batch.size'],
+    answer: 0, why: 'Kafka 4.0 đổi linger.ms mặc định từ 0 sang 5; đủ batch.size thì gửi sớm hơn.' },
+  { q: 'Topic 6 partition, group đang có 6 consumer, lag vẫn tăng. Thêm 6 consumer nữa vào cùng group thì sao?',
+    options: ['Lag giảm một nửa ngay', 'Kafka tự tách thành 12 partition', '6 consumer mới ngồi không', 'Mỗi partition có hai người đọc'],
+    answer: 2, why: 'Số partition là trần song song của một group: mỗi partition chỉ một consumer trong group đọc. Phải tăng thông lượng mỗi consumer hoặc tăng partition (với cái giá ở Bài 8).' },
+  { q: 'Cụm managed bị throttle vì vượt quota. Producer trong API chuyển tiền thấy gì đầu tiên?',
+    options: ['Exception QuotaExceeded ngay', 'Message bị broker bỏ âm thầm', 'Broker trả lỗi cho từng record', 'Gửi chậm dần, send() có thể bị chặn'],
+    answer: 3, why: 'Vượt quota thì broker làm chậm client (mute channel), không báo lỗi. Bộ đệm đầy dần và send() chặn tới max.block.ms.' },
+  { q: 'Cột LAG của kafka-consumer-groups.sh --describe tính từ đâu?',
+    options: ['Từ offset đã commit của group', 'Từ vị trí hiện tại trong bộ nhớ', 'Từ offset đầu tiên của partition', 'Từ timestamp của record cuối'],
+    answer: 0, why: 'LAG = LOG-END-OFFSET trừ CURRENT-OFFSET, là offset đã commit. Metric client records-lag-max thì tính theo vị trí hiện tại.' }
+]);
+</script>
+</body>
+</html>
