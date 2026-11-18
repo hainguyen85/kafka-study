@@ -69,6 +69,18 @@ const SIMS = [
 3. Chế độ C: thử mọi kiểu crash → không bao giờ mất, trùng nhiều nhất một record.`,
   },
   {
+    id: 'sim-error', title: 'Record lỗi: retry, DLT, blocking và non-blocking', api: 'ErrorSim', script: 'error-sim.js',
+    lessons: ['0006-error-handling-dlt'],
+    md: `Một partition 8 record cùng key; record ở offset 3 gây lỗi. Bốn cấu hình error handler, ba loại lỗi. Đơn giản hoá: commit sau mỗi record.
+
+**Thử:**
+1. A + lỗi vĩnh viễn: 10 lần giao rồi chỉ log ERROR, record mất im lặng.
+2. B + lỗi vĩnh viễn: 3 lần giao, cách 300 ms, bản sao vào DLT; ô offset 3 vẫn còn trên partition.
+3. C + lỗi vĩnh viễn: tổng back-off 9 phút vượt \`max.poll.interval.ms\`.
+4. B rồi D với lỗi tạm thời: blocking giữ thứ tự, non-blocking làm m4 chạy trước m3.
+5. Lỗi giải mã: fatal, không retry ở mọi cấu hình.`,
+  },
+  {
     id: 'sim-rebalance', title: 'Rebalance: eager, cooperative, static', api: 'RebalanceSim', script: 'rebalance-sim.js',
     lessons: ['0011-rebalance'],
     md: `Topic 6 partition, ban đầu C1 và C2. Mỗi partition luôn có 2 record đã xử lý nhưng chưa commit, để thấy trùng khi partition đổi chủ không êm. Đơn giản hoá: cooperative thật cần hai vòng rebalance, ở đây gộp làm một.
@@ -78,6 +90,18 @@ const SIMS = [
 2. "Crash (kill -9)" so với "Rời êm": crash gây xử lý lại, rời êm thì không.
 3. "Deploy lại" khi tắt static membership: hai lần rebalance; bật static membership: không rebalance.
 4. "Xử lý quá max.poll.interval.ms": bị đá rồi vào lại, hai lần rebalance cộng trùng.`,
+  },
+  {
+    id: 'sim-exactly', title: 'Outbox, idempotent consumer, transaction: crash ở đâu?', api: 'ExactlySim', script: 'exactly-sim.js',
+    lessons: ['0007-idempotent-consumer-transactions'],
+    md: `Chọn công cụ và điểm crash; sau crash, mô phỏng khởi động lại từ trạng thái bền (DB, offset đã commit, log Kafka). Thứ gì chỉ nằm trong RAM thì mất.
+
+**Thử:**
+1. Ghi kép, crash sau bước 1: DB có đơn, Kafka không có sự kiện. Outbox cùng điểm crash: đúng; crash sau bước 2: trùng trên topic.
+2. Phía nhận không chống trùng, crash sau khi cộng điểm: cộng hai lần.
+3. Set trong RAM, tick "bản trùng", crash sau bước 3: RAM mất khi restart nên vẫn trùng.
+4. UNIQUE(eventId) cùng transaction DB: đúng ở mọi điểm crash.
+5. Kafka → Kafka có transaction, crash sau bước 2: \`read_committed\` thấy một bản, \`read_uncommitted\` thấy hai.`,
   },
 ];
 

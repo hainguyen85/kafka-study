@@ -29,6 +29,8 @@ public class TopicsConfig {
     @Bean NewTopic s7() { return base("s7-poll", 1).build(); }
     @Bean NewTopic s8() { return base("s8-poison", 3).build(); }
     @Bean NewTopic s8dlt() { return base("s8-poison-dlt", 3).build(); }
+    // s8retry: chỉ tạo topic gốc; topic retry và DLT do @RetryableTopic tự tạo (xem S8Retry).
+    @Bean NewTopic s8retry() { return base("s8r-orders", 3).build(); }
     @Bean NewTopic s9() { return base("s9-points", 1).build(); }
     @Bean NewTopic s10in() { return base("s10-in", 1).build(); }
     @Bean NewTopic s10out() { return base("s10-out", 1).build(); }

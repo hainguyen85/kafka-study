@@ -1,0 +1,5 @@
+# S8 (Bài 6): CỐ Ý không có property nào.
+# Profile này chỉ để bật bean @Profile("s8") trong S8Poison.java và quan sát HÀNH VI MẶC ĐỊNH của Spring Kafka:
+#   - không khai báo CommonErrorHandler => Boot dùng DefaultErrorHandler với FixedBackOff(0L, 9): 1 + 9 = 10 lần giao, không chờ;
+#   - hết lượt => recoverer mặc định chỉ log ERROR rồi commit offset => POISON bị bỏ qua im lặng.
+# Thêm property vào đây sẽ làm sai thí nghiệm. Muốn thử biến thể, dùng profile s8dlt.

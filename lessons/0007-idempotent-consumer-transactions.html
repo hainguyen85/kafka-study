@@ -72,7 +72,18 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 <p><b>Chọn ngữ nghĩa nào cho luồng nào, và cấu hình Spring Boot cho từng loại:</b> xem <a href="0012-delivery-semantics.html">Bài 5c</a>. Bài này đi sâu vào hai công cụ của dòng cuối bảng đó: idempotent consumer với outbox, và transaction.</p>
 
-<h2>2. Dự đoán, rồi chạy</h2>
+<h2>2. Mô phỏng: crash ở đâu thì mất, trùng hay đúng?</h2>
+<p>Chọn một công cụ và một điểm crash, <em>đoán trước</em> kết quả (đúng, mất hay trùng), rồi bấm "Chạy". Sau crash, mô phỏng khởi động lại từ trạng thái bền (DB, offset đã commit, log Kafka); thứ gì chỉ nằm trong RAM thì mất. Mô phỏng theo mô hình ở mục 1, không phải client thật.</p>
+<ol class="steps">
+<li><b>Ghi kép</b>, crash sau bước 1: DB và Kafka lệch nhau thế nào? Rồi <b>outbox</b> với cùng điểm crash, và crash sau bước 2.</li>
+<li><b>Phía nhận: không chống trùng</b>, crash sau bước 2 (đã cộng điểm, chưa commit offset). Đây là at-least-once.</li>
+<li><b>Chống trùng bằng Set trong RAM</b>: lúc không crash có vẻ ổn, kể cả khi tick "bản trùng". Rồi tick "bản trùng" và crash sau bước 3: vì sao lại trùng?</li>
+<li><b>UNIQUE(eventId) cùng transaction DB</b>: thử mọi điểm crash, có lúc nào trùng không?</li>
+<li><b>Kafka → Kafka</b>: không transaction và có transaction, crash sau bước 2, với reader <code>read_committed</code> rồi <code>read_uncommitted</code>.</li>
+</ol>
+<div id="xsim"></div>
+
+<h2>3. Dự đoán, rồi chạy</h2>
 <p>Đọc <code>S9IdempotentConsumer.java</code>: 5 sự kiện, user <code>u1..u5</code> được cộng <code>10 × n</code> điểm, <em>mỗi sự kiện được gửi 2 lần</em> với cùng <code>eventId</code> (mô phỏng ứng dụng gửi lại sau restart), producer idempotent bật. Trả lời trước khi chạy:</p>
 <div id="predict"></div>
 
@@ -88,7 +99,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <div class="step">
 <h3>Bước 2. S9dedup: chống trùng bằng eventId</h3>
 <pre><code>mvn -q spring-boot:run -Dspring-boot.run.profiles=s9dedup</code></pre>
-<div class="expect">Đã quan sát: điểm đúng. <b>Cảnh báo trong chính file code:</b> tập "đã xử lý" nằm trong RAM chỉ để minh hoạ. Hãy làm bài tập ở mục 3 để thấy vì sao.</div>
+<div class="expect">Đã quan sát: điểm đúng. <b>Cảnh báo trong chính file code:</b> tập "đã xử lý" nằm trong RAM chỉ để minh hoạ. Hãy làm bài tập ở mục 4 để thấy vì sao.</div>
 <label class="tick"><input type="checkbox" data-step="2"> Tôi đã chạy s9dedup</label>
 </div>
 <div class="step">
@@ -101,7 +112,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 
 <div id="predict2"></div>
 
-<h2>3. Bài tập thiết kế: đưa dedup vào đúng chỗ</h2>
+<h2>4. Bài tập thiết kế: đưa dedup vào đúng chỗ</h2>
 <p>Hàm cộng điểm (khoảng 5 dòng) hiện chạy trong RAM. Bạn viết lại cho production, dùng DB quan hệ. Tự viết trước, rồi mở đáp án.</p>
 <ol class="steps">
 <li>Bảng nào, ràng buộc nào, khoá là gì?</li>
@@ -117,7 +128,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <p><b>Dọn dẹp:</b> bảng <code>processed_event</code> lớn dần; giữ theo cửa sổ thời gian lớn hơn thời gian tối đa mà một bản trùng có thể xuất hiện (retention của topic).</p>
 </details>
 
-<h2>4. Đi sâu: chi tiết cho ba công cụ</h2>
+<h2>5. Đi sâu: chi tiết cho ba công cụ</h2>
 <p>Đọc sau khi đã làm lab và bài tập thiết kế.</p>
 
 <h3>Ngữ nghĩa giao hàng và cách docs mô tả cho hệ thống ngoài</h3>
@@ -139,7 +150,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s9        # ~15 giây</code></
 <li><b>Phạm vi:</b> transaction của Kafka không bao gồm DB của bạn. <code>ChainedKafkaTransactionManager</code> đã deprecated từ 2.7; khuyến nghị dùng <code>KafkaTransactionManager</code> ở container và <code>@Transactional</code> cho DB, <em>không</em> phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". <a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html">[Transactions]</a></li>
 </ul>
 
-<h2>5. Usecase</h2>
+<h2>6. Usecase</h2>
 <p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
 <h3 id="uc-a">(a) Đặt vé: ghi DB rồi gửi Kafka (dual write)</h3>
 <p>Dịch vụ lưu đơn vào DB rồi <code>send</code> sự kiện. Crash giữa hai việc: DB có đơn, Kafka không có sự kiện (mất), hoặc ngược lại nếu bạn gửi trước. Hai hệ thống không có transaction chung. <b>Outbox</b>: ghi sự kiện vào bảng <code>outbox</code> <em>cùng transaction DB</em> với đơn; một tiến trình riêng đọc bảng này và gửi lên Kafka (polling, hoặc CDC đọc log DB), đánh dấu đã gửi. Kết quả: at-least-once (relay có thể gửi hai lần khi crash giữa gửi và đánh dấu), nên consumer vẫn phải idempotent. Đánh đổi: thêm bảng, thêm tiến trình, thêm độ trễ. Pattern ứng dụng, không có trong docs Kafka.</p>
@@ -263,11 +274,11 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <li><b>Bảng dedup giữ bao lâu?</b> Lâu hơn khoảng thời gian một bản trùng còn có thể xuất hiện, thường gắn với retention của topic.</li>
 </ul>
 
-<h2>6. Tự nói thành lời</h2>
+<h2>7. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."</i> Dùng: at-least-once, idempotent, outbox, <code>read_committed</code>, LSO.</p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0007-idempotent-consumer-transactions.md">tóm tắt Bài 7</a> (đọc sau khi đã tự nói).</p>
 
-<h2>7. Kiểm tra</h2>
+<h2>8. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -281,6 +292,9 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/flow-anim.js"></script>
+<script src="../assets/exactly-sim.js"></script>
+<script>ExactlySim.mount(document.getElementById('xsim'));</script>
 <script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>

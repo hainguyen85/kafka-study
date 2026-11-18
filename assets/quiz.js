@@ -34,7 +34,7 @@
         var why = el('div', 'why');
         why.hidden = true;
         var btns = item.options.map(function (text, j) {
-          var b = el('button', 'opt', text);
+          var b = el('button', 'opt', String.fromCharCode(65 + j) + '. ' + text);
           b.type = 'button';
           b.addEventListener('click', function () {
             btns.forEach(function (x, k) {
@@ -46,7 +46,7 @@
             why.hidden = false;
             why.className = 'why ' + (ok ? 'ok' : 'no');
             why.textContent = (ok ? 'Đúng. ' : 'Chưa đúng. ') + item.why;
-            answered++; if (ok) correct++; else wrong.push(i + 1);
+            answered++; if (ok) correct++; else wrong.push((i + 1) + ' (chọn ' + String.fromCharCode(65 + j) + ', đúng là ' + String.fromCharCode(65 + item.answer) + ')');
             updateScore();
           });
           box.appendChild(b);

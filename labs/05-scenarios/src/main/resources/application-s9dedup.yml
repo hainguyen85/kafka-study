@@ -1,0 +1,3 @@
+# S9dedup (Bài 7): không có property nào. Khác s9 ở code: S9IdempotentConsumer đọc profile này
+# (env.acceptsProfiles("s9dedup")) và bỏ qua eventId đã xử lý.
+# Lưu ý: tập eventId nằm trong RAM chỉ để minh hoạ; thực tế phải là UNIQUE(eventId) trong DB, cùng transaction với tác dụng phụ.

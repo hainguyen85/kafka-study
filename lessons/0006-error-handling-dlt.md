@@ -12,37 +12,45 @@ Một message hỏng thì Kafka làm gì? Spring Kafka mặc định bỏ nó đ
 
 ## 1. Ba khái niệm
 
-Một record làm listener ném exception đi qua ba chặng: nó có phải **poison pill** không, có nên **retry** không và retry kiểu gì, hết lượt thì để vào đâu (**DLT**). Mỗi chặng chỉ có vài ý cần nhớ.
+Một record làm listener ném exception đi qua ba chặng: nó có phải **poison pill** không, có nên **retry** không và retry kiểu gì (blocking hay non-blocking), hết lượt thì để vào đâu (**DLT**). Mỗi chặng chỉ có vài ý cần nhớ.
 
 ```mermaid
 flowchart TB
 R["Record"] --> L["Listener ném exception"]
-L --> Q{"Lỗi fatal?<br/>giải mã, sai kiểu"}
-Q -->|"có"| REC["Recoverer"]
-Q -->|"không"| T["Retry theo back-off<br/>mặc định 1 + 9 lần"]
-T -->|"hết lượt"| REC
+L --> Q{"Loại exception?"}
+Q -->|"fatal: giải mã, sai kiểu"| PP["Poison pill chắc chắn<br/>không retry"]
+Q -->|"còn lại, kể cả lỗi nghiệp vụ<br/>(poison pill vẫn có thể ở đây)"| M{"Kiểu retry?"}
+M -->|"blocking<br/>DefaultErrorHandler"| B["Seek lại, thread ngủ theo back-off<br/>partition ĐỨNG, thứ tự được giữ<br/>mặc định 1 + 9 lần giao, không chờ"]
+M -->|"non-blocking<br/>@RetryableTopic"| NB["Gửi sang topic -retry rồi commit<br/>partition CHẠY TIẾP, thứ tự VỠ<br/>Boot mặc định 3 lần giao, cách 1 giây"]
+B -->|"thành công"| OK["Xử lý xong"]
+NB -->|"thành công"| OK
+B -->|"hết lượt"| REC["Recoverer"]
+NB -->|"hết lượt"| D["Topic tên-gốc-dlt<br/>BẢN SAO, cùng partition, kèm header lỗi"]
+PP --> REC
 REC -->|"mặc định"| LOG["Chỉ log ERROR, commit offset<br/>MẤT im lặng"]
-REC -->|"cấu hình DLT"| D["Topic tên-gốc-dlt<br/>cùng partition, kèm header lỗi"]
-class LOG bad
-class D ok
+REC -->|"DeadLetterPublishingRecoverer"| D
+class LOG,PP bad
+class D,OK ok
+class B,NB warn
 classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ```
 
-*Flow: đường đi của một record lỗi trong Spring Kafka, mặc định và khi có DLT.*
+*Flow: đường đi của một record lỗi trong Spring Kafka, với blocking retry (mặc định) và non-blocking retry (`@RetryableTopic`). Ở mọi nhánh, record gốc vẫn nằm trong topic gốc; DLT chỉ nhận bản sao, và offset commit đi qua record gốc.*
 
 ### 1.1. Poison pill: record không bao giờ xử lý được
 
 - **Poison pill** là record mà xử lý lại bao nhiêu lần cũng lỗi: JSON hỏng, thiếu trường, sai kiểu. Retry nó chỉ tốn thời gian.
 - **Lỗi giải mã xảy ra trước listener.** Bọc deserializer bằng `ErrorHandlingDeserializer`: lỗi thành value `null` kèm header chứa exception và byte gốc, record không tới listener nên không làm hỏng vòng `poll()`. [[Serialization]](https://docs.spring.io/spring-kafka/reference/kafka/serdes.html)
 - **Spring coi một số lỗi là "fatal" và không retry** (ví dụ `DeserializationException`, `ClassCastException`): đi thẳng tới recoverer. Thêm loại lỗi của bạn bằng `addNotRetryableExceptions`. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
+- **Poison pill và lỗi fatal không phải một.** Poison pill nói về *record* (giao bao nhiêu lần cũng lỗi); fatal nói về *loại exception* mà Spring không retry. Lỗi giải mã, sai kiểu gần như luôn do poison pill nên Spring xếp chúng vào fatal. Nhưng poison pill vì dữ liệu sai nghiệp vụ thường ném exception thường (ví dụ `IllegalArgumentException`): Spring không biết đó là poison pill nên vẫn retry đủ lượt, vô ích (lab `s8retry`: POISON được giao 3 lần). Muốn đi thẳng recoverer: `addNotRetryableExceptions(...)` với blocking, thuộc tính `exclude` với `@RetryableTopic`. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html) [[Retry topic]](https://docs.spring.io/spring-kafka/reference/retrytopic/retry-config.html)
 
 ### 1.2. Retry: thử lại kiểu gì?
 
 - **Mặc định `DefaultErrorHandler`** dùng `FixedBackOff(0L, 9)`: tham số đầu là thời gian chờ giữa các lần, tham số sau là số lần *thử lại* sau lần giao đầu. Tổng 1 + 9 = 10 lần giao, không chờ. Hết lượt thì recoverer mặc định **chỉ log ERROR rồi commit offset: record mất im lặng**. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html)
 - **Blocking retry** (kiểu trên): thread consumer ngủ giữa các lần thử, cả partition đứng, thứ tự theo key được giữ. Back-off tổng dài hơn `max.poll.interval.ms` thì consumer bị đá khỏi group (Bài 5).
-- **Non-blocking retry** (`@RetryableTopic`): record lỗi được đẩy sang topic `-retry`, partition gốc chạy tiếp. Đổi lại, **thứ tự theo key không còn được giữ**. [[Retry topic]](https://docs.spring.io/spring-kafka/reference/retrytopic/retry-config.html)
+- **Non-blocking retry** (`@RetryableTopic`): record lỗi được đẩy sang topic `-retry` rồi được commit, partition gốc chạy tiếp; hết lượt thì sang `-dlt`. Đổi lại, **thứ tự theo key không còn được giữ** (lab `s8retry` cho thấy tận mắt). Spring Boot mặc định 3 lần giao, cách nhau 1 giây (`spring.kafka.retry.topic.*`). [[Retry topic]](https://docs.spring.io/spring-kafka/reference/retrytopic/retry-config.html)
 
 ### 1.3. DLT: hết lượt thì để vào đâu?
 
@@ -60,7 +68,17 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 | Lỗi giải mã | Lỗi trong `poll()` | `ErrorHandlingDeserializer` |
 | Non-blocking retry | Không bật | Chỉ khi không cần thứ tự theo key |
 
-## 2. Dự đoán trước khi chạy (retrieval)
+## 2. Mô phỏng: record lỗi đi đâu?
+
+Một partition 8 record cùng key; record ở offset 3 gây lỗi. Chọn cấu hình và loại lỗi, *đoán trước*, rồi bấm "Giao record kế tiếp" (từng bước) hoặc "Chạy tới hết". Mô phỏng theo mô hình ở mục 1, không phải client thật; nó đơn giản hoá bằng cách commit sau mỗi record.
+
+1. **A + lỗi vĩnh viễn:** POISON được giao mấy lần, cuối cùng nằm ở đâu? (Cấu hình mặc định.)
+2. **B + lỗi vĩnh viễn:** đếm lần giao, xem partition đứng bao lâu, DLT có gì. Ô offset 3 vẫn còn trên partition: DLT nhận *bản sao*.
+3. **C + lỗi vĩnh viễn:** back-off 60 giây × 9. Tổng thời gian chờ so với `max.poll.interval.ms` (5 phút) thì sao?
+4. **B + lỗi tạm thời** rồi **D + lỗi tạm thời:** so sánh dòng "Thứ tự đã xử lý". Đây là đánh đổi blocking và non-blocking.
+5. **Lỗi giải mã** ở bất kỳ cấu hình nào: có retry không?
+
+## 3. Dự đoán trước khi chạy (retrieval)
 
 Đọc `labs/05-scenarios/src/main/java/lab/S8Poison.java` rồi trả lời *trước* khi mở kết quả. Topic `s8-poison` nhận 10 message `m0..m9`, trong đó `m5` được thay bằng `POISON` làm listener ném exception.
 
@@ -113,9 +131,9 @@ Mặc định gửi tới <topic>-dlt cùng số partition; DLT phải có ít n
 
 <!-- /quiz -->
 
-## 3. Lab thật
+## 4. Lab thật
 
-**Trạng thái trung thực:** `s8` và `s8dlt` đã chạy trên broker nhúng 1 node và kết quả trong bài là kết quả quan sát được. Chưa chạy với cụm 3 broker của bạn. Cụm thật cũng cho thấy cùng kết quả logic (đường đi của record, không liên quan độ bền), nhưng hãy xác nhận và báo lại.
+**Trạng thái trung thực:** `s8` và `s8dlt` đã chạy trên broker nhúng 1 node (2026-11-11); `s8dlt` và `s8retry` đã chạy trên cụm 3 broker của `labs/03-cluster` (2026-11-18). Kết quả trong bài là kết quả quan sát được.
 
 ### Bước 1. Mặc định: `s8`
 
@@ -140,7 +158,43 @@ Profile này khai báo `new DefaultErrorHandler(new DeadLetterPublishingRecovere
 
 Tôi đã chạy s8dlt và đọc được header DLT_*
 
-### Bước 3. Đọc DLT bằng CLI
+### Bước 3. Non-blocking: `s8retry`
+
+```
+mvn -q spring-boot:run -Dspring-boot.run.profiles=s8retry      # ~30 giây
+```
+
+Topic `s8r-orders` nhận m0..m7 cùng key `acc-1`; `m3 = FLAKY` lỗi ở lần giao đầu rồi thành công, `m5 = POISON` lần nào cũng ném `IllegalArgumentException`. Listener khai báo:
+
+```
+@RetryableTopic(attempts = "3", backOff = @BackOff(delay = 1000), kafkaTemplate = "kafkaTemplate",
+        numPartitions = "3", replicationFactor = "${lab.replicas:3}")
+@KafkaListener(topics = "s8r-orders", groupId = "s8r-#{@run.id}")
+void on(ConsumerRecord<String, String> rec) { ... }
+
+@DltHandler
+void dlt(ConsumerRecord<String, String> rec) { ... }
+```
+
+Đã quan sát trên cụm 3 broker (thời gian tính từ lúc khởi động):
+
+```
++4896 ms  FLAKY  lần 1  từ s8r-orders-0@11          ← lỗi, sang topic retry
++5458 ms  m4     lần 1  từ s8r-orders-0@12          ← partition gốc chạy tiếp
++5459 ms  POISON lần 1  từ s8r-orders-0@13
++5907 ms  FLAKY  lần 2  từ s8r-orders-retry-0@3     ← thành công, nhưng SAU m4
++6467 ms  POISON lần 2  từ s8r-orders-retry-0@4
++7473 ms  POISON lần 3  từ s8r-orders-retry-0@5
++7966 ms  DLT nhận POISON từ s8r-orders-dlt-0@1
+thứ tự đã xử lý thành công: [m0, m1, m2, m4, FLAKY, m6, m7]
+topic liên quan: [s8r-orders, s8r-orders-dlt, s8r-orders-retry]
+```
+
+Ba điều: (1) m4 xử lý trước FLAKY dù cùng key; (2) POISON vẫn bị giao đủ 3 lần vì `IllegalArgumentException` không phải lỗi fatal; (3) chỉ có *một* topic retry (Spring Kafka 4.1 dùng chung một topic khi các lần chờ bằng nhau), và record giữ số partition 0 ở cả ba topic.
+
+Tôi đã chạy s8retry và thấy thứ tự bị đảo
+
+### Bước 4. Đọc DLT, và thấy bản gốc vẫn còn
 
 ```
 docker exec kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-1:19092 --topic s8-poison-dlt --from-beginning --property print.headers=true
@@ -148,15 +202,27 @@ docker exec kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server 
 
 Mong đợi (chưa kiểm chứng cờ `print.headers` với bản 4.4): record cùng payload và header `kafka_dlt-exception-fqcn`, `kafka_dlt-original-topic`... Nếu cờ không nhận, bỏ nó và chỉ xem payload.
 
-Tôi đã đọc DLT bằng CLI
+Bản gốc của POISON có bị xoá khỏi `s8-poison` không? Đọc topic gốc và xem offset đã commit của group `s8-<run-id>` (run-id nằm trong `out/run-id.txt`):
 
-### Bước 4. Biến thể tự làm
+```
+docker exec kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka-1:19092 --topic s8-poison \
+  --from-beginning --property print.partition=true --property print.offset=true --timeout-ms 8000 | grep POISON
+docker exec kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka-1:19092 --describe --group s8-<run-id>
+```
+
+Đã quan sát sau `s8dlt` (2026-11-18): `Partition:2 Offset:5 …|POISON` vẫn còn trong topic gốc; group có `CURRENT-OFFSET 10`, `LAG 0` ở partition 2. DLT nhận bản sao; topic gốc chỉ "quên" POISON theo nghĩa offset commit đã đi qua nó. Bản gốc chỉ mất khi retention dọn segment chứa nó.
+
+Tôi đã đọc DLT và thấy bản gốc vẫn còn
+
+### Bước 5. Biến thể tự làm
 
 Sửa `FixedBackOff(300L, 2L)` thành `ExponentialBackOff` hoặc thêm `addNotRetryableExceptions(IllegalArgumentException.class)` và cho listener ném `IllegalArgumentException`. Đoán trước số lần giao, rồi đếm trong log.
 
+Với `s8retry`: thêm `exclude = IllegalArgumentException.class` vào `@RetryableTopic`, đoán POISON được giao mấy lần, rồi chạy.
+
 Tôi đã đổi back-off hoặc loại lỗi không retry
 
-## 4. Đi sâu: chi tiết cho ba khái niệm
+## 5. Đi sâu: chi tiết cho ba khái niệm
 
 Đọc sau khi đã chạy lab. Mỗi khối mở rộng một khái niệm ở mục 1.
 
@@ -176,7 +242,7 @@ Tôi đã đổi back-off hoặc loại lỗi không retry
 - **`DeadLetterPublishingRecoverer`:** mặc định gửi tới `<topic gốc>-dlt` (tutorial cũ ghi `.DLT`, đã lỗi thời), **cùng số partition** với record gốc, nên DLT phải có ít nhất bằng số partition của topic gốc. Nó giữ mọi header gốc và thêm header `DLT_EXCEPTION_*`, `DLT_ORIGINAL_TOPIC/PARTITION/OFFSET`. Nó *không tự tạo* topic DLT. [[Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html) [[mã nguồn v4.1.2]](https://github.com/spring-projects/spring-kafka/blob/v4.1.2/spring-kafka/src/main/java/org/springframework/kafka/listener/DeadLetterPublishingRecoverer.java)
 - **Docs Apache không định nghĩa DLQ cho consumer thường.** DLQ chính thức chỉ có ở Kafka Connect (`errors.tolerance`, `errors.deadletterqueue.topic.name`) và Share Groups. Retry topic và DLT trong consumer là *pattern ứng dụng*; Spring Kafka hiện thực nó cho bạn. [[Connect guide]](https://kafka.apache.org/44/kafka-connect/user-guide/) [[research/0001, mục 1.1]](../research/0001-curriculum-coverage.md)
 
-## 5. Usecase
+## 6. Usecase
 
 [Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
@@ -300,19 +366,35 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ### Hỏi nhanh, đáp gọn
 
 - **Chọn retry kiểu nào cho dòng tiền theo tài khoản?** Thường là blocking retry ngắn để giữ thứ tự theo tài khoản, rồi DLT; lỗi kéo dài thì cảnh báo thay vì retry vô hạn.
+- **Đưa vào DLT có xoá record khỏi topic gốc không?** Không. Topic là log chỉ ghi thêm; recoverer gửi *bản sao* sang DLT rồi commit offset vượt qua record gốc. Group khác vẫn đọc thấy nó, và reset offset về trước nó thì gặp lại (DLT nhận thêm một bản). Bước 4 của lab cho thấy tận mắt.
 - **DLT xong rồi thì sao?** Có người nhận cảnh báo, sửa nguyên nhân, rồi replay record về topic gốc; consumer phải idempotent vì replay là giao thêm lần nữa.
 
-## 6. Tự nói thành lời
+## 7. Tự nói thành lời
 
 Trong 45 giây: *"Message lỗi vào consumer Spring Kafka mặc định thì ... Mình cấu hình ... để ... Đánh đổi của retry blocking so với retry topic là ..."* Dùng: poison pill, DLT, back-off, thứ tự, `max.poll.interval.ms`.
 
 **Ôn nhanh:** [tóm tắt Bài 6](../summaries/0006-error-handling-dlt.md) (đọc sau khi đã tự nói).
 
-## 7. Kiểm tra
+## 8. Kiểm tra
 
 <!-- quiz:quiz -->
 
-**1. Message JSON hỏng làm lỗi ở bước giải mã trước khi tới listener. Cách đúng trong Spring Kafka là gì?**
+**1. Listener ném IllegalArgumentException vì dữ liệu sai nghiệp vụ (một poison pill). Không cấu hình gì thêm, Spring làm gì?**
+
+- **A.** Đi thẳng tới recoverer, không retry lần nào
+- **B.** Dừng hẳn consumer, chờ người vận hành xử lý
+- **C.** Vẫn retry đủ lượt, rồi mới tới recoverer
+- **D.** Tự sửa dữ liệu rồi giao lại lần nữa
+
+<details><summary>Đáp án</summary>
+
+**C. Vẫn retry đủ lượt, rồi mới tới recoverer**
+
+IllegalArgumentException không nằm trong danh sách lỗi fatal. Spring không biết record là poison pill, nên vẫn retry đủ lượt (lab s8retry: POISON giao 3 lần). Muốn đi thẳng recoverer: addNotRetryableExceptions (blocking) hoặc exclude của @RetryableTopic.
+
+</details>
+
+**2. Message JSON hỏng làm lỗi ở bước giải mã trước khi tới listener. Cách đúng trong Spring Kafka là gì?**
 
 - **A.** Bọc deserializer bằng ErrorHandlingDeserializer
 - **B.** Bắt exception trong hàm main của ứng dụng
@@ -327,7 +409,7 @@ ErrorHandlingDeserializer biến lỗi giải mã thành value null + header; re
 
 </details>
 
-**2. Dịch vụ phụ trợ lỗi trong 5 phút. Bạn dùng blocking retry với back-off 1 phút, max.poll.interval.ms mặc định 5 phút. Rủi ro chính?**
+**3. Dịch vụ phụ trợ lỗi trong 5 phút. Bạn dùng blocking retry với back-off 1 phút, max.poll.interval.ms mặc định 5 phút. Rủi ro chính?**
 
 - **A.** Message bị trùng trong topic DLT
 - **B.** Partition đứng và có thể rebalance
@@ -342,7 +424,7 @@ Blocking retry giữ thread consumer ngủ; tổng thời gian không poll có t
 
 </details>
 
-**3. Nghiệp vụ bắt buộc giữ thứ tự theo key (các bước của một đơn hàng). Nhược điểm của @RetryableTopic là gì?**
+**4. Nghiệp vụ bắt buộc giữ thứ tự theo key (các bước của một đơn hàng). Nhược điểm của @RetryableTopic là gì?**
 
 - **A.** Không thể tạo topic có hậu tố -dlt
 - **B.** Không thể gửi record tới nhiều partition
@@ -357,7 +439,7 @@ Record lỗi đi sang topic retry trong khi record sau của cùng key chạy ti
 
 </details>
 
-**4. Docs chính thức của Apache Kafka 4.4 có mô tả DLQ cho consumer thường không?**
+**5. Docs chính thức của Apache Kafka 4.4 có mô tả DLQ cho consumer thường không?**
 
 - **A.** Có, qua cấu hình errors.tolerance
 - **B.** Có, qua cấu hình dead.letter.topic
@@ -380,8 +462,8 @@ DLQ chính thức chỉ có cho Kafka Connect và Share Groups; với consumer t
 >
 > **Bổ trợ:** [Retry topic](https://docs.spring.io/spring-kafka/reference/retrytopic/retry-config.html).
 >
-> **Mã nguồn bài này:** `labs/05-scenarios` (`S8Poison.java`). **Tra nhanh:** [Sổ tay](../reference/0003-tricky-scenarios.md), nhóm C (E1).
+> **Mã nguồn bài này:** `labs/05-scenarios` (`S8Poison.java`, `S8Retry.java`). **Tra nhanh:** [Sổ tay](../reference/0003-tricky-scenarios.md), nhóm C (E1).
 
 **Bài tiếp theo:** [Bài 7: idempotent consumer, outbox, transaction](0007-idempotent-consumer-transactions.md): retry nghĩa là giao nhiều lần; làm sao để nhiều lần mà tác dụng vẫn một lần.
 
-> **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "retry topic hay blocking retry cho dòng tiền?", "replay DLT thế nào?". Dán kết quả quiz và những gì bạn thấy khi chạy s8/s8dlt.
+> **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "retry topic hay blocking retry cho dòng tiền?", "replay DLT thế nào?". Dán kết quả quiz và những gì bạn thấy khi chạy s8, s8dlt, s8retry.

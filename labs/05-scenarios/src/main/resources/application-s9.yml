@@ -1,0 +1,4 @@
+# S9 (Bài 7): CỐ Ý không có property nào.
+# Logic nằm ở S9IdempotentConsumer.java: producer (ứng dụng) gửi mỗi sự kiện 2 lần cùng eventId,
+# consumer cộng điểm mỗi lần nhận => điểm gấp đôi. Idempotence của producer (Bài 4b)
+# không cứu được, vì đây là hai lần gọi send() của ứng dụng, không phải retry nội bộ của producer.

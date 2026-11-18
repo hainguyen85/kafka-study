@@ -17,15 +17,22 @@ table.uc td:last-child { width: 30%; }
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · <a href="0003-tricky-scenarios.html">Sổ tay usecase (triệu chứng, nguyên nhân, code)</a></nav>
 <h1>Tổng hợp usecase</h1>
-<p class="lede">48 usecase từ 12 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.</p>
+<p class="lede">51 usecase từ 13 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.</p>
 <p><input id="ucFilter" type="search" placeholder="Lọc theo từ khoá: thanh toán, rebalance, acks, DLT..." aria-label="Lọc usecase"></p>
 <p>Trang này do <code>scripts/build_usecases.py</code> sinh từ các bài học; cột "Cách xử lý" lấy câu bắt đầu bằng "Xử lý" hoặc "Sửa" trong usecase.</p>
 
+<h2>Bài 1: Bức tranh tổng thể về Kafka</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0001-kafka-big-picture.html#uc-a">(a) Thương mại điện tử: email chậm làm hỏng đặt hàng</a></td><td>Kịch bản minh hoạ (do mình dựng). Order gọi REST lần lượt tới Notification, Inventory, Analytics rồi mới trả lời khách.</td><td>Order ghi OrderPlaced vào topic orders rồi trả lời khách ngay.</td></tr>
+<tr><td><a href="../lessons/0001-kafka-big-picture.html#uc-b">(b) Ngân hàng: thêm service chống gian lận cần lịch sử giao dịch</a></td><td>Kịch bản minh hoạ (do mình dựng). Team chống gian lận cần giao dịch của 3 ngày gần nhất để chạy thử bộ quy tắc mới, rồi đọc tiếp giao dịch theo thời gian thực.</td><td>group mới đặt auto.offset.reset=earliest để bắt đầu từ dữ liệu cũ nhất còn trong retention.</td></tr>
+</table>
 <h2>Bài 2: Key, partition, offset</h2>
 <table class="uc">
 <tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
 <tr><td><a href="../lessons/0002-key-partition-offset.html#uc-a">(a) Gọi xe: tài xế "nhảy lùi" trên bản đồ</a></td><td>Mỗi vài giây, app tài xế gửi DriverLocationUpdated vào topic driver-locations (3 partition). Team làm bản đồ muốn hiển thị vị trí mới nhất của từng tài xế, nhưng lại dùng mã cuốc xe làm key (và giữa hai cuốc, key trống).</td><td>key = mã tài xế.</td></tr>
-<tr><td><a href="../lessons/0002-key-partition-offset.html#uc-b">(b) Flash sale: một shop làm nghẽn một partition</a></td><td>Topic orders dùng mã shop làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition.</td><td>chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8).</td></tr>
+<tr><td><a href="../lessons/0002-key-partition-offset.html#uc-b">(b) Flash sale: một shop làm nghẽn một partition</a></td><td>Topic orders dùng mã shop làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition.</td><td>chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8, đo trên cụm thật ở Bài 8b).</td></tr>
+<tr><td><a href="../lessons/0002-key-partition-offset.html#uc-c">(c) Chứng khoán: tiền huỷ lệnh về sau lệnh mua mới</a></td><td>Kịch bản minh hoạ (do mình dựng). Service quản lý lệnh gửi OrderPlaced và OrderCancelled vào topic stock-orders với key = mã chứng khoán, để lệnh của từng mã giữ đúng thứ tự.</td><td>key theo đối tượng mà consumer cần thứ tự: service sức mua cần thứ tự theo tài khoản, nên key = mã tài khoản.</td></tr>
 </table>
 <h2>Bài 3: Dựng cụm 3 broker</h2>
 <table class="uc">

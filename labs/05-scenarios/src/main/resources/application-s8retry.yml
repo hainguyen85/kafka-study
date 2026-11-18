@@ -1,0 +1,5 @@
+# S8retry (Bài 6): không có property nào. Non-blocking retry khai báo bằng annotation trên listener (S8Retry.java):
+#     @RetryableTopic(attempts = "3", backOff = @BackOff(delay = 1000), numPartitions = "3", replicationFactor = "${lab.replicas:3}")
+#   - lỗi => record sang topic s8r-orders-retry, partition gốc chạy tiếp (thứ tự theo key bị phá);
+#   - hết 3 lần giao => sang s8r-orders-dlt và tới phương thức @DltHandler.
+# Spring Boot cũng có spring.kafka.retry.topic.* nhưng nó áp cho MỌI listener; lab này dùng annotation để chỉ áp cho một listener.

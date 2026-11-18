@@ -4,16 +4,24 @@
 
 # Tổng hợp usecase
 
-48 usecase từ 12 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.
+51 usecase từ 13 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.
 
 Trang này do `scripts/build_usecases.py` sinh từ các bài học; cột "Cách xử lý" lấy câu bắt đầu bằng "Xử lý" hoặc "Sửa" trong usecase.
+
+## Bài 1: Bức tranh tổng thể về Kafka
+
+| Usecase | Chuyện gì xảy ra | Cách xử lý |
+|---|---|---|
+| [(a) Thương mại điện tử: email chậm làm hỏng đặt hàng](../lessons/0001-kafka-big-picture.md#uc-a) | Kịch bản minh hoạ (do mình dựng). Order gọi REST lần lượt tới Notification, Inventory, Analytics rồi mới trả lời khách. | Order ghi OrderPlaced vào topic orders rồi trả lời khách ngay. |
+| [(b) Ngân hàng: thêm service chống gian lận cần lịch sử giao dịch](../lessons/0001-kafka-big-picture.md#uc-b) | Kịch bản minh hoạ (do mình dựng). Team chống gian lận cần giao dịch của 3 ngày gần nhất để chạy thử bộ quy tắc mới, rồi đọc tiếp giao dịch theo thời gian thực. | group mới đặt auto.offset.reset=earliest để bắt đầu từ dữ liệu cũ nhất còn trong retention. |
 
 ## Bài 2: Key, partition, offset
 
 | Usecase | Chuyện gì xảy ra | Cách xử lý |
 |---|---|---|
 | [(a) Gọi xe: tài xế "nhảy lùi" trên bản đồ](../lessons/0002-key-partition-offset.md#uc-a) | Mỗi vài giây, app tài xế gửi DriverLocationUpdated vào topic driver-locations (3 partition). Team làm bản đồ muốn hiển thị vị trí mới nhất của từng tài xế, nhưng lại dùng mã cuốc xe làm key (và giữa hai cuốc, key trống). | key = mã tài xế. |
-| [(b) Flash sale: một shop làm nghẽn một partition](../lessons/0002-key-partition-offset.md#uc-b) | Topic orders dùng mã shop làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. | chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8). |
+| [(b) Flash sale: một shop làm nghẽn một partition](../lessons/0002-key-partition-offset.md#uc-b) | Topic orders dùng mã shop làm key để giữ thứ tự đơn theo shop. Ngày flash sale, một shop nhận 70% đơn, nên 70% message dồn vào một partition. | chọn key theo đối tượng thật sự cần giữ thứ tự và tránh key quá "to"; thêm consumer không giúp được partition nóng (Bài 8, đo trên cụm thật ở Bài 8b). |
+| [(c) Chứng khoán: tiền huỷ lệnh về sau lệnh mua mới](../lessons/0002-key-partition-offset.md#uc-c) | Kịch bản minh hoạ (do mình dựng). Service quản lý lệnh gửi OrderPlaced và OrderCancelled vào topic stock-orders với key = mã chứng khoán, để lệnh của từng mã giữ đúng thứ tự. | key theo đối tượng mà consumer cần thứ tự: service sức mua cần thứ tự theo tài khoản, nên key = mã tài khoản. |
 
 ## Bài 3: Dựng cụm 3 broker
 

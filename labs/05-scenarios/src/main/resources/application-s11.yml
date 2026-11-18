@@ -1,0 +1,3 @@
+# S11 (Bài 8): không có property nào, vì thí nghiệm cần BỐN cấu hình producer/consumer khác nhau trong một lần chạy.
+# S11TooLarge.java tự dựng KafkaProducer thuần cho từng lần thử (max.request.size mặc định, rồi 3 MB),
+# topic s11-big-default (max.message.bytes mặc định) và s11-big-ok (max.message.bytes=3000000) tạo trong TopicsConfig.

@@ -1,0 +1,2 @@
+# S13 (Bài 8c): không có property nào. Cấu hình compaction là cấu hình TOPIC, không phải của client:
+# TopicsConfig tạo topic với cleanup.policy=compact và segment.ms=1000, min.cleanable.dirty.ratio=0.01 để compaction chạy sớm; S13Compaction.java đếm record theo key.

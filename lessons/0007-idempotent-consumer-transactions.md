@@ -61,7 +61,17 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 **Chọn ngữ nghĩa nào cho luồng nào, và cấu hình Spring Boot cho từng loại:** xem [Bài 5c](0012-delivery-semantics.md). Bài này đi sâu vào hai công cụ của dòng cuối bảng đó: idempotent consumer với outbox, và transaction.
 
-## 2. Dự đoán, rồi chạy
+## 2. Mô phỏng: crash ở đâu thì mất, trùng hay đúng?
+
+Chọn một công cụ và một điểm crash, *đoán trước* kết quả (đúng, mất hay trùng), rồi bấm "Chạy". Sau crash, mô phỏng khởi động lại từ trạng thái bền (DB, offset đã commit, log Kafka); thứ gì chỉ nằm trong RAM thì mất. Mô phỏng theo mô hình ở mục 1, không phải client thật.
+
+1. **Ghi kép**, crash sau bước 1: DB và Kafka lệch nhau thế nào? Rồi **outbox** với cùng điểm crash, và crash sau bước 2.
+2. **Phía nhận: không chống trùng**, crash sau bước 2 (đã cộng điểm, chưa commit offset). Đây là at-least-once.
+3. **Chống trùng bằng Set trong RAM**: lúc không crash có vẻ ổn, kể cả khi tick "bản trùng". Rồi tick "bản trùng" và crash sau bước 3: vì sao lại trùng?
+4. **UNIQUE(eventId) cùng transaction DB**: thử mọi điểm crash, có lúc nào trùng không?
+5. **Kafka → Kafka**: không transaction và có transaction, crash sau bước 2, với reader `read_committed` rồi `read_uncommitted`.
+
+## 3. Dự đoán, rồi chạy
 
 Đọc `S9IdempotentConsumer.java`: 5 sự kiện, user `u1..u5` được cộng `10 × n` điểm, *mỗi sự kiện được gửi 2 lần* với cùng `eventId` (mô phỏng ứng dụng gửi lại sau restart), producer idempotent bật. Trả lời trước khi chạy:
 
@@ -118,7 +128,7 @@ Tôi đã chạy s9 và thấy điểm gấp đôi
 mvn -q spring-boot:run -Dspring-boot.run.profiles=s9dedup
 ```
 
-Đã quan sát: điểm đúng. **Cảnh báo trong chính file code:** tập "đã xử lý" nằm trong RAM chỉ để minh hoạ. Hãy làm bài tập ở mục 3 để thấy vì sao.
+Đã quan sát: điểm đúng. **Cảnh báo trong chính file code:** tập "đã xử lý" nằm trong RAM chỉ để minh hoạ. Hãy làm bài tập ở mục 4 để thấy vì sao.
 
 Tôi đã chạy s9dedup
 
@@ -153,7 +163,7 @@ read_uncommitted trả mọi record, kể cả của transaction đã abort; rea
 
 <!-- /quiz -->
 
-## 3. Bài tập thiết kế: đưa dedup vào đúng chỗ
+## 4. Bài tập thiết kế: đưa dedup vào đúng chỗ
 
 Hàm cộng điểm (khoảng 5 dòng) hiện chạy trong RAM. Bạn viết lại cho production, dùng DB quan hệ. Tự viết trước, rồi mở đáp án.
 
@@ -172,7 +182,7 @@ Mở đáp án gợi ý
 
 **Dọn dẹp:** bảng `processed_event` lớn dần; giữ theo cửa sổ thời gian lớn hơn thời gian tối đa mà một bản trùng có thể xuất hiện (retention của topic).
 
-## 4. Đi sâu: chi tiết cho ba công cụ
+## 5. Đi sâu: chi tiết cho ba công cụ
 
 Đọc sau khi đã làm lab và bài tập thiết kế.
 
@@ -192,7 +202,7 @@ Mở đáp án gợi ý
 - **Phía đọc:** consumer cần `isolation.level=read_committed` (mặc định `read_uncommitted`) và `enable.auto.commit=false`. `read_committed` chỉ đọc tới LSO (last stable offset); transaction treo làm LSO không tiến và consumer kẹt: đó là động cơ của KIP-890. `transaction.timeout.ms` mặc định 60000, trần broker 900000. Transaction cần cụm ≥ 3 broker. [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[KIP-890]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-890%3A+Transactions+Server-Side+Defense)
 - **Phạm vi:** transaction của Kafka không bao gồm DB của bạn. `ChainedKafkaTransactionManager` đã deprecated từ 2.7; khuyến nghị dùng `KafkaTransactionManager` ở container và `@Transactional` cho DB, *không* phải hai-pha-commit. Ghi DB + gửi Kafka vẫn là "hai hệ thống". [[Transactions]](https://docs.spring.io/spring-kafka/reference/kafka/transactions.html)
 
-## 5. Usecase
+## 6. Usecase
 
 [Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
@@ -330,13 +340,13 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 - **Bên kia nói "mình có exactly-once", hỏi lại gì?** "Đầu ra cuối cùng là Kafka hay DB?" Nếu là DB thì đó là at-least-once cộng dedup.
 - **Bảng dedup giữ bao lâu?** Lâu hơn khoảng thời gian một bản trùng còn có thể xuất hiện, thường gắn với retention của topic.
 
-## 6. Tự nói thành lời
+## 7. Tự nói thành lời
 
 Trong 60 giây: *"Để một lệnh không bị xử lý hai lần dù Kafka giao hai lần, mình ... Nếu hỏi exactly-once thì mình trả lời ... vì phạm vi của nó là ..."* Dùng: at-least-once, idempotent, outbox, `read_committed`, LSO.
 
 **Ôn nhanh:** [tóm tắt Bài 7](../summaries/0007-idempotent-consumer-transactions.md) (đọc sau khi đã tự nói).
 
-## 7. Kiểm tra
+## 8. Kiểm tra
 
 <!-- quiz:quiz -->
 

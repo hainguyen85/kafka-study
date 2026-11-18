@@ -15,7 +15,7 @@ import org.springframework.kafka.test.EmbeddedKafkaKraftBroker;
  * Chỉ để kiểm tra logic consumer/error/transaction; KHÔNG kiểm tra được độ bền đa broker (acks, ISR, kill broker).
  *
  * Chạy:  java -cp target/classes;target/test-classes;<classpath> lab.EmbeddedHarness s8 s8dlt s10 ...
- * Tên tình huống: s6 s6fix s7 s8 s8dlt s9 s9dedup s10 s11 s12 s13
+ * Tên tình huống: s6 s6fix s7 s8 s8dlt s8retry s9 s9dedup s10 s11 s12 s13
  */
 public class EmbeddedHarness {
 

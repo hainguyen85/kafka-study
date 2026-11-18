@@ -75,28 +75,99 @@ Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các
 5. Event vẫn nằm đó sau khi đọc, cho tới hết thời gian retention. Thêm group **Analytics** vào sau cũng đọc được.
 6. Nếu một broker chết, các server còn lại tiếp quản ("if any of its servers fails, the other servers will take over their work"). [[intro]](https://kafka.apache.org/intro)
 
+### Sáu điều cần nhớ
+
+| Thứ | Điều cần nhớ | Hệ quả khi thiết kế |
+|---|---|---|
+| Producer và consumer | Tách rời, producer không chờ consumer | Bên nhận chậm hay chết không kéo bên gửi theo |
+| Event | Không bị xoá khi đọc, giữ theo retention | Service mới đọc lại được lịch sử còn trong retention |
+| Consumer đọc | Tự kéo (pull) theo tốc độ riêng | Chậm thì tụt lại rồi đuổi kịp, không làm sập ai |
+| Partition và bản sao | Topic chia thành partition; mỗi partition có bản sao trên broker khác | Partition là đơn vị song song, bản sao là đơn vị độ bền |
+| Consumer group | Mỗi group nhận đủ; trong group, mỗi partition một consumer | Số partition là trần số consumer có việc trong group |
+| Controller (KRaft) | Giữ metadata của cụm | Nội dung message nằm ở broker, không ở controller |
+
 ## 5. Bản đồ: câu hỏi trong họp → bài sẽ học
 
 | Bạn sẽ nghe | Khái niệm | Bài |
 |---|---|---|
 | "Sự kiện của cùng một đơn hàng sao bị lộn thứ tự?" | key, partition, offset | [Bài 2](0002-key-partition-offset.md) |
-| "Dựng cụm thế nào? Broker chết thì sao?" | cluster, leader, KRaft | Bài 3 |
-| "Broker chết thì có mất đơn hàng không?" | acks, ISR, min.insync.replicas | Bài 4 |
-| "Sao khách nhận hai email xác nhận?" / "sao kho bị trừ hai lần?" | consumer group, commit offset, at-least-once | Bài 5 |
-| "Một message lỗi làm kẹt cả hàng" | poison pill, retry, DLQ, rebalance | Bài 6 |
+| "Dựng cụm thế nào? Broker chết thì sao?" | cluster, leader, KRaft | [Bài 3](0003-build-cluster.md) |
+| "Broker chết thì có mất đơn hàng không?" | acks, ISR, min.insync.replicas | [Bài 4](0004-producer-durability.md) |
+| "Producer gửi lại thì có ghi trùng không?" | idempotent producer | [Bài 4b](0010-idempotent-producer.md) |
+| "Sao khách nhận hai email xác nhận?" / "sao kho bị trừ hai lần?" | consumer group, commit offset, at-least-once | [Bài 5](0005-consumer-offset-commit.md) |
+| "Deploy xong consumer đứng hình vài chục giây" | rebalance | [Bài 5b](0011-rebalance.md) |
+| "Exactly-once có thật không?" | delivery semantics | [Bài 5c](0012-delivery-semantics.md) |
+| "Một message lỗi làm kẹt cả hàng" | poison pill, retry, DLT | [Bài 6](0006-error-handling-dlt.md) |
+| "Làm sao để không trừ tiền hai lần?" | idempotent consumer, outbox, transaction | [Bài 7](0007-idempotent-consumer-transactions.md) |
+| "Topic này cần bao nhiêu partition, key là gì?" | thiết kế topic | [Bài 8](0008-topic-design.md) |
+| "Giờ mở cửa phiên hệ thống chậm hẳn" | thông lượng, độ trễ, lag | [Bài 8b](0014-throughput-latency.md) |
+| "Đọc lại dữ liệu tuần trước được không?" | retention, compaction, replay | [Bài 8c](0015-replay-retention.md) |
+| "Thêm field có làm hỏng consumer không?" | schema, Schema Registry | [Bài 8d](0016-schema-evolution.md) |
+
+## 6. Usecase: gọi API trực tiếp hỏng ở đâu
+
+[Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
+
+### (a) Thương mại điện tử: email chậm làm hỏng đặt hàng
+
+Kịch bản minh hoạ (do mình dựng). Order gọi REST lần lượt tới Notification, Inventory, Analytics rồi mới trả lời khách. Một sáng, máy chủ email chậm và Notification mất 30 giây cho mỗi request. Thread của Order nằm chờ, pool thread cạn dần, khách đặt hàng nhận timeout, dù kho và thanh toán vẫn bình thường. Một service phụ đã kéo sập luồng chính.
+
+**Xử lý:** Order ghi `OrderPlaced` vào topic `orders` rồi trả lời khách ngay. Notification tự kéo event khi sẵn sàng; chậm thì tụt lại rồi đuổi kịp, event vẫn nằm trong log. Cái giá: email có thể đến muộn vài phút, vì hệ thống giờ là nhất quán sau (eventual), không còn đồng bộ.
+
+```mermaid
+sequenceDiagram
+participant K as Khách
+participant O as Order
+participant N as Notification (chậm)
+participant T as Topic orders
+K->>O: Đặt hàng
+Note over O,N: Gọi REST trực tiếp
+O->>N: Gửi email xác nhận
+Note over N: 30 giây chưa trả lời
+O-->>K: Timeout, dù kho và thanh toán vẫn ổn
+Note over O,T: Qua Kafka
+K->>O: Đặt hàng
+O->>T: Ghi OrderPlaced
+O-->>K: Đặt hàng thành công
+N->>T: Kéo event khi sẵn sàng (có thể muộn vài phút)
+```
+
+*Sequence: gọi trực tiếp làm khách chờ service chậm nhất; qua Kafka, Order chỉ cần ghi được vào topic.*
+
+### (b) Ngân hàng: thêm service chống gian lận cần lịch sử giao dịch
+
+Kịch bản minh hoạ (do mình dựng). Team chống gian lận cần giao dịch của 3 ngày gần nhất để chạy thử bộ quy tắc mới, rồi đọc tiếp giao dịch theo thời gian thực. Với REST, team giao dịch phải viết thêm API xuất lịch sử, thêm một lời gọi mới và chịu thêm tải. Với Kafka, team chống gian lận chỉ cần tạo một consumer group mới đọc topic giao dịch có sẵn; service giao dịch không sửa dòng nào.
+
+**Xử lý:** group mới đặt `auto.offset.reset=earliest` để bắt đầu từ dữ liệu cũ nhất còn trong retention. Hai cái bẫy: mặc định là `latest`, nên group mới chỉ thấy giao dịch từ lúc nó chạy ([Bài 5](0005-consumer-offset-commit.md)); và dữ liệu cũ hơn retention đã bị xoá, Kafka không giữ mãi ([Bài 8c](0015-replay-retention.md)). [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
+
+```mermaid
+flowchart LR
+TX["Service giao dịch<br/>(không sửa gì)"] --> T["Topic transactions<br/>giữ theo retention"]
+T --> G1["Group sao kê<br/>đang đọc ở cuối log"]
+T --> G2["Group chống gian lận (mới)<br/>earliest: đọc từ dữ liệu cũ nhất"]
+T -.-> G3["Nếu để mặc định latest:<br/>bỏ qua 3 ngày lịch sử"]
+class G2 ok
+class G3 bad
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
+```
+
+*Flow: thêm bên đọc mới không đụng tới bên ghi; vị trí bắt đầu của group mới do `auto.offset.reset` quyết định.*
 
 ### Hỏi nhanh, đáp gọn
 
+- **Kafka có thay được mọi lời gọi API không?** Không. Khi bên gọi cần câu trả lời ngay để đi tiếp (ví dụ kiểm tra số dư trước khi cho chuyển tiền), gọi đồng bộ vẫn hợp lý. Kafka hợp với thông báo "việc này đã xảy ra", không hợp với câu hỏi "tôi có được làm việc này không".
 - **Kafka có phải message queue không?** Dùng được như queue (các consumer cùng group chia nhau partition) và như pub/sub (mỗi group nhận đủ), nhưng bản chất là một log chỉ ghi thêm: đọc không xoá, đọc lại được, song song bị giới hạn bởi số partition.
 - **Một broker chết thì sao?** Partition có leader trên broker đó được bầu leader mới từ các bản sao còn bám kịp (ISR); cụm chạy tiếp. Chi tiết ở Bài 3 và 4.
 
-## 6. Tự nói thành lời (30 giây, rồi mới làm quiz)
+## 7. Tự nói thành lời (30 giây, rồi mới làm quiz)
 
 Che màn hình hoặc nhìn ra chỗ khác. Nói to (hoặc viết ra giấy): *"Order gửi event, Kafka ... , Notification và Inventory ..."* Gọi đúng tên 5 thành phần. Khoảng trống bạn gặp chính là chỗ cần xem lại. Cố truy hồi trước khi nhìn lại luôn giúp nhớ lâu hơn là đọc lại.
 
 **Ôn nhanh:** [tóm tắt Bài 1](../summaries/0001-kafka-big-picture.md) (đọc sau khi đã tự nói).
 
-## 7. Kiểm tra
+## 8. Kiểm tra
 
 <!-- quiz:quiz -->
 
@@ -217,6 +288,21 @@ Producer chỉ ghi vào leader; follower sao chép từ leader.
 **C. Siêu dữ liệu (metadata) của cả cụm**
 
 Controller tạo quorum để giữ metadata cụm. Nội dung message nằm ở các broker.
+
+</details>
+
+**9. Team mới cần đọc giao dịch 3 ngày qua từ topic transactions đang chạy. Cách nào đúng tinh thần Kafka?**
+
+- **A.** Sửa producer để gửi thêm bản sao
+- **B.** Gọi API của service giao dịch cũ
+- **C.** Tạo topic mới rồi chép dữ liệu
+- **D.** Group mới, đọc từ offset sớm nhất
+
+<details><summary>Đáp án</summary>
+
+**D. Group mới, đọc từ offset sớm nhất**
+
+Event không bị xoá khi đọc, nên một group mới với auto.offset.reset=earliest đọc lại được dữ liệu còn trong retention mà không phải sửa bên ghi. Mặc định latest sẽ bỏ qua lịch sử.
 
 </details>
 

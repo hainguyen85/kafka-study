@@ -1,6 +1,6 @@
 # Lab 05: các tình huống "oái oăm" (Spring Kafka)
 
-Mỗi tình huống là một **profile**: cùng một code nền, đổi profile là đổi tình huống. Sổ tay đầy đủ (triệu chứng, nguyên nhân, cách xử lý, nguồn) ở `reference/0003-tricky-scenarios.html`.
+Mỗi tình huống là một **profile**: cùng một code nền, đổi profile là đổi tình huống. File `application-<profile>.yml` chỉ chứa property khi tình huống đổi được bằng property (`s6`, `s6fix`, `s7`, `s10`). Các profile còn lại cấu hình trong Java (bean `@Profile`, ví dụ error handler + DLT của `s8dlt`, vì Spring Boot không có property cho chúng) hoặc cố ý để mặc định (`s8`); file yaml của chúng chỉ có chú thích chỉ ra cấu hình nằm ở đâu. Sổ tay đầy đủ (triệu chứng, nguyên nhân, cách xử lý, nguồn) ở `reference/0003-tricky-scenarios.html`.
 
 ## Chuẩn bị
 
@@ -22,6 +22,7 @@ Mỗi tình huống là một **profile**: cùng một code nền, đổi profil
 | `s6` / `s6fix` | Auto-commit: mất và trùng message khi xử lý bất đồng bộ + crash | chạy `--lab.phase=crash`, rồi `--lab.phase=resume` (cùng profile) | In "MẤT" và "TRÙNG". `s6` mất; `s6fix` (ack thủ công) không mất, chỉ trùng |
 | `s7` | Xử lý 12 giây > `max.poll.interval.ms` 10 giây: rebalance, trùng | chạy một lần (~100 giây) | Cùng offset xử lý nhiều lần. Thử sửa: `--spring.kafka.consumer.max-poll-records=1 --spring.kafka.consumer.max-poll-interval=30s` |
 | `s8` / `s8dlt` | Poison pill: mặc định bị bỏ qua im lặng; có DLT thì còn dấu vết | chạy một lần (~25 giây) mỗi profile | `s8`: POISON không ở đâu cả. `s8dlt`: POISON nằm trong `s8-poison-dlt` |
+| `s8retry` | Non-blocking retry `@RetryableTopic` (attempts 3, 1 giây) + `@DltHandler`: thứ tự theo key bị phá | chạy một lần (~30 giây) | Thứ tự `[m0, m1, m2, m4, FLAKY, m6, m7]`; POISON giao 3 lần rồi vào `s8r-orders-dlt`; topic tự tạo `s8r-orders-retry`, `s8r-orders-dlt`. Đã chạy trên cụm 3 broker 2026-11-18 |
 | `s9` / `s9dedup` | Trùng dù producer idempotent (ứng dụng gửi lại); chống trùng ở consumer | chạy một lần (~15 giây) mỗi profile | `s9`: điểm gấp đôi. `s9dedup`: điểm đúng |
 | `s10` | Transaction consume-transform-produce, `read_committed` vs `read_uncommitted` | chạy một lần (~15 giây) | `read_uncommitted` thấy BOOM 2 lần (1 bản aborted); `read_committed` chỉ thấy 1 lần |
 | `s11` | Message 2 MB: lỗi ở từng tầng cấu hình | chạy một lần | 4 dòng kết quả, mỗi dòng một exception hoặc thành công |
@@ -51,7 +52,7 @@ Kết quả quan sát được ghi ở sổ tay (cột "Trạng thái"). Những
 ## Đọc code theo thứ tự
 
 1. `TopicsConfig.java`: bạn tạo topic, đặt RF và `min.insync.replicas` ở đây (có comment về DLT cần đủ partition).
-2. `S8Poison.java`: cấu hình `DefaultErrorHandler` + `DeadLetterPublishingRecoverer`.
+2. `S8Poison.java`: cấu hình `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` (blocking retry). `S8Retry.java`: `@RetryableTopic` (non-blocking retry).
 3. `S6AutoCommit.java`, `S7PollInterval.java`: hai nguồn gây trùng/mất message phía consumer.
 4. `S9IdempotentConsumer.java`, `S10Transactions.java`: chống trùng và giới hạn của transaction.
 5. `S11TooLarge.java`, `S12PartitionMap.java`, `S13Compaction.java`: thiết kế topic.

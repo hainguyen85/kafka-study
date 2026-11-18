@@ -1,0 +1,7 @@
+# S8dlt (Bài 6): không có property nào, vì Spring Boot KHÔNG có property cho error handler / DLT.
+# Cấu hình nằm trong code: S8Poison.DltConfig (bean @Profile("s8dlt")):
+#     new DefaultErrorHandler(new DeadLetterPublishingRecoverer(template), new FixedBackOff(300L, 2L))
+#   - Boot tự gắn bean CommonErrorHandler này vào container factory mặc định;
+#   - FixedBackOff(300L, 2L) = lần giao đầu + 2 lần thử lại, cách nhau 300 ms => 3 lần giao;
+#   - recoverer gửi BẢN SAO record sang "s8-poison-dlt", cùng số partition với record gốc (topic DLT tạo trong TopicsConfig).
+#     Record gốc vẫn nằm trong s8-poison; chỉ offset commit của group đi qua nó.
