@@ -14,6 +14,8 @@ Key, partition và offset: ba thứ quyết định thứ tự và vị trí c�
 
 Một message đi vào topic qua ba bước: producer nhìn **key**, key quyết định **partition**, partition gắn cho message một **offset**. Mỗi bước chỉ có vài ý cần nhớ.
 
+![Producer gửi vào topic driver-locations có 3 partition, consumer group đọc](img/0002-key-partition-offset-fig1.svg)
+
 *Key → partition → offset: cùng key `DRV-001` luôn rơi vào cùng một partition; trong partition, message xếp theo offset tăng dần.*
 
 ### 1.1. Key: chọn partition cho message

@@ -1,0 +1,56 @@
+<svg width="680" height="340" xmlns="http://www.w3.org/2000/svg" class="diagram" viewBox="0 0 680 340" role="img" aria-label="Kiến trúc tổng thể: producer, cluster 3 broker, 2 consumer group, controller">
+<style>
+svg { --bg: #fffdf8; --fg: #1c1b19; --muted: #6b665c; --rule: #ddd6c6; --accent: #1d5fa8; --ok: #1b7a3d; --ok-bg: #e6f4ea; --bad: #b3261e; --bad-bg: #fbe9e7; --code-bg: #f3efe4; --card: #fbf8ef; --ctrl: #dfeaf7; --node: #efe7d2; background: var(--bg); font-family: system-ui, sans-serif; }
+@media (prefers-color-scheme: dark) { svg { --bg: #17161a; --fg: #ebe8e1; --muted: #a09b90; --rule: #3a3841; --accent: #7fb2ee; --ok: #6fd18c; --ok-bg: #1d3325; --bad: #ff8f86; --bad-bg: #3a1f1d; --code-bg: #25232b; --card: #1f1d24; --ctrl: #1f2f45; --node: #33301f; color-scheme: dark; } }
+text { fill: var(--fg); font-size: 13px; }
+.muted { fill: var(--muted); font-size: 11.5px; }
+.box { stroke: var(--rule); stroke-width: 1.2; }
+.ctrl { fill: var(--ctrl); }
+.node { fill: var(--node); }
+.part { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+.arrow { stroke: var(--accent); stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+.tag { fill: var(--accent); font-weight: 700; font-size: 12px; }
+</style>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <rect class="box ctrl" x="10" y="115" width="110" height="60" rx="6"/>
+  <text x="65" y="141" text-anchor="middle">Producer</text><text class="muted" x="65" y="159" text-anchor="middle">Order service</text>
+  <path class="arrow" d="M120 145 L178 145"/>
+  <text class="muted" x="148" y="136" text-anchor="middle">ghi</text>
+
+  <rect x="180" y="30" width="330" height="236" rx="8" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <text x="345" y="50" text-anchor="middle">Kafka cluster (3 broker), topic "orders" = P0, P1, P2</text>
+
+  <rect class="box node" x="192" y="62" width="96" height="170" rx="5"/><text x="240" y="82" text-anchor="middle">Broker 1</text>
+  <rect class="box node" x="298" y="62" width="96" height="170" rx="5"/><text x="346" y="82" text-anchor="middle">Broker 2</text>
+  <rect class="box node" x="404" y="62" width="96" height="170" rx="5"/><text x="452" y="82" text-anchor="middle">Broker 3</text>
+
+  <rect class="box ctrl" x="202" y="94" width="76" height="26" rx="3"/><text x="240" y="112" text-anchor="middle" style="font-size:10.5px">P0 ★ · #1 #4</text>
+  <rect class="part" x="202" y="130" width="76" height="26" rx="3"/><text x="240" y="148" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="202" y="166" width="76" height="26" rx="3"/><text x="240" y="184" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+
+  <rect class="part" x="308" y="94" width="76" height="26" rx="3"/><text x="346" y="112" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="box ctrl" x="308" y="130" width="76" height="26" rx="3"/><text x="346" y="148" text-anchor="middle" style="font-size:10.5px">P1 ★ · #2 #5</text>
+  <rect class="part" x="308" y="166" width="76" height="26" rx="3"/><text x="346" y="184" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+
+  <rect class="part" x="414" y="94" width="76" height="26" rx="3"/><text x="452" y="112" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="414" y="130" width="76" height="26" rx="3"/><text x="452" y="148" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="box ctrl" x="414" y="166" width="76" height="26" rx="3"/><text x="452" y="184" text-anchor="middle" style="font-size:10.5px">P2 ★ · #3 #6</text>
+  <text class="muted" x="345" y="222" text-anchor="middle">★ = leader (nơi producer ghi); còn lại = bản sao (follower)</text>
+  <text class="muted" x="345" y="244" text-anchor="middle">mỗi partition có 3 bản sao (replication factor = 3)</text>
+  <text class="muted" x="345" y="259" text-anchor="middle">#1..#6 = đơn hàng: P0, P1, P2 chứa đơn KHÁC nhau</text>
+
+  <rect class="box ctrl" x="540" y="40" width="130" height="96" rx="6"/>
+  <text x="605" y="60" text-anchor="middle">Consumer group</text><text class="muted" x="605" y="76" text-anchor="middle">"Notification"</text>
+  <rect class="part" x="550" y="90" width="50" height="30" rx="3"/><text x="575" y="110" text-anchor="middle">C1</text>
+  <rect class="part" x="610" y="90" width="50" height="30" rx="3"/><text x="635" y="110" text-anchor="middle">C2</text>
+  <rect class="box ctrl" x="540" y="150" width="130" height="96" rx="6"/>
+  <text x="605" y="170" text-anchor="middle">Consumer group</text><text class="muted" x="605" y="186" text-anchor="middle">"Inventory"</text>
+  <rect class="part" x="550" y="200" width="50" height="30" rx="3"/><text x="575" y="220" text-anchor="middle">C1</text>
+  <rect class="part" x="610" y="200" width="50" height="30" rx="3"/><text x="635" y="220" text-anchor="middle">C2</text>
+  <path class="arrow" d="M512 90 L538 90"/><path class="arrow" d="M512 200 L538 200"/>
+  <text class="muted" x="525" y="270" text-anchor="middle">đọc (pull)</text>
+
+  <rect class="box node" x="180" y="288" width="330" height="40" rx="6"/>
+  <text x="345" y="306" text-anchor="middle">Controller (KRaft)</text><text class="muted" x="345" y="321" text-anchor="middle">giữ metadata cụm: ai là leader, topic nào có gì</text>
+  <line x1="345" y1="266" x2="345" y2="288" stroke="var(--muted)"/>
+</svg>

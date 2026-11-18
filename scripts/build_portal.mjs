@@ -122,8 +122,22 @@ function quizzesOf(html) {
   return out;
 }
 // Bỏ dòng tự sinh và thanh điều hướng đầu file .md (portal có điều hướng riêng).
-function cleanMd(md) {
-  return md.replace(/^<!--.*?-->\s*/s, '')
+// Ảnh SVG do html2md tách ra (![..](img/x.svg)): chèn thẳng SVG vào trang để nó dùng biến màu của portal
+// (đổi theme sáng/tối được). Bỏ <style> riêng của file và dòng trống (để marked giữ nguyên khối HTML).
+function inlineSvgs(md, dir) {
+  if (!dir) return md;
+  return md.replace(/^!\[([^\]\n]*)\]\((img\/[\w.-]+\.svg)\)$/gm, (all, alt, rel) => {
+    const p = `${dir}/${rel}`;
+    if (!exists(p)) return all;
+    const svg = read(p).replace(/<style>[\s\S]*?<\/style>\s*/, '')
+      .replace(/^<svg width="[\d.]+" height="[\d.]+"/, '<svg') // chỉ thẻ gốc; rect bên trong giữ width/height
+      .split('\n').filter((l) => l.trim()).join('\n');
+    return `<figure class="svg-fig">\n${svg}\n</figure>`;
+  });
+}
+
+function cleanMd(md, dir) {
+  return inlineSvgs(md, dir).replace(/^<!--.*?-->\s*/s, '')
     .replace(/^\[[^\n]*\]\([^\n]*\)[^\n]*\n+/, '') // dòng breadcrumb đầu tiên
     .replace(/<!-- quiz:([\w-]+) -->[\s\S]*?<!-- \/quiz -->/g, (_, id) => `<div class="portal-quiz" data-quiz="${id}"></div>`);
 }
@@ -153,7 +167,7 @@ for (const part of PARTS) {
       src: `lessons/${stem}.md`, html: `lessons/${stem}.html`,
       summary: exists(`summaries/${stem}.md`) ? `sum-${stem}` : null,
       sims: SIMS.filter((s) => s.lessons.includes(stem)).map((s) => s.id),
-      quizzes: quizzesOf(html), md: cleanMd(md),
+      quizzes: quizzesOf(html), md: cleanMd(md, 'lessons'),
     });
   }
   groups.push(g);
@@ -181,7 +195,7 @@ const refGroup = { title: 'Tra cứu', items: [] };
 for (const f of fs.readdirSync(path.join(ROOT, 'reference')).filter((f) => f.endsWith('.html')).sort()) {
   const stem = f.replace(/\.html$/, '');
   const html = read(`reference/${f}`);
-  add(refGroup, { id: `ref-${stem}`, kind: 'reference', title: titleOf(html).replace(/^Bảng tra:\s*/, ''), src: `reference/${stem}.md`, html: `reference/${f}`, quizzes: quizzesOf(html), md: cleanMd(read(`reference/${stem}.md`)) });
+  add(refGroup, { id: `ref-${stem}`, kind: 'reference', title: titleOf(html).replace(/^Bảng tra:\s*/, ''), src: `reference/${stem}.md`, html: `reference/${f}`, quizzes: quizzesOf(html), md: cleanMd(read(`reference/${stem}.md`), 'reference') });
 }
 groups.push(refGroup);
 

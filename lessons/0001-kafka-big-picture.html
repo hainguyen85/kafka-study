@@ -107,14 +107,13 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
   <text x="345" y="306" text-anchor="middle">Controller (KRaft)</text><text class="muted" x="345" y="321" text-anchor="middle">giữ metadata cụm: ai là leader, topic nào có gì</text>
   <line x1="345" y1="266" x2="345" y2="288" stroke="var(--muted)"/>
 </svg>
-<figcaption>P0, P1, P2 là 3 partition của topic <code>orders</code>. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.</figcaption>
+<figcaption>P0, P1, P2 là 3 partition của topic <code>orders</code>. Cụm có 3 broker và replication factor 3, nên broker nào cũng giữ một bản của mọi partition; với 6 broker, mỗi partition chỉ nằm trên 3 trong 6 broker. Leader (★) của ba partition nằm ở ba broker khác nhau nên việc ghi được chia tải. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.</figcaption>
 </figure>
 
 <div class="warn"><b>Đừng lẫn partition với bản sao (replica).</b> Hai chiều của hình là hai khái niệm khác nhau:
 <ul class="tight">
 <li><b>Theo cột dọc, trong một broker (P0 so với P1 so với P2): khác nội dung.</b> Topic được <em>chia</em> thành partition; mỗi đơn hàng chỉ vào <em>một</em> partition (đơn #1 vào P0, đơn #2 vào P1...). Gộp P0 + P1 + P2 mới ra toàn bộ topic.</li>
 <li><b>Theo hàng ngang, qua các broker (P0 ở Broker 1, 2, 3): cùng nội dung.</b> Đó là 3 <em>bản sao</em> của cùng một partition P0, để một broker chết không mất dữ liệu. Chỉ bản leader (★) nhận ghi; follower chép lại từ leader. Consumer đọc <em>partition</em>, không đọc từng bản sao: đọc P0 là đọc nội dung của P0, dù nằm ở broker nào.</li>
-<li><b>Vì sao hình trông như "broker nào cũng có đủ P0, P1, P2"?</b> Vì cụm có đúng 3 broker và replication factor cũng là 3, nên mỗi broker phải giữ một bản của mọi partition. Với 6 broker và RF=3, mỗi partition chỉ có bản sao trên 3 trong 6 broker, và broker nào cũng chỉ giữ một phần topic. Điều "rải trên các broker" thể hiện qua <em>leader</em>: leader của P0, P1, P2 nằm ở ba broker khác nhau nên việc ghi được chia tải. <a href="https://kafka.apache.org/44/design/design/">[Design: replication]</a></li>
 </ul></div>
 
 <table>
@@ -163,13 +162,12 @@ Mục tiêu của bạn là hiểu <em>cách cấu hình Kafka để giải quy�
 </figure>
 <p><b>Đọc hình:</b></p>
 <ul class="tight">
-<li><b>Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc</b>, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là <em>consumer instance</em>, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.</li>
-<li>Chiều ngược lại không bị cấm: một consumer có thể đọc <em>nhiều</em> partition (C1 giữ P0 và P1).</li>
-<li>Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy <b>số partition là trần song song hoá của một group</b> (Bài 8).</li>
-<li>Việc chia này <em>không cố định</em>: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là <b>rebalance</b> (<a href="0011-rebalance.html">Bài 5b</a>). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.</li>
-<li><b>Vì sao thiết kế vậy?</b> Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.</li>
-<li><b>Hai group khác nhau không tranh nhau:</b> Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.</li>
-<li>Ngoại lệ về sau: <b>Share Groups</b> (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka">[KIP-932]</a></li>
+<li><b>Trong một group, mỗi partition do một consumer đọc</b> tại một thời điểm. Consumer là một <em>instance</em> (process hoặc thread), không phải một máy. Một consumer có thể giữ nhiều partition (C1 giữ P0, P1).</li>
+<li><b>Số partition là trần song song của một group:</b> 4 consumer trên 3 partition thì C4 ngồi không (Bài 8).</li>
+<li><b>Lý do:</b> thứ tự chỉ được đảm bảo trong một partition (Bài 2); hai consumer cùng đọc một partition sẽ xử lý song song và mất thứ tự.</li>
+<li><b>Việc chia thay đổi</b> khi consumer vào hoặc rời group: Kafka chia lại, gọi là <b>rebalance</b> (<a href="0011-rebalance.html">Bài 5b</a>).</li>
+<li><b>Các group độc lập:</b> mỗi group có offset riêng trên cùng partition.</li>
+<li>Ngoại lệ: <b>Share Groups</b> (Kafka 4.2 trở đi) cho nhiều consumer hơn partition, đổi lại không giữ thứ tự. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka">[KIP-932]</a></li>
 </ul>
 
 <h2>4. Hành trình của một đơn hàng</h2>

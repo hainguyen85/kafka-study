@@ -20,6 +20,8 @@ Bức tranh toàn cảnh trước, từng bộ phận sau.
 
 Kịch bản minh hoạ (do mình dựng): một cửa hàng online. Khi khách đặt hàng xong, service **Order** cần báo cho **Notification** (gửi email xác nhận), **Inventory** (trừ kho) và **Analytics** (cập nhật thống kê doanh thu).
 
+![So sánh gọi trực tiếp và đi qua Kafka](img/0001-kafka-big-picture-fig1.svg)
+
 *Bên trái: thêm một service nhận thì phải sửa Order, và một service nhận chậm hay chết sẽ kéo theo Order. Bên phải: Kafka đứng giữa.*
 
 Tài liệu chính thức mô tả đúng ý này: "producers and consumers are fully decoupled and agnostic of each other" và "producers never need to wait for consumers." [[Kafka intro]](https://kafka.apache.org/intro) Trang giới thiệu liệt kê nhiều lĩnh vực dùng Kafka; một mục trong đó là "To process payments and financial transactions in real-time, such as in stock exchanges, banks, and insurances."
@@ -34,13 +36,14 @@ Tài liệu chính thức mô tả đúng ý này: "producers and consumers are 
 
 ## 3. Năm thành phần trong bức tranh
 
-*P0, P1, P2 là 3 partition của topic `orders`. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.*
+![Kiến trúc tổng thể: producer, cluster 3 broker, 2 consumer group, controller](img/0001-kafka-big-picture-fig2.svg)
+
+*P0, P1, P2 là 3 partition của topic `orders`. Cụm có 3 broker và replication factor 3, nên broker nào cũng giữ một bản của mọi partition; với 6 broker, mỗi partition chỉ nằm trên 3 trong 6 broker. Leader (★) của ba partition nằm ở ba broker khác nhau nên việc ghi được chia tải. Sơ đồ này rút gọn: mũi tên từ cluster tới một group chỉ có nghĩa "group đọc topic". Ai trong group đọc partition nào thì xem hình ở mục "Một group chia partition thế nào?" ngay dưới bảng.*
 
 **Đừng lẫn partition với bản sao (replica).** Hai chiều của hình là hai khái niệm khác nhau:
 
 - **Theo cột dọc, trong một broker (P0 so với P1 so với P2): khác nội dung.** Topic được *chia* thành partition; mỗi đơn hàng chỉ vào *một* partition (đơn #1 vào P0, đơn #2 vào P1...). Gộp P0 + P1 + P2 mới ra toàn bộ topic.
 - **Theo hàng ngang, qua các broker (P0 ở Broker 1, 2, 3): cùng nội dung.** Đó là 3 *bản sao* của cùng một partition P0, để một broker chết không mất dữ liệu. Chỉ bản leader (★) nhận ghi; follower chép lại từ leader. Consumer đọc *partition*, không đọc từng bản sao: đọc P0 là đọc nội dung của P0, dù nằm ở broker nào.
-- **Vì sao hình trông như "broker nào cũng có đủ P0, P1, P2"?** Vì cụm có đúng 3 broker và replication factor cũng là 3, nên mỗi broker phải giữ một bản của mọi partition. Với 6 broker và RF=3, mỗi partition chỉ có bản sao trên 3 trong 6 broker, và broker nào cũng chỉ giữ một phần topic. Điều "rải trên các broker" thể hiện qua *leader*: leader của P0, P1, P2 nằm ở ba broker khác nhau nên việc ghi được chia tải. [[Design: replication]](https://kafka.apache.org/44/design/design/)
 
 | Thành phần | Vai trò (một câu) | Nguồn |
 |---|---|---|
@@ -54,17 +57,18 @@ Bạn chưa cần nhớ chi tiết từng ô: bảng này là "khung treo". Các
 
 ### Một group chia partition thế nào?
 
+![Group 2 consumer chia 3 partition; group 4 consumer thì một consumer nhàn rỗi](img/0001-kafka-big-picture-fig3.svg)
+
 *Hai group đọc cùng một topic và *độc lập* nhau: group nào cũng nhận đủ mọi message. Trong group Notification, C1 xử lý đơn #1 #4 #2 #5, C2 xử lý #3 #6: hai consumer chia nhau công việc, không làm trùng. Trong từng group, mỗi partition có đúng một consumer; một consumer có thể giữ nhiều partition.*
 
 **Đọc hình:**
 
-- **Đúng, trong một group, tại một thời điểm, mỗi partition chỉ có một consumer đọc**, dù ứng dụng chạy trên 2, 5 hay 20 máy. Đơn vị là *consumer instance*, không phải node: hai instance chạy chung một máy vẫn là hai consumer và được chia partition như hai máy khác nhau.
-- Chiều ngược lại không bị cấm: một consumer có thể đọc *nhiều* partition (C1 giữ P0 và P1).
-- Thừa consumer thì thừa ra: group 4 consumer trên 3 partition có một consumer chờ không (C4). Vì vậy **số partition là trần song song hoá của một group** (Bài 8).
-- Việc chia này *không cố định*: consumer vào hoặc rời group (deploy, crash) thì Kafka chia lại, gọi là **rebalance** ([Bài 5b](0011-rebalance.md)). Nếu C1 chết, P0 và P1 được giao cho consumer còn sống.
-- **Vì sao thiết kế vậy?** Thứ tự được đảm bảo trong một partition (Bài 2). Nếu hai consumer cùng group đọc chung một partition, hai bên xử lý song song và thứ tự xử lý không còn giữ được.
-- **Hai group khác nhau không tranh nhau:** Notification và Inventory đều đọc P0, mỗi bên có vị trí đọc (offset) riêng.
-- Ngoại lệ về sau: **Share Groups** (Kafka 4.2 trở đi) cho phép nhiều consumer hơn partition, đổi lại không đảm bảo thứ tự giữa các batch. Đó là cơ chế khác, ngoài phạm vi 2 ngày học này. [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)
+- **Trong một group, mỗi partition do một consumer đọc** tại một thời điểm. Consumer là một *instance* (process hoặc thread), không phải một máy. Một consumer có thể giữ nhiều partition (C1 giữ P0, P1).
+- **Số partition là trần song song của một group:** 4 consumer trên 3 partition thì C4 ngồi không (Bài 8).
+- **Lý do:** thứ tự chỉ được đảm bảo trong một partition (Bài 2); hai consumer cùng đọc một partition sẽ xử lý song song và mất thứ tự.
+- **Việc chia thay đổi** khi consumer vào hoặc rời group: Kafka chia lại, gọi là **rebalance** ([Bài 5b](0011-rebalance.md)).
+- **Các group độc lập:** mỗi group có offset riêng trên cùng partition.
+- Ngoại lệ: **Share Groups** (Kafka 4.2 trở đi) cho nhiều consumer hơn partition, đổi lại không giữ thứ tự. [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)
 
 ## 4. Hành trình của một đơn hàng
 

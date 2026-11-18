@@ -7,7 +7,8 @@ Chạy:  python scripts/html2md.py        (từ thư mục gốc workspace)
 Quy ước cho HTML để chuyển sạch:
   - Chỉ dùng: h1-h3, p, ul/ol/li, table, blockquote(+cite), pre/code, strong/em/a, figure/figcaption.
   - div.mission / .win / .ask / .source thành blockquote.
-  - <svg> bị bỏ. Muốn có hình trong .md, đặt ngay trong <figure>:
+  - <svg> được tách thành img/<tên bài>-figN.svg (cùng thư mục) và hiện trong .md như một ảnh.
+    Hoặc vẽ bằng Mermaid, đặt ngay trong <figure>:
         <script type="text/mermaid">
         flowchart LR
           A --> B
@@ -302,8 +303,54 @@ def title_of(html):
     return m.group(1).strip() if m else ""
 
 
+SVG_RE = re.compile(r"<svg\b[^>]*>.*?</svg>", re.S)
+
+
+def standalone_css():
+    """CSS cho file .svg đứng riêng: biến màu (sáng + tối) và các luật svg.diagram, lấy từ assets/style.css."""
+    css = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
+    light = re.search(r":root\s*\{(.*?)\}", css, re.S).group(1)
+    dark = re.search(r":root\[data-theme=\"dark\"\]\s*\{(.*?)\}", css, re.S).group(1)
+    rules = [r for r in re.findall(r"^svg\.diagram[^{]*\{[^}]*\}", css, re.M) if not r.startswith("svg.diagram {")]
+    rules = [r.replace("svg.diagram ", "") for r in rules]
+    flat = lambda s: " ".join(s.split())
+    return ("<style>\nsvg { " + flat(light) + " background: var(--bg); font-family: system-ui, sans-serif; }\n"
+            "@media (prefers-color-scheme: dark) { svg { " + flat(dark) + " } }\n" + "\n".join(rules) + "\n</style>")
+
+
+def extract_svgs(html, path):
+    """Mỗi <svg> thành file <thư mục>/img/<tên bài>-figN.svg, trong .md là một ảnh.
+    GitHub hiện ảnh; portal (build_portal.mjs) chèn lại SVG vào trang để dùng màu theo theme."""
+    img = path.parent / "img"
+    for old in img.glob(f"{path.stem}-fig*.svg"):
+        old.unlink()
+    n = 0
+
+    def sub(m):
+        nonlocal n
+        n += 1
+        raw = m.group(0)
+        label = re.search(r'aria-label="([^"]*)"', raw)
+        label = label.group(1).replace("[", "(").replace("]", ")") if label else f"Hình {n}"
+        open_tag = re.match(r"<svg\b[^>]*>", raw).group(0)
+        tag = open_tag
+        if "xmlns=" not in tag:
+            tag = tag.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+        vb = re.search(r'viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"', tag)
+        if vb and "width=" not in tag:
+            tag = tag.replace("<svg", f'<svg width="{vb.group(1)}" height="{vb.group(2)}"', 1)
+        body = raw[len(open_tag):]
+        name = f"{path.stem}-fig{n}.svg"
+        img.mkdir(exist_ok=True)
+        (img / name).write_text(f"{tag}\n{standalone_css()}{body}\n", encoding="utf-8", newline="\n")
+        return f"<p>![{label}](img/{name})</p>"
+
+    return SVG_RE.sub(sub, html)
+
+
 def convert(path):
     html = path.read_text(encoding="utf-8")
+    html = extract_svgs(html, path)
     conv = Converter(quizzes_of(html))
     conv.feed(html)
     body = conv.result()

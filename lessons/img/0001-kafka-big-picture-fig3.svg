@@ -1,0 +1,42 @@
+<svg width="680" height="400" xmlns="http://www.w3.org/2000/svg" class="diagram" viewBox="0 0 680 400" role="img" aria-label="Group 2 consumer chia 3 partition; group 4 consumer thì một consumer nhàn rỗi">
+<style>
+svg { --bg: #fffdf8; --fg: #1c1b19; --muted: #6b665c; --rule: #ddd6c6; --accent: #1d5fa8; --ok: #1b7a3d; --ok-bg: #e6f4ea; --bad: #b3261e; --bad-bg: #fbe9e7; --code-bg: #f3efe4; --card: #fbf8ef; --ctrl: #dfeaf7; --node: #efe7d2; background: var(--bg); font-family: system-ui, sans-serif; }
+@media (prefers-color-scheme: dark) { svg { --bg: #17161a; --fg: #ebe8e1; --muted: #a09b90; --rule: #3a3841; --accent: #7fb2ee; --ok: #6fd18c; --ok-bg: #1d3325; --bad: #ff8f86; --bad-bg: #3a1f1d; --code-bg: #25232b; --card: #1f1d24; --ctrl: #1f2f45; --node: #33301f; color-scheme: dark; } }
+text { fill: var(--fg); font-size: 13px; }
+.muted { fill: var(--muted); font-size: 11.5px; }
+.box { stroke: var(--rule); stroke-width: 1.2; }
+.ctrl { fill: var(--ctrl); }
+.node { fill: var(--node); }
+.part { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+.arrow { stroke: var(--accent); stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+.tag { fill: var(--accent); font-weight: 700; font-size: 12px; }
+</style>
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <text class="muted" x="20" y="18">Group "Notification": 2 consumer, topic 3 partition</text>
+  <rect class="part" x="20" y="34" width="80" height="32" rx="3"/><text x="60" y="55" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="20" y="80" width="80" height="32" rx="3"/><text x="60" y="101" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="20" y="126" width="80" height="32" rx="3"/><text x="60" y="147" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+  <rect x="290" y="26" width="150" height="140" rx="6" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <rect class="box ctrl" x="330" y="44" width="70" height="34" rx="4"/><text x="365" y="66" text-anchor="middle">C1</text>
+  <rect class="box ctrl" x="330" y="108" width="70" height="34" rx="4"/><text x="365" y="130" text-anchor="middle">C2</text>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 50 L328 58"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 96 L328 66"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 142 L328 125"/>
+  <text class="muted" x="450" y="65">C1 đọc P0 và P1</text>
+  <text class="muted" x="450" y="129">C2 đọc P2</text>
+
+  <text class="muted" x="20" y="208">Group "Inventory": 4 consumer, cùng topic 3 partition</text>
+  <rect class="part" x="20" y="224" width="80" height="32" rx="3"/><text x="60" y="245" text-anchor="middle" style="font-size:10.5px">P0 · #1 #4</text>
+  <rect class="part" x="20" y="270" width="80" height="32" rx="3"/><text x="60" y="291" text-anchor="middle" style="font-size:10.5px">P1 · #2 #5</text>
+  <rect class="part" x="20" y="316" width="80" height="32" rx="3"/><text x="60" y="337" text-anchor="middle" style="font-size:10.5px">P2 · #3 #6</text>
+  <rect x="290" y="216" width="150" height="176" rx="6" fill="none" stroke="var(--muted)" stroke-dasharray="4 3"/>
+  <rect class="box ctrl" x="330" y="226" width="70" height="30" rx="4"/><text x="365" y="246" text-anchor="middle">C1</text>
+  <rect class="box ctrl" x="330" y="266" width="70" height="30" rx="4"/><text x="365" y="286" text-anchor="middle">C2</text>
+  <rect class="box ctrl" x="330" y="306" width="70" height="30" rx="4"/><text x="365" y="326" text-anchor="middle">C3</text>
+  <rect x="330" y="346" width="70" height="30" rx="4" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/><text x="365" y="366" text-anchor="middle">C4</text>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 240 L328 241"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 286 L328 281"/>
+  <path class="arrow" style="marker-end:url(#ah2)" d="M100 332 L328 321"/>
+  <text class="muted" x="450" y="285">mỗi consumer một partition</text>
+  <text class="muted" x="450" y="366">C4 nhàn rỗi: không còn partition nào</text>
+</svg>
