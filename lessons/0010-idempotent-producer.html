@@ -70,7 +70,7 @@ java -jar target/producer-durability-0.0.1-SNAPSHOT.jar --spring.profiles.active
 <ol class="tight">
 <li><b>"Gửi, ack bị mất trên đường về"</b>: broker đã ghi, producer tự retry. Bật: không trùng. Tắt: trùng.</li>
 <li><b>"Gửi 2 batch, batch đầu lỗi tạm thời"</b>: batch sau tới trước. Bật: broker từ chối batch nhảy cóc, thứ tự giữ nguyên. Tắt: đảo thứ tự.</li>
-<li><b>"Producer restart, ứng dụng gửi lại đơn cuối"</b>: PID mới, sequence về 0. Bật hay tắt đều <b>trùng</b>: đây là giới hạn "single session".</li>
+<li><b>"Gửi, producer crash trước khi nhận ack, restart rồi gửi lại"</b>: cùng tình huống ack không về như nút thứ hai, nhưng producer chết trước khi kịp retry. Nhìn ô Broker: nó nhớ seq của PID cũ, còn PID mới chưa có gì để so. Bật hay tắt đều <b>trùng</b>: đây là giới hạn "single session".</li>
 </ol>
 
 <h2>4. Usecase</h2>

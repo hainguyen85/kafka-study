@@ -52,7 +52,7 @@
 <tr><th>#</th><th>Hỏi</th><th>Vì sao</th></tr>
 <tr><td>1</td><td>Dịch vụ nào (MSK Standard/Express/Serverless, Confluent Basic/Standard/Enterprise/Dedicated/Freight)? Phiên bản Kafka? Có single-zone hay multi-zone?</td><td>Quyết định gần như mọi cấu hình bên dưới</td></tr>
 <tr><td>2</td><td>Ai sở hữu cấu hình cụm? Giá trị hiện tại của <code>unclean.leader.election.enable</code>, <code>min.insync.replicas</code>, RF mặc định, auto-create topic?</td><td>MSK Standard mặc định <code>unclean</code>=true</td></tr>
-<tr><td>3</td><td>Tôi tự tạo/sửa topic thế nào (script, IaC, Console)? Quyền gì (IAM <code>CreateTopic</code>, RBAC)? Quy ước đặt tên, trần số partition?</td><td>Bạn là người tạo topic; auto-create tắt</td></tr>
+<tr><td>3</td><td>Ai tạo/sửa topic và theo quy trình nào (script, IaC, Console)? Tài liệu thiết kế topic gửi ở đâu, ai duyệt? Quy ước đặt tên, trần số partition?</td><td>Bạn thiết kế topic, team riêng tạo khi go-live; auto-create tắt</td></tr>
 <tr><td>4</td><td>Xác thực và mạng: IAM / SCRAM / mTLS hoặc API key / OAuth; PrivateLink, peering?</td><td>Cấu hình client Spring; bạn hoãn học bảo mật nhưng phải biết cách kết nối</td></tr>
 <tr><td>5</td><td>Lịch bảo trì/nâng cấp và cách báo? MSK tự nâng version sau hết hạn hỗ trợ, không báo trước</td><td>Quyết định retry/timeout của client</td></tr>
 <tr><td>6</td><td>Quota: partition mỗi broker/cụm, throughput, số connection (IAM: 3000/broker), số consumer group?</td><td>Số partition cho topic mới</td></tr>

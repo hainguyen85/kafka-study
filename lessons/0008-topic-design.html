@@ -11,23 +11,23 @@
 <nav class="crumbs"><a href="../README.md">Kafka</a> / <a href="0007-idempotent-consumer-transactions.html">Bài 7</a> / Bài 8 · <a href="../reference/0003-tricky-scenarios.html">Sổ tay tình huống</a> · <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">Managed trên AWS</a></nav>
 
 <h1>Bài 8: Thiết kế topic</h1>
-<p class="lede">Bạn là người tạo topic, và có bảy quyết định không sửa lại được dễ dàng. Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì bạn chọn lúc tạo topic.</p>
+<p class="lede">Topic được thiết kế trước khi viết code, và có bảy quyết định không sửa lại được dễ dàng. Bài 4-7 là cấu hình để chữa. Bài này là cấu hình để khỏi phải chữa: những gì phải chốt trong tài liệu thiết kế topic.</p>
 
 <div class="mission"><b>Liên quan tới mission</b>
-Bạn tự tạo và cấu hình topic ở nơi mới. Đây là phần thiết kế ảnh hưởng lớn nhất và khó đảo ngược nhất. Bài kiểm tra cuối (Bài 9) đòi bạn đưa ra các quyết định này trong 30 phút cho một bài toán lạ.</div>
+Ở nơi mới, bạn thiết kế topic; khi go-live, một team riêng tạo và cấu hình topic trên production theo tài liệu thiết kế của bạn. Tài liệu thiếu hay mơ hồ thì topic được tạo theo mặc định, và mặc định thường không hợp với yêu cầu "không mất". Bài kiểm tra cuối (Bài 9) đòi bạn đưa ra các quyết định này trong 30 phút cho một bài toán lạ.</div>
 
-<p class="win"><b>Thắng lợi của bài này:</b> với một bài toán, bạn điền được "thẻ thiết kế topic" (key, số partition, RF/minISR, retention hay compaction, kích thước message, tên, schema) kèm lý do và đánh đổi, và biết quyết định nào gần như không đổi lại được.</p>
+<p class="win"><b>Thắng lợi của bài này:</b> với một bài toán, bạn điền được "thẻ thiết kế topic" (key, số partition, RF/minISR, retention hay compaction, kích thước message, tên, schema) kèm lý do và đánh đổi, biết quyết định nào gần như không đổi lại được, và viết được tài liệu thiết kế đủ để team khác tạo topic mà không phải hỏi lại.</p>
 
-<h2>1. Bảy quyết định khi tạo topic</h2>
-<p>Mỗi ý dưới đây là một quyết định: số partition, mức song song, retention, compaction, kích thước message, độ bền, tên và cách tạo topic. Thẻ thiết kế ở mục 3 gom chúng lại thành một mẫu điền.</p>
+<h2>1. Bảy quyết định khi thiết kế topic</h2>
+<p>Mỗi ý dưới đây là một quyết định: số partition, mức song song, retention, compaction, kích thước message, độ bền, tên topic và topic phụ. Thẻ thiết kế ở mục 3 gom chúng lại thành một mẫu điền; mục 5 biến thẻ thành tài liệu bàn giao.</p>
 <ol class="steps">
 <li><b>Số partition chỉ tăng, không giảm; tăng làm key đổi partition.</b> Docs: sau khi mở rộng "messages with the same key may be routed to different partitions"; Kafka không phân phối lại dữ liệu cũ. Với consumer <code>auto.offset.reset=latest</code>, thêm partition "may cause silent message loss". <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></li>
 <li><b>Song song hoá bị chặn bởi số partition:</b> trong một group, mỗi partition chỉ có một consumer; thêm consumer vượt số partition là consumer nhàn rỗi. <a href="https://kafka.apache.org/44/design/design/">[Design]</a></li>
 <li><b>Retention mặc định:</b> <code>cleanup.policy=delete</code>, <code>retention.ms</code>=604800000 (7 ngày), <code>retention.bytes</code>=-1. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a></li>
 <li><b>Compaction:</b> <code>cleanup.policy=compact</code> giữ giá trị mới nhất mỗi key; thứ tự và offset không đổi. Compaction chạy ngầm, hạn chót "is not a hard guarantee"; <code>min.cleanable.dirty.ratio</code>=0.5, <code>min.compaction.lag.ms</code>=0, segment đang ghi không bị compact. Tombstone (value <code>null</code>) bị xoá sau <code>delete.retention.ms</code>=86400000; consumer chậm hơn thế có thể bỏ lỡ lệnh xoá. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/design/design/">[Design: log compaction]</a></li>
 <li><b>Kích thước message có bốn tầng giới hạn độc lập:</b> producer <code>max.request.size</code>=1048576; broker/topic <code>message.max.bytes</code>/<code>max.message.bytes</code> (kích thước batch sau nén); follower <code>replica.fetch.max.bytes</code>=1048576; consumer <code>max.partition.fetch.bytes</code>=1048576 và <code>fetch.max.bytes</code>=52428800, hai giá trị này <em>không phải giới hạn cứng</em> (batch đầu quá lớn vẫn được trả). Lỗi: <code>RecordTooLargeException</code>. <a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer]</a> <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer]</a></li>
-<li><b>Độ bền là cấu hình của <em>topic</em></b> (Bài 4): RF và <code>min.insync.replicas</code> đặt khi tạo, kiểm bằng <code>--describe</code>. Với Spring: <code>TopicBuilder</code> không có <code>minInsyncReplicas()</code>, dùng <code>.config(...)</code>; topic đã tồn tại thì không bị sửa trừ khi bật <code>modify-topic-configs</code>. <a href="../research/0002-spring-kafka.md">[research/0002, mục 2.6]</a></li>
-<li><b>Tên và tạo topic:</b> tắt auto-create (Apache mặc định bật, MSK và Confluent Cloud tắt) để lỗi gõ tên không đẻ ra "topic ma" RF=1; tạo bằng code (<code>NewTopic</code>) hay IaC đều cần quyền. <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">[Bảng managed]</a></li>
+<li><b>Độ bền là cấu hình của <em>topic</em></b> (Bài 4): RF và <code>min.insync.replicas</code> phải ghi rõ trong tài liệu, vì topic được tạo theo đúng những gì ghi. Sau khi team vận hành tạo, kiểm lại bằng <code>kafka-topics.sh --describe</code>. Trên cụm lab bạn tự tạo bằng Spring: <code>TopicBuilder</code> không có <code>minInsyncReplicas()</code>, dùng <code>.config(...)</code>. <a href="../research/0002-spring-kafka.md">[research/0002, mục 2.6]</a></li>
+<li><b>Tên topic và topic phụ:</b> tên theo luật và quy ước ở mục 4; tên không đổi được. Mọi topic ứng dụng cần, kể cả topic retry và DLT, phải có trong tài liệu: <code>@RetryableTopic</code> mặc định tự tạo topic retry/DLT với replication factor của broker, nên khi team khác tạo topic thì đặt <code>autoCreateTopics = "false"</code>. Cụm nên tắt auto-create (Apache mặc định bật, MSK và Confluent Cloud tắt) để lỗi gõ tên không đẻ ra "topic ma" RF=1. <a href="../research/0002-spring-kafka.md">[research/0002]</a> <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">[Bảng managed]</a></li>
 </ol>
 
 <h2>2. Quyết định số 1: key, và vì sao thêm partition là chuyện lớn</h2>
@@ -47,9 +47,41 @@ Bạn tự tạo và cấu hình topic ở nơi mới. Đây là phần thiết 
 <tr><td>7</td><td>Schema (định dạng)</td><td>Ai sở hữu schema, thay đổi thế nào mà không phá consumer cũ?</td><td>Phá vỡ tương thích là khó nhất</td></tr>
 </table>
 
-<div class="warn"><b>Schema: ranh giới của bài này.</b> Mission chỉ dành một bài ngắn cho Schema Registry, nhưng <b>chưa có nguồn chính nào về Schema Registry/Avro/Protobuf trong workspace</b> (xem mục Gaps của <code>RESOURCES.md</code>), và Schema Registry không thuộc Apache Kafka lõi. Mình không dạy chi tiết từ trí nhớ. Mức thiết kế duy nhất an toàn lúc này: <em>coi định dạng message là hợp đồng giữa các service</em>, đặt <code>eventId</code> và một trường phiên bản ngay từ đầu (Bài 7 cần <code>eventId</code>), và hỏi platform team về registry và quy tắc tương thích. Bước tiếp theo nếu bạn muốn: mình chạy một vòng research riêng cho Schema Registry/tương thích schema rồi mới viết bài.</div>
+<p><b>Schema</b> (dòng 7) có bài riêng: <a href="0016-schema-evolution.html">Bài 8d</a>. Ở mức thiết kế topic: coi định dạng message là hợp đồng giữa các team, có <code>eventId</code> (Bài 7 cần) ngay từ đầu, và ghi rõ subject cùng mode compatibility trong tài liệu.</p>
 
-<h2>4. Thực hành: bốn thẻ thiết kế</h2>
+<h2>4. Đặt tên topic</h2>
+<p><b>Luật cứng của Kafka</b> (đọc trong source 4.4.0):</p>
+<ul class="tight">
+<li>Chỉ dùng chữ ASCII, số, <code>.</code>, <code>_</code>, <code>-</code>; dài tối đa 249 ký tự; cấm tên <code>.</code> và <code>..</code>. <a href="https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/internals/Topic.java">[Topic.java]</a></li>
+<li><b>Không dùng lẫn <code>.</code> và <code>_</code>.</b> Trong tên metric hai ký tự này bị coi là một, nên <code>payments.fee</code> và <code>payments_fee</code> va nhau. Broker từ chối topic thứ hai ("collides with existing topic"), và <code>kafka-topics.sh</code> cảnh báo: "best to use either, but not both". <a href="https://github.com/apache/kafka/blob/4.4.0/metadata/src/main/java/org/apache/kafka/controller/ReplicationControlManager.java">[ReplicationControlManager]</a> <a href="https://github.com/apache/kafka/blob/4.4.0/tools/src/main/java/org/apache/kafka/tools/TopicCommand.java">[TopicCommand]</a></li>
+<li><b>Không đổi tên được:</b> "it is not possible to rename a topic directly"; đổi tên là tạo topic mới rồi chuyển dữ liệu. <a href="https://kafka.apache.org/44/operations/multi-tenancy/">[Multi-tenancy]</a></li>
+</ul>
+<p><b>Khuyến nghị của docs Apache</b> <a href="https://kafka.apache.org/44/operations/multi-tenancy/">[Multi-tenancy]</a>:</p>
+<ul class="tight">
+<li>Tên phân cấp, ví dụ <code>&lt;organization&gt;.&lt;team&gt;.&lt;dataset&gt;.&lt;event-name&gt;</code> ("acme.infosec.telemetry.logins") hoặc <code>&lt;project&gt;.&lt;product&gt;.&lt;event-name&gt;</code>. Lợi ích chính là phân quyền: prefix ACL cho một team chỉ được dùng topic bắt đầu bằng <code>payments.teamA.</code>.</li>
+<li>Không đưa vào tên thứ hay đổi (tên consumer) hoặc thông tin đã có chỗ khác (số partition, cấu hình).</li>
+</ul>
+<p><b>Hệ quả từ các bài trước:</b> Spring thêm hậu tố <code>-retry</code>, <code>-dlt</code> (Bài 6); Schema Registry đặt subject <code>&lt;topic&gt;-value</code> (Bài 8d); thay đổi schema phá vỡ thì tạo topic mới, nên nhiều nơi thêm <code>.v2</code>. Ví dụ hợp với cả ba: <code>retail.payments.transfer-completed</code>, rồi <code>retail.payments.transfer-completed-dlt</code>. <b>Quy ước cuối cùng là của nơi mới</b>: hỏi platform team trước khi đặt.</p>
+
+<h2>5. Tài liệu thiết kế topic: thứ bàn giao cho team vận hành</h2>
+<p>Thẻ thiết kế ở mục 3 là phần <em>lý do</em>. Tài liệu bàn giao là phần <em>giá trị</em>: team tạo topic chỉ cần đọc bảng này. Ví dụ cho Thẻ B (sự kiện thanh toán) ở mục 6; số partition là giả định để minh hoạ.</p>
+<table>
+<tr><th>Mục</th><th>Ví dụ</th><th>Từ đâu ra</th></tr>
+<tr><td>Tên topic</td><td><code>retail.payments.transfer-completed</code></td><td>Quy ước của nơi mới (mục 4)</td></tr>
+<tr><td>Mục đích, team sở hữu</td><td>Sự kiện chuyển tiền đã hạch toán; team Payments</td><td>Ai trả lời khi có sự cố</td></tr>
+<tr><td>Producer, consumer group</td><td><code>payments-service</code> ghi; <code>notification</code>, <code>fraud</code> đọc</td><td>Để cấp quyền ghi, đọc</td></tr>
+<tr><td>Key, định dạng</td><td>key = <code>accountId</code>; value Avro, subject <code>&lt;topic&gt;-value</code>, BACKWARD</td><td>Thứ tự theo tài khoản (Bài 2), hợp đồng (Bài 8d)</td></tr>
+<tr><td>Số partition</td><td>12 (giả định)</td><td>Consumer song song lúc đỉnh tải cộng dư địa; chỉ tăng được</td></tr>
+<tr><td><code>replication.factor</code>, <code>min.insync.replicas</code></td><td>3, 2</td><td>Không mất, chịu được một broker tắt (Bài 4)</td></tr>
+<tr><td><code>unclean.leader.election.enable</code></td><td><code>false</code></td><td>Kiểm giá trị thực tế trên dịch vụ managed (mục 7)</td></tr>
+<tr><td><code>cleanup.policy</code>, <code>retention.ms</code></td><td><code>delete</code>, 7776000000 (90 ngày)</td><td>Yêu cầu truy vết 90 ngày (Bài 8c)</td></tr>
+<tr><td><code>max.message.bytes</code></td><td>Mặc định (khoảng 1 MB)</td><td>Payload lớn nhất ước tính</td></tr>
+<tr><td>Topic phụ</td><td><code>...-dlt</code>: cùng số partition, RF 3, minISR 2</td><td>Recoverer gửi bản sao vào cùng số partition (Bài 6)</td></tr>
+<tr><td>Tải dự kiến</td><td>Trung bình và đỉnh (msg/s), kích thước message</td><td>Để kiểm quota, trần partition (Bài 8b)</td></tr>
+</table>
+<p>Sau khi topic được tạo: chạy <code>--describe</code> và đối chiếu từng dòng với bảng. Topic tạo sai RF hay số partition thì sửa ngay lúc đó rẻ hơn rất nhiều so với sau go-live.</p>
+
+<h2>6. Thực hành: bốn thẻ thiết kế</h2>
 <p>Điền từng thẻ <em>trước</em>, rồi mở đáp án. Không có đáp án duy nhất: chấm theo việc bạn nêu đúng đánh đổi hay chưa.</p>
 
 <h3>Thẻ A. Vị trí tài xế (gọi xe)</h3>
@@ -84,8 +116,8 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code>
 <label class="tick"><input type="checkbox" data-step="2"> Tôi đã chạy s13 và ghi lại số record trước/sau</label>
 </div>
 
-<h2>5. Điều khác đi khi nơi mới là dịch vụ managed</h2>
-<p>Cụm tự dựng của bạn là chỗ để <em>học</em>; nơi làm việc là dịch vụ do devops lo. Bốn thứ cần hỏi trước khi chốt thẻ thiết kế (chi tiết, so sánh MSK/Confluent và nguồn ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>): <b>(1)</b> RF/minISR có bị khoá không (MSK Express khoá, Serverless không cho sửa, Confluent nhận minISR 1 hoặc 2); <b>(2)</b> <code>unclean.leader.election.enable</code> hiệu lực là gì (MSK Standard mặc định <b>true</b>); <b>(3)</b> bạn có quyền tạo topic và trần partition là bao nhiêu; <b>(4)</b> trần kích thước message. Những khái niệm của bài 4-8 dùng được ở mọi nơi; chỉ giá trị và quyền thay đổi.</p>
+<h2>7. Điều khác đi khi nơi mới là dịch vụ managed</h2>
+<p>Cụm tự dựng của bạn là chỗ để <em>học</em>; nơi làm việc là dịch vụ do devops lo. Bốn thứ cần hỏi trước khi chốt thẻ thiết kế (chi tiết, so sánh MSK/Confluent và nguồn ở <a href="../reference/0004-managed-kafka-msk-vs-confluent.html">bảng managed</a>): <b>(1)</b> RF/minISR có bị khoá không (MSK Express khoá, Serverless không cho sửa, Confluent nhận minISR 1 hoặc 2); <b>(2)</b> <code>unclean.leader.election.enable</code> hiệu lực là gì (MSK Standard mặc định <b>true</b>); <b>(3)</b> quy trình bàn giao tài liệu thiết kế topic (gửi ở đâu, ai duyệt, team nào tạo), quy ước đặt tên và trần partition; <b>(4)</b> trần kích thước message. Những khái niệm của bài 4-8 dùng được ở mọi nơi; chỉ giá trị và quyền thay đổi.</p>
 
 <h3>Hỏi nhanh, đáp gọn</h3>
 <ul class="tight">
@@ -93,11 +125,11 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code>
 <li><b>Compaction có đảm bảo mỗi key một bản ghi không?</b> Không tức thì: segment đang ghi không bị compact và thời điểm compact không cứng. Consumer phải chịu được việc thấy nhiều bản của một key.</li>
 </ul>
 
-<h2>6. Tự nói thành lời</h2>
-<p>Trong 60 giây, cho "bảng giá sản phẩm": <i>"Mình tạo topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."</i></p>
+<h2>8. Tự nói thành lời</h2>
+<p>Trong 60 giây, cho "bảng giá sản phẩm": <i>"Mình đề xuất topic với key ..., ... partition vì ..., chính sách dọn dẹp ... vì ..., độ bền ... Chỗ không đổi lại được là ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0008-topic-design.md">tóm tắt Bài 8</a> (đọc sau khi đã tự nói).</p>
 
-<h2>7. Kiểm tra</h2>
+<h2>9. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -107,7 +139,7 @@ mvn -q spring-boot:run -Dspring-boot.run.profiles=s13        # ~110 giây</code>
 
 <p><b>Bài tiếp theo:</b> <a href="0014-throughput-latency.html">Bài 8b: quá tải, thông lượng, độ trễ</a>, rồi 8c (đọc lại, audit) và 8d (schema) trước <a href="0009-final-design-test.html">Bài 9: bài kiểm tra cuối</a>.</p>
 
-<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "chọn bao nhiêu partition cho topic này?", "key nóng xử lý thế nào?". Dán kết quả quiz và thẻ thiết kế bạn tự điền để mình chấm.</div>
+<div class="ask"><b>Còn chỗ nào mơ hồ?</b> Hỏi thẳng giáo viên, ví dụ "chọn bao nhiêu partition cho topic này?", "key nóng xử lý thế nào?". Dán kết quả quiz, thẻ thiết kế hoặc tài liệu bàn giao bạn tự viết để mình chấm.</div>
 </main>
 
 <script src="../assets/checklist.js"></script>
@@ -129,6 +161,9 @@ Quiz.mount(document.getElementById('quiz'), [
   { q: 'Topic dòng tiền cần "không mất", 3 broker chịu mất 1 mà vẫn ghi được. Cặp RF và min.insync.replicas hợp lý?',
     options: ['RF=3 và min.insync.replicas=2', 'RF=3 và min.insync.replicas=3', 'RF=2 và min.insync.replicas=2', 'RF=1 và min.insync.replicas=1'],
     answer: 0, why: 'RF=3, minISR=2 cho phép mất một broker mà vẫn ghi an toàn; minISR=3 làm mất một broker là ngừng ghi (thí nghiệm strict ở Bài 4).' },
+  { q: 'Cụm đã có topic payments.fee.charged. Tài liệu của một team khác yêu cầu tạo payments_fee_charged. Điều gì xảy ra?',
+    options: ['Kafka cấm mọi tên có gạch dưới', 'Tạo được vì hai tên khác nhau', 'Topic mới ghi đè lên topic cũ', 'Broker từ chối vì tên va nhau'],
+    answer: 3, why: 'Trong tên metric, dấu chấm và gạch dưới bị coi là một, nên broker từ chối với lỗi "collides with existing topic". Gạch dưới tự nó hợp lệ; chỉ đừng dùng lẫn với dấu chấm.' },
   { q: 'Nơi làm việc dùng MSK Standard. Giá trị mặc định nào có thể làm bạn mất dữ liệu đã ack khi partition sống lại?',
     options: ['num.partitions của mỗi topic', 'auto.create.topics.enable', 'unclean.leader.election.enable', 'delete.retention.ms của compaction']
     , answer: 2, why: 'Theo bảng managed: MSK Standard mặc định unclean.leader.election.enable=true (non-tiered), trong khi Apache là false. Bật nghĩa là chấp nhận mất dữ liệu để partition sống lại.' }

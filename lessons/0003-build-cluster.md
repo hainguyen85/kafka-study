@@ -52,7 +52,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 ### 1.3. Cấu hình topic: số bản sao và cái sàn
 
-- **Mặc định broker rất mỏng:** 1 partition, 1 bản sao, `min.insync.replicas=1`, và tự tạo topic khi gõ sai tên. Người tạo topic phải tự đặt. [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
+- **Mặc định broker rất mỏng:** 1 partition, 1 bản sao, `min.insync.replicas=1`, và tự tạo topic khi gõ sai tên. Giá trị đúng phải được đặt tường minh cho từng topic, nên phải có trong tài liệu thiết kế topic (Bài 8). [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
 - **Lab đặt RF=3 và `min.insync.replicas=2`:** mất 1 broker vẫn ghi được, mỗi ghi có ít nhất 2 bản sao. Đặt 3 thì mất 1 broker là ngừng ghi. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/)
 - **Sửa topic đã có, không cần xoá:** `kafka-configs.sh --alter --add-config`. [[Basic operations]](https://kafka.apache.org/44/operations/basic-kafka-operations/)
 

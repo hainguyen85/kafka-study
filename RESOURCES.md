@@ -71,6 +71,10 @@
   8 compatibility mode (`_ALL` = transitive, `DISABLED`), IAM, miễn phí; serializer mặc định không auto-register, compatibility BACKWARD. Use for: nếu nơi mới dùng MSK + Glue.
 - [Amazon MSK: Best practices for Apache Kafka clients](https://docs.aws.amazon.com/msk/latest/developerguide/bestpractices-kafka-client.html), [Monitor consumer lags](https://docs.aws.amazon.com/msk/latest/developerguide/consumer-lag.html), [Tiered storage](https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html)
   Khuyến nghị của AWS (không phải default Apache): `linger.ms` >= 5 (25 cho đa số), `batch.size` 64-128 KB, nén lz4/zstd; điều kiện metric lag biến mất; tiered tối thiểu 3 ngày ở tầng rẻ. Use for: đối chiếu cấu hình client với môi trường MSK.
+- [Multi-tenancy (4.4)](https://kafka.apache.org/44/operations/multi-tenancy/)
+  Đọc 2026-11-18. Khuyến nghị đặt tên topic phân cấp: `<organization>.<team>.<dataset>.<event-name>` hoặc `<project>.<product>.<event-name>`; không đưa vào tên thứ hay đổi (tên consumer) hay metadata có sẵn chỗ khác (số partition, cấu hình); không đổi tên topic tại chỗ được; ép tiền tố bằng prefix ACL (KIP-290) hoặc `CreateTopicPolicy`. Use for: quy ước đặt tên topic, phân quyền theo tiền tố.
+- [Topic.java (4.4.0)](https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/internals/Topic.java) và [TopicCommand.java](https://github.com/apache/kafka/blob/4.4.0/tools/src/main/java/org/apache/kafka/tools/TopicCommand.java)
+  Đọc 2026-11-18. Tên topic: ký tự `[a-zA-Z0-9._-]`, tối đa 249, cấm `.` và `..`; `.` và `_` va nhau trong tên metric ("best to use either, but not both"). Use for: luật cứng khi đặt tên topic.
 
 ## Wisdom (Communities)
 

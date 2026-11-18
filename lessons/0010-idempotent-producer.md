@@ -64,7 +64,7 @@ Một partition, xem log broker ghi gì. Mô phỏng theo mô hình ở mục 1,
 
 1. **"Gửi, ack bị mất trên đường về"**: broker đã ghi, producer tự retry. Bật: không trùng. Tắt: trùng.
 2. **"Gửi 2 batch, batch đầu lỗi tạm thời"**: batch sau tới trước. Bật: broker từ chối batch nhảy cóc, thứ tự giữ nguyên. Tắt: đảo thứ tự.
-3. **"Producer restart, ứng dụng gửi lại đơn cuối"**: PID mới, sequence về 0. Bật hay tắt đều **trùng**: đây là giới hạn "single session".
+3. **"Gửi, producer crash trước khi nhận ack, restart rồi gửi lại"**: cùng tình huống ack không về như nút thứ hai, nhưng producer chết trước khi kịp retry. Nhìn ô Broker: nó nhớ seq của PID cũ, còn PID mới chưa có gì để so. Bật hay tắt đều **trùng**: đây là giới hạn "single session".
 
 ## 4. Usecase
 

@@ -64,7 +64,7 @@
     [['Gửi bình thường', normal],
      ['Gửi, ack bị mất trên đường về', lostAck],
      ['Gửi 2 batch, batch đầu lỗi tạm thời', reorder],
-     ['Producer restart, ứng dụng gửi lại đơn cuối', restart],
+     ['Gửi, producer crash trước khi nhận ack, restart rồi gửi lại', restart],
      ['Làm lại', function () { fresh(); }]].forEach(function (p) {
       var b = el('button', null, p[0]); b.type = 'button';
       b.addEventListener('click', function () { if (pl && p[0] !== 'Làm lại') pl.run(p[1], draw); else { p[1](); draw(); } });
@@ -131,16 +131,33 @@
       }
     }
 
+    // Cùng tình huống "ack không về" như lostAck, nhưng producer chết trước khi kịp retry.
+    // Sau restart: PID mới, seq về 0, nên broker không có gì để so: bản gửi lại là bản ghi mới.
     function restart() {
-      if (!S.lastVal) { ev('Chưa có đơn nào để gửi lại.'); return; }
-      S.pid += 1; S.seq = 0;
-      if (pl) pl.pulse('P');
-      snap();
-      ev('Producer khởi động lại → producer ID mới ' + S.pid + ', sequence đếm lại từ 0.');
-      var b = newBatch(S.lastVal); var r = deliver(b);
+      var b = newBatch(); var r = deliver(b); S.lastVal = b.val;
       sendAnim(b, r);
+      if (pl) pl.tok('B', 'P', 'ack', 'ack', { half: true });
+      ev('Gửi ' + b.val + tag(b) + ' → broker ĐÃ ghi. Producer crash trước khi nhận ack, không kịp retry.');
+      var oldPid = S.pid, oldSeq = b.seq;
+      if (pl) {
+        pl.call(function () { st.setNode('P', { title: 'Producer', sub: 'crash: không biết ' + b.val + ' đã vào chưa', cls: 'dead' }); });
+        pl.wait(900);
+      }
+      S.pid += 1; S.seq = 0;
+      if (pl) {
+        var s = snapshot();
+        pl.call(function () { paint(s); st.setNode('P', { title: 'Producer (vừa restart)', sub: 'PID MỚI ' + s.pid + ' · seq về 0', cls: 'hot' }); });
+        pl.pulse('P');
+      }
+      ev(idem.checked
+        ? 'Khởi động lại: broker cấp producer ID MỚI ' + S.pid + ', sequence về 0. Broker chỉ nhớ "PID ' + oldPid + ' đã tới seq ' + oldSeq + '", không biết PID mới là cùng một ứng dụng.'
+        : 'Khởi động lại. Không có idempotence nên broker không nhớ gì về producer.');
+      var b2 = newBatch(b.val); var r2 = deliver(b2);
+      sendAnim(b2, r2);
       if (pl) pl.tok('B', 'P', 'ack', 'ack');
-      ev('Ứng dụng không chắc lần trước đã vào chưa, gửi lại ' + b.val + tag(b) + ' → với broker đây là bản ghi MỚI: TRÙNG' + (idem.checked ? ' dù đã bật idempotence.' : '.'));
+      ev('Ứng dụng gửi lại ' + b2.val + tag(b2) + (idem.checked
+        ? ' → PID ' + S.pid + ' chưa có seq nào nên broker GHI: TRÙNG dù đã bật idempotence. So với nút "ack bị mất": ở đó retry cùng PID, cùng seq nên bị chặn. Giới hạn "single session": loại trùng này phải chặn ở consumer idempotent (Bài 7).'
+        : ' → broker ghi thêm: TRÙNG.'));
     }
 
     function tag(b) { return idem.checked ? ' (PID ' + b.pid + ', seq ' + b.seq + ')' : ''; }

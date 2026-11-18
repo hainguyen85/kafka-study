@@ -45,7 +45,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <h3>1.2. Độ trễ: thứ <code>acks</code> không mua được</h3>
 <ul class="tight">
 <li><b>Hạ <code>acks</code> không làm consumer thấy dữ liệu sớm hơn.</b> "Regardless of the acks setting, the messages will not be visible to the consumers" cho tới khi mọi replica trong ISR đã có. <code>acks=1</code> chỉ rút ngắn thời gian producer chờ, đổi lại rủi ro mất (Bài 4). <a href="https://kafka.apache.org/44/design/design/">[Design: Replicated Logs]</a></li>
-<li><b>Khi quá tải, độ trễ chủ yếu là thời gian xếp hàng</b> trong bộ đệm producer, không phải thời gian mạng. Lab ở mục 2 cho thấy rõ: cùng một cụm, độ trễ p50 từ vài giây xuống vài chục ms chỉ nhờ gom lô và nén.</li>
+<li><b>Khi quá tải, độ trễ chủ yếu là thời gian xếp hàng</b> trong bộ đệm producer, không phải thời gian mạng. Lab ở mục 3 cho thấy rõ: cùng một cụm, độ trễ p50 từ vài giây xuống vài chục ms chỉ nhờ gom lô và nén.</li>
 </ul>
 
 <h3>1.3. Song song: partition là trần</h3>
@@ -77,7 +77,18 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </table>
 <p><a href="https://kafka.apache.org/44/configuration/producer-configs/">[Producer configs]</a> <a href="https://kafka.apache.org/44/configuration/consumer-configs/">[Consumer configs]</a></p>
 
-<h2>2. Thực hành trên cụm</h2>
+<h2>2. Mô phỏng: dữ liệu chờ ở đâu khi quá tải?</h2>
+<p>Một topic, một consumer group, tính theo từng giây. Trần thông lượng của bốn cấu hình producer lấy từ số đo lab ở mục 3 trên máy bạn (payload nén rất tốt), nên chỉ đáng nhìn tỷ lệ. Mô phỏng theo mô hình ở mục 1, không phải client thật. Đổi lựa chọn giữa chừng được, như deploy cấu hình mới. <em>Đoán trước</em> rồi mới bấm.</p>
+<ol class="steps">
+<li>Tải <b>mở cửa phiên</b>, producer <b>mặc định 4.x</b>: bộ đệm đầy sau mấy giây, và chuyện gì xảy ra với <code>send()</code>? Đổi sang <b>lz4</b> rồi chạy tiếp.</li>
+<li>Tải <b>bình thường</b>, xử lý <b>1 ms</b>, 6 partition: 2 consumer, rồi 6 consumer. Lag còn tăng không? Đổi sang 0,2 ms.</li>
+<li>Giữ 1 ms, đổi sang <b>3 partition</b> với 6 consumer: consumer nào ngồi không, lag có hết tăng không?</li>
+<li>6 partition, 6 consumer, 0,2 ms, tick <b>key nóng</b>: partition nào tụt lại, và thêm consumer có giúp không?</li>
+<li>Tick <b>pause()</b>: lag tăng, nhưng vì sao đây không phải sự cố?</li>
+</ol>
+<div id="lsim"></div>
+
+<h2>3. Thực hành trên cụm</h2>
 <p>Dùng lab Spring Boot <code>labs/03-spring-clients</code> (profile mới <code>perf</code>) và cụm 3 broker của Bài 3. Profile <code>perf</code> gửi 200.000 message, mỗi message 200 byte, nhanh nhất có thể, rồi in thông lượng và độ trễ gửi (từ lúc gọi <code>send()</code> tới lúc broker ack).</p>
 <pre><code>// labs/03-spring-clients/src/main/java/lab/PerfRunner.java (rút gọn)
 long t0 = System.nanoTime();
@@ -140,7 +151,7 @@ registry.getListenerContainer("orders").resume();</code></pre>
 <p>Trong lúc pause, lag tăng là chủ đích chứ không phải sự cố. Mẫu "pause khi circuit breaker mở" là thiết kế tự dựng; docs Spring chỉ mô tả <code>pause()</code>/<code>resume()</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/pause-resume.html">[Spring: pause/resume]</a></p>
 </div>
 
-<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<h2>4. Đi sâu: chi tiết cho bốn khái niệm</h2>
 <p>Đọc sau khi đã chạy lab.</p>
 
 <h3>Producer và khuyến nghị của AWS cho MSK</h3>
@@ -169,7 +180,7 @@ registry.getListenerContainer("orders").resume();</code></pre>
 <li><b>Bật SSL thì Kafka không dùng zero-copy:</b> "sendfile is not used when SSL is enabled". Cụm TLS/mTLS của ngân hàng tốn CPU hơn cho đường đọc; đừng so với số benchmark plaintext. <a href="https://kafka.apache.org/44/design/design/">[Design: Efficiency]</a></li>
 </ul>
 
-<h2>4. Usecase</h2>
+<h2>5. Usecase</h2>
 <p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
 <h3 id="uc-a">(a) Chứng khoán: một mã vốn hoá lớn làm nghẽn bảng giá</h3>
 <p>Topic giá dùng mã chứng khoán làm key để giữ thứ tự tick theo mã. Phiên có tin tức, một mã chiếm phần lớn tick, nên một partition và một consumer gánh gần hết tải; thêm consumer không giúp vì mỗi partition chỉ một consumer trong group đọc. Bảng giá của mã đó trễ dần trong khi các mã khác vẫn mượt. Với dữ liệu hiển thị, javadoc mô tả đúng cách xử lý: consumer tụt quá xa thì "skip to the most recent records" thay vì đọc hết.</p>
@@ -231,11 +242,11 @@ C->>C: container.resume(), lag giảm dần
 <li><b>Lag bao nhiêu là quá nhiều?</b> Không có con số chung; lag vượt retention là mất dữ liệu chưa đọc, nên ngưỡng phải nhỏ hơn retention nhiều.</li>
 </ul>
 
-<h2>5. Tự nói thành lời</h2>
+<h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Thông lượng tăng nhờ ... và ...; mặc định linger.ms đã là ... từ 4.0. Hạ acks không giúp consumer vì ... Khi quá tải, dữ liệu chờ ở hai chỗ: ... và ... Tín hiệu số một là ..., đo bằng ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0014-throughput-latency.md">tóm tắt Bài 8b</a> (đọc sau khi đã tự nói).</p>
 
-<h2>6. Kiểm tra</h2>
+<h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -248,6 +259,9 @@ C->>C: container.resume(), lag giảm dần
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/flow-anim.js"></script>
+<script src="../assets/load-sim.js"></script>
+<script>LoadSim.mount(document.getElementById('lsim'));</script>
 <script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>

@@ -48,7 +48,7 @@ Note over P,F: acks=1 thì ack ngay sau khi leader ghi, trước khi follower k�
 <h3>1.2. <code>min.insync.replicas</code>: tối thiểu mấy bản sao?</h3>
 <ul class="tight">
 <li><b>Là cái sàn cho <code>acks=all</code>:</b> ISR nhỏ hơn giá trị này thì broker <em>từ chối ghi</em> bằng <code>NotEnoughReplicasException</code>, thay vì ghi vào một bản rồi báo thành công. <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/common/errors/NotEnoughReplicasException.html">[Javadoc]</a></li>
-<li><b>Đặt ở topic</b>, thường RF=3 và <code>min.insync.replicas=2</code>. Mặc định của broker là 1 (RF mặc định cũng là 1), nên đây là việc của người tạo topic. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
+<li><b>Đặt ở topic</b>, thường RF=3 và <code>min.insync.replicas=2</code>. Mặc định của broker là 1 (RF mặc định cũng là 1), nên phải ghi rõ trong tài liệu thiết kế topic (Bài 8) và kiểm lại sau khi topic được tạo. <a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></li>
 <li><b>Đánh đổi sẵn sàng lấy bền:</b> minISR=2 thì mất 2 trên 3 broker là ngừng nhận ghi; minISR=1 thì vẫn ghi, nhưng mỗi message chỉ còn 1 bản sao.</li>
 <li><b>Khi mọi replica trong ISR đều chết:</b> <code>unclean.leader.election.enable=false</code> (mặc định Apache) thì chờ, partition offline; <code>true</code> thì bầu replica tụt hậu lên leader, message nó thiếu mất vĩnh viễn. MSK Standard mặc định <code>true</code>. Chi tiết ở mục 3. <a href="https://kafka.apache.org/44/design/design/">[Design: unclean leader election]</a></li>
 </ul>
@@ -182,7 +182,7 @@ spring:
         "[enable.idempotence]": true
         "[request.timeout.ms]": 10000
         "[delivery.timeout.ms]": 20000   # &gt;= request.timeout.ms + linger.ms; rút ngắn để thấy lỗi nhanh</code></pre>
-<pre><code>// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): bạn là người tạo topic
+<pre><code>// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): trên cụm lab, ứng dụng tự tạo topic
 @Bean NewTopic safe() {
     return TopicBuilder.name("lab-orders-safe").partitions(3).replicas(3)
             .config("min.insync.replicas", "2")   // TopicBuilder không có minInsyncReplicas()

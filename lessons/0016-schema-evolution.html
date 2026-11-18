@@ -76,7 +76,18 @@ C->>C: giải mã thành record
 </table>
 <p><a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html">[Schema evolution]</a> Đổi tên field không có trong các trang đã đọc; về kiểm tra nó tương đương bỏ field cũ cộng thêm field mới (chưa kiểm chứng).</p>
 
-<h2>2. Thực hành trên cụm</h2>
+<h2>2. Mô phỏng: registry nhận hay từ chối, consumer nào vỡ?</h2>
+<p>Subject <code>payments-avro-value</code> bắt đầu với v1 (<code>eventId, accountId, amount, currency="VND"</code>), cùng tên field với lab ở mục 3. Mô hình theo luật đọc của Avro, rút gọn, không phải registry thật. <em>Đoán trước</em> rồi mới bấm.</p>
+<ol class="steps">
+<li>Mode mặc định <b>BACKWARD</b>: thêm <code>branchCode</code> không default. Registry nói gì? (Đối chiếu với lab.)</li>
+<li>Thêm <code>channel</code> có default, đăng ký, cho producer v2 gửi, hai consumer đọc (A vẫn dùng v1).</li>
+<li>Bỏ <code>amount</code> (bắt buộc): BACKWARD nhận. Producer gửi bằng version mới, consumer A còn v1 đọc: chuyện gì xảy ra? Rút ra thứ tự nâng cấp.</li>
+<li>Làm lại, đổi sang <b>FORWARD</b> rồi <b>FULL</b>, thử lại hai thay đổi trên.</li>
+<li>Thêm <code>channel</code> có default, rồi "channel: bỏ default": BACKWARD nhận, <b>BACKWARD_TRANSITIVE</b> thì không. Vì sao?</li>
+</ol>
+<div id="ssim"></div>
+
+<h2>3. Thực hành trên cụm</h2>
 <p>Cụm của Bài 3 giờ có thêm service <code>schema-registry</code> (image <code>confluentinc/cp-schema-registry:8.3.2</code>) trong compose profile <code>schema</code>, REST ở <code>http://localhost:18081</code> (cổng 8081 trên máy bạn đang bị load balancer của k3d dùng). Lab Spring Boot: <code>labs/08d-schema</code>.</p>
 <pre><code># labs/08d-schema/src/main/resources/application.yml (rút gọn)
 spring:
@@ -154,7 +165,7 @@ Byte <code>00</code> là magic, bốn byte <code>00 00 00 01</code> là schema i
 <label class="tick"><input type="checkbox" data-step="4"> Tôi đã đọc được schema id trong byte</label>
 </div>
 
-<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<h2>4. Đi sâu: chi tiết cho bốn khái niệm</h2>
 <h3>Subject và đăng ký schema</h3>
 <ul class="tight">
 <li>Ba strategy: <code>TopicNameStrategy</code> (mặc định, <code>&lt;topic&gt;-value</code>), <code>RecordNameStrategy</code> (theo tên record, kiểm tra <em>trên mọi topic</em>), <code>TopicRecordNameStrategy</code> (<code>&lt;topic&gt;-&lt;record&gt;</code>). <a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html">[Serdes]</a></li>
@@ -176,7 +187,7 @@ Byte <code>00</code> là magic, bốn byte <code>00 00 00 01</code> là schema i
 <li>Chuyển registry: consumer dùng deserializer Glue với <code>SECONDARY_DESERIALIZER</code> cho định dạng cũ; nâng consumer trước, producer sau. <a href="https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations-migration.html">[Glue migration]</a></li>
 </ul>
 
-<h2>4. Usecase</h2>
+<h2>5. Usecase</h2>
 <p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
 <h3 id="uc-a">(a) Ngân hàng: thêm kênh giao dịch vào sự kiện thanh toán</h3>
 <p>Team Core Banking phát <code>PaymentCompleted</code> cho năm team khác. Nghiệp vụ cần thêm <code>channel</code> (mobile, web, quầy). Nếu thêm như field bắt buộc, registry từ chối (Bước 2 với v3); nếu không có registry, consumer của năm team sẽ vỡ ở những chỗ không ai lường trước.</p>
@@ -219,11 +230,11 @@ Note over Core,Rep: BACKWARD = consumer mới đọc dữ liệu cũ. Nâng cons
 <li><b>Đọc lại một năm dữ liệu bằng code mới có chắc đọc được không?</b> Chỉ chắc khi subject dùng <code>BACKWARD_TRANSITIVE</code> hoặc <code>FULL_TRANSITIVE</code>.</li>
 </ul>
 
-<h2>5. Tự nói thành lời</h2>
+<h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Kafka chỉ lưu ..., hợp đồng nằm ở ... Mỗi message mang ..., consumer lấy schema từ ... Mặc định compatibility là ..., nghĩa là nâng ... trước. Thay đổi an toàn nhất là ...; đổi kiểu thì ... Trên MSK thường dùng ..., khác Confluent ở chỗ ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0016-schema-evolution.md">tóm tắt Bài 8d</a> (đọc sau khi đã tự nói).</p>
 
-<h2>6. Kiểm tra</h2>
+<h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -236,6 +247,9 @@ Note over Core,Rep: BACKWARD = consumer mới đọc dữ liệu cũ. Nâng cons
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/flow-anim.js"></script>
+<script src="../assets/schema-sim.js"></script>
+<script>SchemaSim.mount(document.getElementById('ssim'));</script>
 <script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>

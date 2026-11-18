@@ -55,7 +55,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 <li><b>CLI</b> <code>kafka-consumer-groups.sh --reset-offsets</code>: một group mỗi lần, group phải đang dừng, mặc định chỉ xem trước (<code>--dry-run</code>), thêm <code>--execute</code> mới thật sự đổi. <a href="https://kafka.apache.org/44/operations/basic-kafka-operations/">[Basic operations]</a></li>
 <li><b>API</b> <code>seek()</code> và <code>offsetsForTimes()</code>: trả "the earliest offset whose timestamp is greater than or equal to the given timestamp". <a href="https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html">[KafkaConsumer javadoc]</a></li>
 <li><b>Spring</b>: <code>ConsumerSeekAware</code> / <code>AbstractConsumerSeekAware</code> với <code>seekToTimestamp</code>, <code>seekToBeginning</code>, <code>seekToEnd</code>. <a href="https://docs.spring.io/spring-kafka/reference/kafka/seek.html">[Spring: seek]</a></li>
-<li><b>Bẫy múi giờ:</b> <code>--to-datetime</code> không ghi múi giờ thì bị hiểu là <b>UTC</b> (đọc trong source 4.4.0, docs không nói). Ở Việt Nam phải ghi <code>+07:00</code>. Mục 2 cho bạn thấy tận mắt. <a href="https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/utils/Utils.java">[Utils.getDateTime]</a></li>
+<li><b>Bẫy múi giờ:</b> <code>--to-datetime</code> không ghi múi giờ thì bị hiểu là <b>UTC</b> (đọc trong source 4.4.0, docs không nói). Ở Việt Nam phải ghi <code>+07:00</code>. Mục 3 cho bạn thấy tận mắt. <a href="https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/utils/Utils.java">[Utils.getDateTime]</a></li>
 </ul>
 
 <h3>1.4. Timestamp và audit</h3>
@@ -78,7 +78,18 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 </table>
 <p><a href="https://kafka.apache.org/44/configuration/topic-configs/">[Topic configs]</a> <a href="https://kafka.apache.org/44/configuration/broker-configs/">[Broker configs]</a></p>
 
-<h2>2. Thực hành trên cụm</h2>
+<h2>2. Mô phỏng: giữ được bao lâu, đọc lại từ đâu?</h2>
+<p>Ba tình huống của mục 1, chọn bằng ô đầu tiên. Mô hình rút gọn (một partition, đếm theo ngày), không phải broker thật. <em>Đoán trước</em> rồi mới bấm.</p>
+<ol class="steps">
+<li><b>Retention</b> 7 ngày, segment 7 ngày: cleaner chạy xong, record cũ nhất còn đọc được là ngày nào? Đổi segment 1 ngày rồi so.</li>
+<li>Tick <b>nạp lại giao dịch 2 năm trước</b>: segment vừa ghi hôm nay còn sống không?</li>
+<li><b>Đọc lại theo thời điểm</b>, không ghi múi giờ, <code>--dry-run</code>: offset mới là bao nhiêu? Rồi ghi <code>+07:00</code>, tick <code>--execute</code>, khởi động lại consumer.</li>
+<li>Tick "group vẫn đang chạy" rồi chạy lệnh: chuyện gì xảy ra?</li>
+<li><b>Compaction</b>: chạy compaction, tick "đã trôi qua 1 ngày", chạy lần nữa, rồi cho B đọc tiếp. So với consumer mới đọc từ đầu.</li>
+</ol>
+<div id="rsim"></div>
+
+<h2>3. Thực hành trên cụm</h2>
 <p>Dùng profile mới <code>replay</code> của <code>labs/03-spring-clients</code> và cụm của Bài 3.</p>
 <pre><code>// labs/03-spring-clients/src/main/java/lab/ReplayListener.java (rút gọn)
 public class ReplayListener extends AbstractConsumerSeekAware {
@@ -137,7 +148,7 @@ Lệnh đầu nhảy tới <b>cuối log</b>, tức bỏ qua toàn bộ dữ li�
 <div class="expect">Có sau khi bật Schema Registry ở Bài 8d: <code>PartitionCount: 1 ... Configs: min.insync.replicas=1,cleanup.policy=compact</code>. Registry dùng chính compaction để giữ "bản mới nhất mỗi key": đúng mô hình ở mục 1.2.</div>
 </div>
 
-<h2>3. Đi sâu: chi tiết cho bốn khái niệm</h2>
+<h2>4. Đi sâu: chi tiết cho bốn khái niệm</h2>
 <h3>Retention</h3>
 <ul class="tight">
 <li>"Data is deleted one log segment at a time"; với retention theo thời gian, "the largest timestamp in a segment file ... defining the retention time for the entire segment"; retention theo dung lượng tắt mặc định. Broker kiểm tra mỗi 5 phút (<code>log.retention.check.interval.ms</code>), rồi chờ <code>file.delete.delay.ms</code> (1 phút) trước khi xoá file. <a href="https://kafka.apache.org/44/implementation/log/">[Implementation: Log]</a></li>
@@ -164,7 +175,7 @@ Lệnh đầu nhảy tới <b>cuối log</b>, tức bỏ qua toàn bộ dữ li�
 <li>MSK: chỉ cho Standard brokers; "The minimum retention period in low-cost storage is 3 days"; đọc từ tầng rẻ "an increase in read latency for the first few bytes". <a href="https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html">[MSK tiered storage]</a></li>
 </ul>
 
-<h2>4. Usecase</h2>
+<h2>5. Usecase</h2>
 <p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>
 <h3 id="uc-a">(a) Ngân hàng: bug tính phí chạy 3 ngày, dựng lại số dư</h3>
 <p>Phát hiện service tính phí sai từ 00:00 ngày 14/11. Topic <code>account-transactions</code> (key = số tài khoản, retention 30 ngày) vẫn còn đủ dữ liệu. Cần cho service đọc lại từ mốc đó sau khi sửa code. Đọc lại nghĩa là xử lý lại: mọi tác dụng phụ ra ngoài (ghi DB, gửi thông báo) sẽ xảy ra lần nữa.</p>
@@ -211,11 +222,11 @@ S->>DB: ghi lại, trùng eventId thì bỏ qua
 <li><b>Topic compact có thay được topic lịch sử?</b> Không: nó chỉ giữ bản cuối mỗi key.</li>
 </ul>
 
-<h2>5. Tự nói thành lời</h2>
+<h2>6. Tự nói thành lời</h2>
 <p>Trong 60 giây: <i>"Kafka giữ dữ liệu theo ..., không theo việc đã đọc; mặc định ... và đó là SLA cho ... Xoá theo ..., nên ... Compaction giữ ..., không phải ... Đọc lại có ba đường: ... Bẫy lớn nhất là ... Cho audit, Kafka bảo đảm ... nhưng không ..."</i></p>
 <p><b>Ôn nhanh:</b> <a href="../summaries/0015-replay-retention.md">tóm tắt Bài 8c</a> (đọc sau khi đã tự nói).</p>
 
-<h2>6. Kiểm tra</h2>
+<h2>7. Kiểm tra</h2>
 <div id="quiz"></div>
 
 <h2>Nguồn nên đọc</h2>
@@ -228,6 +239,9 @@ S->>DB: ghi lại, trùng eventId thì bỏ qua
 </main>
 
 <script src="../assets/checklist.js"></script>
+<script src="../assets/flow-anim.js"></script>
+<script src="../assets/replay-sim.js"></script>
+<script>ReplaySim.mount(document.getElementById('rsim'));</script>
 <script src="../assets/diagram.js"></script>
 <script src="../assets/quiz.js"></script>
 <script>

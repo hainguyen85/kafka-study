@@ -37,7 +37,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 ### 1.2. Độ trễ: thứ `acks` không mua được
 
 - **Hạ `acks` không làm consumer thấy dữ liệu sớm hơn.** "Regardless of the acks setting, the messages will not be visible to the consumers" cho tới khi mọi replica trong ISR đã có. `acks=1` chỉ rút ngắn thời gian producer chờ, đổi lại rủi ro mất (Bài 4). [[Design: Replicated Logs]](https://kafka.apache.org/44/design/design/)
-- **Khi quá tải, độ trễ chủ yếu là thời gian xếp hàng** trong bộ đệm producer, không phải thời gian mạng. Lab ở mục 2 cho thấy rõ: cùng một cụm, độ trễ p50 từ vài giây xuống vài chục ms chỉ nhờ gom lô và nén.
+- **Khi quá tải, độ trễ chủ yếu là thời gian xếp hàng** trong bộ đệm producer, không phải thời gian mạng. Lab ở mục 3 cho thấy rõ: cùng một cụm, độ trễ p50 từ vài giây xuống vài chục ms chỉ nhờ gom lô và nén.
 
 ### 1.3. Song song: partition là trần
 
@@ -67,7 +67,17 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 [[Producer configs]](https://kafka.apache.org/44/configuration/producer-configs/) [[Consumer configs]](https://kafka.apache.org/44/configuration/consumer-configs/)
 
-## 2. Thực hành trên cụm
+## 2. Mô phỏng: dữ liệu chờ ở đâu khi quá tải?
+
+Một topic, một consumer group, tính theo từng giây. Trần thông lượng của bốn cấu hình producer lấy từ số đo lab ở mục 3 trên máy bạn (payload nén rất tốt), nên chỉ đáng nhìn tỷ lệ. Mô phỏng theo mô hình ở mục 1, không phải client thật. Đổi lựa chọn giữa chừng được, như deploy cấu hình mới. *Đoán trước* rồi mới bấm.
+
+1. Tải **mở cửa phiên**, producer **mặc định 4.x**: bộ đệm đầy sau mấy giây, và chuyện gì xảy ra với `send()`? Đổi sang **lz4** rồi chạy tiếp.
+2. Tải **bình thường**, xử lý **1 ms**, 6 partition: 2 consumer, rồi 6 consumer. Lag còn tăng không? Đổi sang 0,2 ms.
+3. Giữ 1 ms, đổi sang **3 partition** với 6 consumer: consumer nào ngồi không, lag có hết tăng không?
+4. 6 partition, 6 consumer, 0,2 ms, tick **key nóng**: partition nào tụt lại, và thêm consumer có giúp không?
+5. Tick **pause()**: lag tăng, nhưng vì sao đây không phải sự cố?
+
+## 3. Thực hành trên cụm
 
 Dùng lab Spring Boot `labs/03-spring-clients` (profile mới `perf`) và cụm 3 broker của Bài 3. Profile `perf` gửi 200.000 message, mỗi message 200 byte, nhanh nhất có thể, rồi in thông lượng và độ trễ gửi (từ lúc gọi `send()` tới lúc broker ack).
 
@@ -149,7 +159,7 @@ registry.getListenerContainer("orders").resume();
 
 Trong lúc pause, lag tăng là chủ đích chứ không phải sự cố. Mẫu "pause khi circuit breaker mở" là thiết kế tự dựng; docs Spring chỉ mô tả `pause()`/`resume()`. [[Spring: pause/resume]](https://docs.spring.io/spring-kafka/reference/kafka/pause-resume.html)
 
-## 3. Đi sâu: chi tiết cho bốn khái niệm
+## 4. Đi sâu: chi tiết cho bốn khái niệm
 
 Đọc sau khi đã chạy lab.
 
@@ -175,7 +185,7 @@ Trong lúc pause, lag tăng là chủ đích chứ không phải sự cố. Mẫ
 - MSK Express và Serverless có trần thông lượng cứng, vượt thì bị throttle. [[MSK quotas]](https://docs.aws.amazon.com/msk/latest/developerguide/limits.html)
 - **Bật SSL thì Kafka không dùng zero-copy:** "sendfile is not used when SSL is enabled". Cụm TLS/mTLS của ngân hàng tốn CPU hơn cho đường đọc; đừng so với số benchmark plaintext. [[Design: Efficiency]](https://kafka.apache.org/44/design/design/)
 
-## 4. Usecase
+## 5. Usecase
 
 [Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
@@ -246,13 +256,13 @@ Team báo cáo reset offset để đọc lại dữ liệu cả tuần. Dữ li�
 - **Nén có làm broker tốn CPU?** Broker giải nén để kiểm tra lô rồi lưu nguyên dạng nén; nén là việc của producer. Đặt codec ở topic khác codec producer có thể khiến broker nén lại (chưa kiểm chứng trong docs).
 - **Lag bao nhiêu là quá nhiều?** Không có con số chung; lag vượt retention là mất dữ liệu chưa đọc, nên ngưỡng phải nhỏ hơn retention nhiều.
 
-## 5. Tự nói thành lời
+## 6. Tự nói thành lời
 
 Trong 60 giây: *"Thông lượng tăng nhờ ... và ...; mặc định linger.ms đã là ... từ 4.0. Hạ acks không giúp consumer vì ... Khi quá tải, dữ liệu chờ ở hai chỗ: ... và ... Tín hiệu số một là ..., đo bằng ..."*
 
 **Ôn nhanh:** [tóm tắt Bài 8b](../summaries/0014-throughput-latency.md) (đọc sau khi đã tự nói).
 
-## 6. Kiểm tra
+## 7. Kiểm tra
 
 <!-- quiz:quiz -->
 

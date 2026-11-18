@@ -44,7 +44,7 @@ Bạn chưa biết nơi mới dùng dịch vụ nào, nên đây là bản đồ
 |---|---|---|
 | 1 | Dịch vụ nào (MSK Standard/Express/Serverless, Confluent Basic/Standard/Enterprise/Dedicated/Freight)? Phiên bản Kafka? Có single-zone hay multi-zone? | Quyết định gần như mọi cấu hình bên dưới |
 | 2 | Ai sở hữu cấu hình cụm? Giá trị hiện tại của `unclean.leader.election.enable`, `min.insync.replicas`, RF mặc định, auto-create topic? | MSK Standard mặc định `unclean`=true |
-| 3 | Tôi tự tạo/sửa topic thế nào (script, IaC, Console)? Quyền gì (IAM `CreateTopic`, RBAC)? Quy ước đặt tên, trần số partition? | Bạn là người tạo topic; auto-create tắt |
+| 3 | Ai tạo/sửa topic và theo quy trình nào (script, IaC, Console)? Tài liệu thiết kế topic gửi ở đâu, ai duyệt? Quy ước đặt tên, trần số partition? | Bạn thiết kế topic, team riêng tạo khi go-live; auto-create tắt |
 | 4 | Xác thực và mạng: IAM / SCRAM / mTLS hoặc API key / OAuth; PrivateLink, peering? | Cấu hình client Spring; bạn hoãn học bảo mật nhưng phải biết cách kết nối |
 | 5 | Lịch bảo trì/nâng cấp và cách báo? MSK tự nâng version sau hết hạn hỗ trợ, không báo trước | Quyết định retry/timeout của client |
 | 6 | Quota: partition mỗi broker/cụm, throughput, số connection (IAM: 3000/broker), số consumer group? | Số partition cho topic mới |

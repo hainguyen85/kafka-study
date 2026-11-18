@@ -45,7 +45,7 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 - **CLI** `kafka-consumer-groups.sh --reset-offsets`: một group mỗi lần, group phải đang dừng, mặc định chỉ xem trước (`--dry-run`), thêm `--execute` mới thật sự đổi. [[Basic operations]](https://kafka.apache.org/44/operations/basic-kafka-operations/)
 - **API** `seek()` và `offsetsForTimes()`: trả "the earliest offset whose timestamp is greater than or equal to the given timestamp". [[KafkaConsumer javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
 - **Spring**: `ConsumerSeekAware` / `AbstractConsumerSeekAware` với `seekToTimestamp`, `seekToBeginning`, `seekToEnd`. [[Spring: seek]](https://docs.spring.io/spring-kafka/reference/kafka/seek.html)
-- **Bẫy múi giờ:** `--to-datetime` không ghi múi giờ thì bị hiểu là **UTC** (đọc trong source 4.4.0, docs không nói). Ở Việt Nam phải ghi `+07:00`. Mục 2 cho bạn thấy tận mắt. [[Utils.getDateTime]](https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/utils/Utils.java)
+- **Bẫy múi giờ:** `--to-datetime` không ghi múi giờ thì bị hiểu là **UTC** (đọc trong source 4.4.0, docs không nói). Ở Việt Nam phải ghi `+07:00`. Mục 3 cho bạn thấy tận mắt. [[Utils.getDateTime]](https://github.com/apache/kafka/blob/4.4.0/clients/src/main/java/org/apache/kafka/common/utils/Utils.java)
 
 ### 1.4. Timestamp và audit
 
@@ -67,7 +67,17 @@ classDef warn fill:#dfeaf7,stroke:#1d5fa8,color:#1c1b19
 
 [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/) [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
 
-## 2. Thực hành trên cụm
+## 2. Mô phỏng: giữ được bao lâu, đọc lại từ đâu?
+
+Ba tình huống của mục 1, chọn bằng ô đầu tiên. Mô hình rút gọn (một partition, đếm theo ngày), không phải broker thật. *Đoán trước* rồi mới bấm.
+
+1. **Retention** 7 ngày, segment 7 ngày: cleaner chạy xong, record cũ nhất còn đọc được là ngày nào? Đổi segment 1 ngày rồi so.
+2. Tick **nạp lại giao dịch 2 năm trước**: segment vừa ghi hôm nay còn sống không?
+3. **Đọc lại theo thời điểm**, không ghi múi giờ, `--dry-run`: offset mới là bao nhiêu? Rồi ghi `+07:00`, tick `--execute`, khởi động lại consumer.
+4. Tick "group vẫn đang chạy" rồi chạy lệnh: chuyện gì xảy ra?
+5. **Compaction**: chạy compaction, tick "đã trôi qua 1 ngày", chạy lần nữa, rồi cho B đọc tiếp. So với consumer mới đọc từ đầu.
+
+## 3. Thực hành trên cụm
 
 Dùng profile mới `replay` của `labs/03-spring-clients` và cụm của Bài 3.
 
@@ -147,7 +157,7 @@ docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:19
 
 Có sau khi bật Schema Registry ở Bài 8d: `PartitionCount: 1 ... Configs: min.insync.replicas=1,cleanup.policy=compact`. Registry dùng chính compaction để giữ "bản mới nhất mỗi key": đúng mô hình ở mục 1.2.
 
-## 3. Đi sâu: chi tiết cho bốn khái niệm
+## 4. Đi sâu: chi tiết cho bốn khái niệm
 
 ### Retention
 
@@ -171,7 +181,7 @@ Có sau khi bật Schema Registry ở Bài 8d: `PartitionCount: 1 ... Configs: m
 - Tiered storage (KIP-405) "marked production-ready since Kafka 3.9": segment đã đóng chuyển sang kho rẻ (ví dụ S3); không hỗ trợ topic compact; Apache không kèm sẵn plugin lưu trữ. [[KIP-405]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-405%3A+Kafka+Tiered+Storage) [[Tiered storage]](https://kafka.apache.org/44/operations/tiered-storage/)
 - MSK: chỉ cho Standard brokers; "The minimum retention period in low-cost storage is 3 days"; đọc từ tầng rẻ "an increase in read latency for the first few bytes". [[MSK tiered storage]](https://docs.aws.amazon.com/msk/latest/developerguide/msk-tiered-storage.html)
 
-## 4. Usecase
+## 5. Usecase
 
 [Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
@@ -229,13 +239,13 @@ Trong họp, có người đề xuất dùng Kafka làm audit trail vì "log b�
 - **Seek trong `onPartitionsAssigned` có sao không?** Hàm này chạy lại sau mỗi rebalance: seek vô điều kiện thì mỗi lần rebalance lại đọc lại từ mốc. Seek một lần, hoặc dùng CLI khi group dừng.
 - **Topic compact có thay được topic lịch sử?** Không: nó chỉ giữ bản cuối mỗi key.
 
-## 5. Tự nói thành lời
+## 6. Tự nói thành lời
 
 Trong 60 giây: *"Kafka giữ dữ liệu theo ..., không theo việc đã đọc; mặc định ... và đó là SLA cho ... Xoá theo ..., nên ... Compaction giữ ..., không phải ... Đọc lại có ba đường: ... Bẫy lớn nhất là ... Cho audit, Kafka bảo đảm ... nhưng không ..."*
 
 **Ôn nhanh:** [tóm tắt Bài 8c](../summaries/0015-replay-retention.md) (đọc sau khi đã tự nói).
 
-## 6. Kiểm tra
+## 7. Kiểm tra
 
 <!-- quiz:quiz -->
 

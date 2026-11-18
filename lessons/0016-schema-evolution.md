@@ -65,7 +65,17 @@ C->>C: giải mã thành record
 
 [[Schema evolution]](https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html) Đổi tên field không có trong các trang đã đọc; về kiểm tra nó tương đương bỏ field cũ cộng thêm field mới (chưa kiểm chứng).
 
-## 2. Thực hành trên cụm
+## 2. Mô phỏng: registry nhận hay từ chối, consumer nào vỡ?
+
+Subject `payments-avro-value` bắt đầu với v1 (`eventId, accountId, amount, currency="VND"`), cùng tên field với lab ở mục 3. Mô hình theo luật đọc của Avro, rút gọn, không phải registry thật. *Đoán trước* rồi mới bấm.
+
+1. Mode mặc định **BACKWARD**: thêm `branchCode` không default. Registry nói gì? (Đối chiếu với lab.)
+2. Thêm `channel` có default, đăng ký, cho producer v2 gửi, hai consumer đọc (A vẫn dùng v1).
+3. Bỏ `amount` (bắt buộc): BACKWARD nhận. Producer gửi bằng version mới, consumer A còn v1 đọc: chuyện gì xảy ra? Rút ra thứ tự nâng cấp.
+4. Làm lại, đổi sang **FORWARD** rồi **FULL**, thử lại hai thay đổi trên.
+5. Thêm `channel` có default, rồi "channel: bỏ default": BACKWARD nhận, **BACKWARD_TRANSITIVE** thì không. Vì sao?
+
+## 3. Thực hành trên cụm
 
 Cụm của Bài 3 giờ có thêm service `schema-registry` (image `confluentinc/cp-schema-registry:8.3.2`) trong compose profile `schema`, REST ở `http://localhost:18081` (cổng 8081 trên máy bạn đang bị load balancer của k3d dùng). Lab Spring Boot: `labs/08d-schema`.
 
@@ -174,7 +184,7 @@ Byte `00` là magic, bốn byte `00 00 00 01` là schema id 1, phần sau là d�
 
 Tôi đã đọc được schema id trong byte
 
-## 3. Đi sâu: chi tiết cho bốn khái niệm
+## 4. Đi sâu: chi tiết cho bốn khái niệm
 
 ### Subject và đăng ký schema
 
@@ -194,7 +204,7 @@ Tôi đã đọc được schema id trong byte
 - Client Java: `GlueSchemaRegistryKafkaSerializer`; mặc định `SCHEMA_AUTO_REGISTRATION_SETTING` "If not passed, uses "false""; `COMPATIBILITY_SETTING` mặc định BACKWARD; schema name mặc định là tên topic. [[Glue Java serde]](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-gs-serde-java.html)
 - Chuyển registry: consumer dùng deserializer Glue với `SECONDARY_DESERIALIZER` cho định dạng cũ; nâng consumer trước, producer sau. [[Glue migration]](https://docs.aws.amazon.com/glue/latest/dg/schema-registry-integrations-migration.html)
 
-## 4. Usecase
+## 5. Usecase
 
 [Xem mọi usecase của khoá học](../reference/0005-usecase-index.md)
 
@@ -248,13 +258,13 @@ Một team viết consumer nhanh bằng `StringDeserializer` để "xem thử" t
 - **Ai được đăng ký schema?** Câu hỏi cho platform team: registry nào (Glue hay Confluent), quyền đăng ký (IAM hay RBAC), compatibility mặc định của tổ chức, có cho tự đăng ký trên production không.
 - **Đọc lại một năm dữ liệu bằng code mới có chắc đọc được không?** Chỉ chắc khi subject dùng `BACKWARD_TRANSITIVE` hoặc `FULL_TRANSITIVE`.
 
-## 5. Tự nói thành lời
+## 6. Tự nói thành lời
 
 Trong 60 giây: *"Kafka chỉ lưu ..., hợp đồng nằm ở ... Mỗi message mang ..., consumer lấy schema từ ... Mặc định compatibility là ..., nghĩa là nâng ... trước. Thay đổi an toàn nhất là ...; đổi kiểu thì ... Trên MSK thường dùng ..., khác Confluent ở chỗ ..."*
 
 **Ôn nhanh:** [tóm tắt Bài 8d](../summaries/0016-schema-evolution.md) (đọc sau khi đã tự nói).
 
-## 6. Kiểm tra
+## 7. Kiểm tra
 
 <!-- quiz:quiz -->
 

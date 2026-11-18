@@ -40,7 +40,7 @@ Note over P,F: acks=1 thì ack ngay sau khi leader ghi, trước khi follower k�
 ### 1.2. `min.insync.replicas`: tối thiểu mấy bản sao?
 
 - **Là cái sàn cho `acks=all`:** ISR nhỏ hơn giá trị này thì broker *từ chối ghi* bằng `NotEnoughReplicasException`, thay vì ghi vào một bản rồi báo thành công. [[Javadoc]](https://kafka.apache.org/44/javadoc/org/apache/kafka/common/errors/NotEnoughReplicasException.html)
-- **Đặt ở topic**, thường RF=3 và `min.insync.replicas=2`. Mặc định của broker là 1 (RF mặc định cũng là 1), nên đây là việc của người tạo topic. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/) [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
+- **Đặt ở topic**, thường RF=3 và `min.insync.replicas=2`. Mặc định của broker là 1 (RF mặc định cũng là 1), nên phải ghi rõ trong tài liệu thiết kế topic (Bài 8) và kiểm lại sau khi topic được tạo. [[Topic configs]](https://kafka.apache.org/44/configuration/topic-configs/) [[Broker configs]](https://kafka.apache.org/44/configuration/broker-configs/)
 - **Đánh đổi sẵn sàng lấy bền:** minISR=2 thì mất 2 trên 3 broker là ngừng nhận ghi; minISR=1 thì vẫn ghi, nhưng mỗi message chỉ còn 1 bản sao.
 - **Khi mọi replica trong ISR đều chết:** `unclean.leader.election.enable=false` (mặc định Apache) thì chờ, partition offline; `true` thì bầu replica tụt hậu lên leader, message nó thiếu mất vĩnh viễn. MSK Standard mặc định `true`. Chi tiết ở mục 3. [[Design: unclean leader election]](https://kafka.apache.org/44/design/design/)
 
@@ -171,7 +171,7 @@ spring:
 ```
 
 ```
-// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): bạn là người tạo topic
+// labs/04-producer-durability/.../TopicsConfig.java (rút gọn): trên cụm lab, ứng dụng tự tạo topic
 @Bean NewTopic safe() {
     return TopicBuilder.name("lab-orders-safe").partitions(3).replicas(3)
             .config("min.insync.replicas", "2")   // TopicBuilder không có minInsyncReplicas()

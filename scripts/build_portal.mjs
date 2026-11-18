@@ -56,7 +56,7 @@ const SIMS = [
 **Thử:**
 1. "Gửi, ack bị mất trên đường về": bật thì không trùng, tắt thì trùng.
 2. "Gửi 2 batch, batch đầu lỗi tạm thời": bật thì giữ thứ tự, tắt thì đảo.
-3. "Producer restart, ứng dụng gửi lại đơn cuối": trùng trong cả hai trường hợp (giới hạn "single session").`,
+3. "Gửi, producer crash trước khi nhận ack, restart rồi gửi lại": broker nhớ seq của PID cũ, PID mới chưa có gì để so, nên trùng trong cả hai trường hợp (giới hạn "single session").`,
   },
   {
     id: 'sim-commit', title: 'Commit offset: mất hay trùng', api: 'CommitSim', script: 'commit-sim.js',
@@ -102,6 +102,42 @@ const SIMS = [
 3. Set trong RAM, tick "bản trùng", crash sau bước 3: RAM mất khi restart nên vẫn trùng.
 4. UNIQUE(eventId) cùng transaction DB: đúng ở mọi điểm crash.
 5. Kafka → Kafka có transaction, crash sau bước 2: \`read_committed\` thấy một bản, \`read_uncommitted\` thấy hai.`,
+  },
+  {
+    id: 'sim-load', title: 'Quá tải: bộ đệm producer, lag, partition là trần', api: 'LoadSim', script: 'load-sim.js',
+    lessons: ['0014-throughput-latency'],
+    md: `Một topic, một consumer group, tính theo từng giây. Trần thông lượng của bốn cấu hình producer lấy từ số đo lab Bài 8b (payload nén rất tốt): chỉ đáng nhìn tỷ lệ.
+
+**Thử:**
+1. Tải **mở cửa phiên**, producer **mặc định 4.x**: bộ đệm đầy sau mấy giây, và chuyện gì xảy ra với \`send()\`? Đổi sang **lz4** rồi chạy tiếp.
+2. Tải **bình thường**, xử lý **1 ms**, 6 partition: 2 consumer, rồi 6 consumer. Lag còn tăng không? Đổi sang 0,2 ms.
+3. Giữ 1 ms, đổi sang **3 partition** với 6 consumer: consumer nào ngồi không, lag có hết tăng không?
+4. 6 partition, 6 consumer, 0,2 ms, tick **key nóng**: partition nào tụt lại, và thêm consumer có giúp không?
+5. Tick **pause()**: lag tăng, nhưng vì sao đây không phải sự cố?`,
+  },
+  {
+    id: 'sim-replay', title: 'Retention, đọc lại theo thời điểm, compaction', api: 'ReplaySim', script: 'replay-sim.js',
+    lessons: ['0015-replay-retention'],
+    md: `Ba tình huống: retention xoá theo segment, đọc lại theo thời điểm bằng \`--reset-offsets\`, compaction và tombstone. Một partition, đếm theo ngày.
+
+**Thử:**
+1. **Retention** 7 ngày, segment 7 ngày: cleaner chạy xong, record cũ nhất còn đọc được là ngày nào? Đổi segment 1 ngày rồi so.
+2. Tick **nạp lại giao dịch 2 năm trước**: segment vừa ghi hôm nay còn sống không?
+3. **Đọc lại theo thời điểm**, không ghi múi giờ, \`--dry-run\`: offset mới là bao nhiêu? Rồi ghi \`+07:00\`, tick \`--execute\`, khởi động lại consumer.
+4. Tick "group vẫn đang chạy" rồi chạy lệnh: chuyện gì xảy ra?
+5. **Compaction**: chạy compaction, tick "đã trôi qua 1 ngày", chạy lần nữa, rồi cho B đọc tiếp. So với consumer mới đọc từ đầu.`,
+  },
+  {
+    id: 'sim-schema', title: 'Schema Registry: compatibility và consumer nào vỡ', api: 'SchemaSim', script: 'schema-sim.js',
+    lessons: ['0016-schema-evolution'],
+    md: `Subject \`payments-avro-value\` bắt đầu với v1. Registry kiểm compatibility khi đăng ký; consumer đọc message theo schema id. Mô hình theo luật đọc của Avro, rút gọn.
+
+**Thử:**
+1. Mode mặc định **BACKWARD**: thêm \`branchCode\` không default. Registry nói gì? (Đối chiếu với lab.)
+2. Thêm \`channel\` có default, đăng ký, cho producer v2 gửi, hai consumer đọc (A vẫn dùng v1).
+3. Bỏ \`amount\` (bắt buộc): BACKWARD nhận. Producer gửi bằng version mới, consumer A còn v1 đọc: chuyện gì xảy ra? Rút ra thứ tự nâng cấp.
+4. Làm lại, đổi sang **FORWARD** rồi **FULL**, thử lại hai thay đổi trên.
+5. Thêm \`channel\` có default, rồi "channel: bỏ default": BACKWARD nhận, **BACKWARD_TRANSITIVE** thì không. Vì sao?`,
   },
 ];
 
