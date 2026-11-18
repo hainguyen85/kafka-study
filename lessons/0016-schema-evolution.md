@@ -351,6 +351,6 @@ Glue: SCHEMA_AUTO_REGISTRATION_SETTING "If not passed, uses false"; Confluent: a
 >
 > **Cho MSK:** [AWS Glue Schema Registry](https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html). Nguồn đầy đủ: `research/0008-schema-evolution.md`.
 
-**Bài tiếp theo:** [Bài 9: bài kiểm tra cuối](0009-final-design-test.md), rồi [Bài 10: tổng kết 80/20](0013-core-80-20.md).
+**Bài tiếp theo:** [Bài 9: bài kiểm tra cuối](0009-final-design-test.md), rồi [Bài 10: tổng kết](0013-core-80-20.md).
 
 > **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "đổi tên một field thì làm sao?", "JSON Schema có khác Avro nhiều không?". Dán thông báo lỗi của registry nếu bạn thử schema khác.

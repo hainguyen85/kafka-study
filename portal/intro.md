@@ -16,7 +16,7 @@ Yêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất messa
 | 2 · Producer | 4, 4b | Cấu hình "không mất" phía ghi và biết nó đổi lấy gì; idempotent producer |
 | 3 · Consumer và xử lý lỗi | 5, 5b, 5c, 6, 7 | Commit đúng lúc; rebalance; chọn at-most/at-least/exactly-once; poison pill và DLT; idempotent consumer, outbox, transaction |
 | 4 · Thiết kế và kiểm tra cuối | 8, 8b, 8c, 8d, 9 | Thẻ thiết kế topic; quá tải, thông lượng, độ trễ; đọc lại, audit, giữ dữ liệu; hợp đồng sự kiện (schema); bài thi thiết kế 30 phút |
-| 5 · Tổng kết | 10 | Tám ý cốt lõi theo nguyên tắc 80/20, các ngộ nhận phổ biến, sáu câu hỏi thiết kế |
+| 5 · Tổng kết | 10 | Ba ý cốt lõi (partition, ack, commit), các ngộ nhận phổ biến, sáu câu hỏi thiết kế |
 
 Ngoài bài học còn có ba nhóm hỗ trợ ở thanh bên:
 
