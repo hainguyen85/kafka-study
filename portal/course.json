@@ -1,7 +1,7 @@
 {
  "title": "Apache Kafka cho kiến trúc microservices",
  "subtitle": "Spring Kafka · cụm 3 broker tự dựng · tiếng Việt",
- "built": "2026-11-18",
+ "built": "2026-11-19",
  "groups": [
   {
    "title": "Giới thiệu",
@@ -1714,7 +1714,7 @@
    "title": "Bài 10: Tổng kết",
    "src": "summaries/0013-core-80-20.md",
    "lesson": "0013-core-80-20",
-   "md": "# Tóm tắt Bài 10: Tổng kết\n\n[← Tóm tắt Bài 9](0009-final-design-test.md) · [Bài học](../lessons/0013-core-80-20.html)\n\n*Bài nói 1-2 phút để giải thích cho người khác. Ngộ nhận, sáu câu hỏi thiết kế và bảng cấu hình nằm trong bài học.*\n\nKafka là một cuốn sổ chỉ ghi thêm, không phải hàng đợi: đọc xong dữ liệu vẫn còn, mỗi nhóm consumer tự nhớ mình đọc tới đâu, nên nhiều hệ thống đọc cùng một luồng sự kiện mà không ảnh hưởng nhau.\n\nMọi thứ xoay quanh partition. Thứ tự chỉ có trong một partition, nên muốn sự kiện của một tài khoản đúng thứ tự thì lấy mã tài khoản làm key. Số partition cũng là giới hạn song song, và khó đổi về sau.\n\nMuốn không mất, phía ghi cần ba bản sao, chờ đủ bản sao mới báo thành công, và có cái sàn tối thiểu hai bản. Phía đọc phải xử lý xong rồi mới đánh dấu đã đọc. Cái giá là có thể trùng: Kafka mặc định \"ít nhất một lần\". Vì vậy service ghi tiền phải tự chống trùng bằng mã sự kiện; \"exactly-once\" của Kafka chỉ đúng khi cả đầu vào lẫn đầu ra đều là Kafka.\n\nHai việc hay bị quên: mỗi lần deploy hay scale, nhóm consumer chia lại việc và có thể xử lý lại; và message lỗi mặc định bị bỏ qua sau vài lần thử, nên cần topic chứa lỗi có người theo dõi.\n\nGặp bài toán mới, hỏi sáu câu: thứ tự theo gì, mất được không, trùng được không, commit lúc nào, tải bao nhiêu, lỗi và dữ liệu cũ xử lý ra sao.\n"
+   "md": "# Tóm tắt Bài 10: Tổng kết\n\n[← Tóm tắt Bài 9](0009-final-design-test.md) · [Bài học](../lessons/0013-core-80-20.html)\n\n*Bài nói 1-2 phút để giải thích cho người khác. Ngộ nhận, sáu câu hỏi thiết kế và bảng cấu hình nằm trong bài học.*\n\nKafka gói trong ba từ, theo đường đi của một message: partition, ack, commit.\n\n**Partition: nơi message nằm.** Kafka là một cuốn sổ chỉ ghi thêm, chia thành nhiều phần gọi là partition. Đọc xong dữ liệu vẫn còn, nên nhiều hệ thống đọc cùng một luồng sự kiện mà không ảnh hưởng nhau, và đọc lại được. Thứ tự chỉ có trong một partition, nên muốn sự kiện của một tài khoản đúng thứ tự thì lấy mã tài khoản làm key. Số partition là giới hạn song song và khó đổi về sau, nên phải thiết kế topic trước khi code.\n\n**Ack: lúc ghi.** Ack là lời báo của Kafka cho phía ghi rằng message đã được giữ. Muốn không mất, cần ba bản sao, chờ các bản sao đang đồng bộ ghi xong mới báo thành công, và có cái sàn tối thiểu hai bản. Thiếu cái sàn thì có lúc báo thành công khi mới có một bản.\n\n**Commit: lúc đọc.** Commit là lúc phía đọc đánh dấu \"đã đọc tới đây\". Xử lý xong rồi mới đánh dấu thì không mất, nhưng có thể trùng: khi service chết, khi deploy hay scale làm nhóm consumer chia lại việc, hoặc khi thử lại. Vì vậy service ghi tiền phải tự chống trùng bằng mã sự kiện; \"exactly-once\" của Kafka chỉ đúng khi cả đầu vào lẫn đầu ra đều là Kafka. Message lỗi mặc định bị bỏ qua sau vài lần thử, nên cần topic chứa lỗi có người theo dõi.\n\nCâu để nhớ: chia theo key, ghi chờ đủ bản sao, đọc xong mới commit và chống trùng.\n\nGặp bài toán mới, hỏi sáu câu: thứ tự theo gì, mất được không, trùng được không, commit lúc nào, tải bao nhiêu, lỗi và dữ liệu cũ xử lý ra sao.\n"
   },
   "ref-0001-core-concepts": {
    "id": "ref-0001-core-concepts",
