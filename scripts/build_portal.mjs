@@ -141,6 +141,46 @@ const SIMS = [
   },
 ];
 
+// Mô phỏng tổng hợp: một sự kiện đi từ producer, qua broker, tới consumer và DB; gộp nhiều bài.
+const E2E_MODEL = `Một sự kiện chuyển tiền đi trọn đường: producer → ba broker (B1 leader, B2, B3) → consumer → DB, message lỗi thì sang DLT. Gộp Bài 4 (acks, ISR, \`min.insync.replicas\`), 4b (idempotent producer), 5 (commit offset), 5b (rebalance), 6 (DLT), 7 (idempotent consumer). Ba cấu hình mẫu:
+
+- **Mặc định (Kafka 4.x + Spring Boot)**: \`acks=all\`, idempotence bật, \`min.insync.replicas=1\`, commit sau khi xử lý, không chống trùng, không DLT.
+- **Cấu hình cho tiền**: thêm \`min.insync.replicas=2\`, \`UNIQUE(eventId)\` và DLT.
+- **Cấu hình "cho nhanh"**: \`acks=1\` (idempotence tự tắt), commit trước khi xử lý xong.
+
+Đổi một ô bất kỳ thì cấu hình thành "Tự chọn". Mô phỏng theo mô hình tài liệu mô tả, không phải broker thật; service phát dùng outbox nên sau crash vẫn gửi lại.`;
+
+const COMBO_SIMS = [
+  {
+    id: 'sim-e2e', title: 'Từ producer tới DB: sự cố ở đâu thì mất, trùng?', api: 'E2ESim', script: 'e2e-sim.js',
+    opts: { mode: 'one' }, lessons: ['0009-final-design-test', '0013-core-80-20'],
+    md: `${E2E_MODEL}
+
+Ba sự kiện e1, e2, e3; sự cố bạn chọn xảy ra ở e2. Đoán kết quả của e2 trước khi bấm "Chạy".
+
+**Thử:**
+1. Cấu hình **mặc định**, lần lượt từng sự cố. Sự cố nào mặc định đã chịu được, sự cố nào làm mất, sự cố nào làm trùng?
+2. "Leader B1 chết ngay sau khi ghi": đổi sang \`acks=1\`. Vì sao consumer không bao giờ thấy e2?
+3. "Ack bị mất": tắt idempotence (hoặc đặt \`acks=1\`). Log có mấy bản e2? Bật chống trùng: DB còn trùng không?
+4. "Producer crash": idempotence bật vẫn có 2 bản trong log. Ô nào cứu được?
+5. "Consumer crash" và "rebalance": so commit trước và commit sau. Một bên mất, một bên trùng; ô nào biến "trùng" thành "đúng"?
+6. Cấu hình **cho tiền**: chạy lại mọi sự cố.`,
+  },
+  {
+    id: 'sim-e2e-day', title: 'Một ngày ở production: bảy sự cố liên tiếp', api: 'E2ESim', script: 'e2e-sim.js',
+    opts: { mode: 'day' }, lessons: ['0009-final-design-test', '0013-core-80-20'],
+    md: `${E2E_MODEL}
+
+Tám sự kiện: e1 bình thường, e2 tới e8 mỗi sự kiện gặp một sự cố: ack mất, leader chết, producer crash, ISR co rồi đĩa hỏng, consumer crash, message lỗi, deploy gây rebalance. Bảng kết quả ghi sự kiện nào mất, trùng hay đúng, và ô cấu hình nào sửa được.
+
+**Thử:**
+1. Cấu hình **"cho nhanh"**: đếm trước xem bao nhiêu sự kiện mất, bao nhiêu trùng, rồi chạy.
+2. **Mặc định**: mặc định của Kafka và Spring đã chịu được những sự cố nào? Còn lại sự cố nào?
+3. Từ mặc định, bật **từng ô một** theo cột "Sửa" (\`min.insync.replicas=2\`, chống trùng, DLT) và chạy lại sau mỗi lần. Ô nào sửa được nhiều sự cố nhất?
+4. **Cho tiền**: không mất, không trùng. Nói thành lời mỗi ô chặn sự cố nào; đó là phần "độ bền" và "chống trùng" của bài thi Bài 9.`,
+  },
+];
+
 // ---------- tiện ích ----------
 function titleOf(html) {
   const m = html.match(/<title>([^<]*)<\/title>/);
@@ -202,19 +242,21 @@ for (const part of PARTS) {
       id: stem, kind: 'lesson', title: titleOf(html) || firstHeading(md),
       src: `lessons/${stem}.md`, html: `lessons/${stem}.html`,
       summary: exists(`summaries/${stem}.md`) ? `sum-${stem}` : null,
-      sims: SIMS.filter((s) => s.lessons.includes(stem)).map((s) => s.id),
+      sims: SIMS.concat(COMBO_SIMS).filter((s) => s.lessons.includes(stem)).map((s) => s.id),
       quizzes: quizzesOf(html), md: cleanMd(md, 'lessons'),
     });
   }
   groups.push(g);
 }
 
-// Mô phỏng
-const simGroup = { title: 'Mô phỏng', items: [] };
-for (const s of SIMS) {
-  add(simGroup, { id: s.id, kind: 'sim', title: s.title, api: s.api, script: s.script, opts: s.opts || null, lessons: s.lessons, md: s.md });
+// Mô phỏng (theo bài) và mô phỏng tổng hợp (nhiều bài, từ producer tới consumer)
+for (const [title, list] of [['Mô phỏng', SIMS], ['Mô phỏng tổng hợp', COMBO_SIMS]]) {
+  const g = { title, items: [] };
+  for (const s of list) {
+    add(g, { id: s.id, kind: 'sim', title: s.title, api: s.api, script: s.script, opts: s.opts || null, lessons: s.lessons, md: s.md });
+  }
+  groups.push(g);
 }
-groups.push(simGroup);
 
 // Tóm tắt ôn nhanh (theo thứ tự bài)
 const sumGroup = { title: 'Tóm tắt ôn nhanh', items: [] };

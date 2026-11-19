@@ -67,6 +67,13 @@ window.COURSE = {
    ]
   },
   {
+   "title": "Mô phỏng tổng hợp",
+   "items": [
+    "sim-e2e",
+    "sim-e2e-day"
+   ]
+  },
+  {
    "title": "Tóm tắt ôn nhanh",
    "items": [
     "sum-0001-kafka-big-picture",
@@ -104,7 +111,7 @@ window.COURSE = {
    "kind": "intro",
    "title": "Giới thiệu khóa học",
    "src": "portal/intro.md",
-   "md": "# Apache Kafka cho kiến trúc microservices\n\nKhoá tự học Kafka cho kỹ sư backend Java/Spring Boot đã có kinh nghiệm, viết bằng tiếng Việt, thuật ngữ Kafka giữ nguyên tiếng Anh. Học trên một cụm Kafka 3 broker tự dựng (Docker trong WSL2) với code Spring Kafka chạy được.\n\n## Mục tiêu\n\nHiểu Kafka đủ chắc để **thảo luận và thiết kế** ngay khi vào dự án: đọc một cấu hình producer/consumer và nói được nó đánh đổi gì (mất message, trùng message, thứ tự, độ trễ), và với một bài toán lạ, trong 30 phút đề xuất được topic, key, số partition, cấu hình độ bền, cách xử lý trùng và lỗi.\n\nYêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất message**. Các bài đi theo chuỗi đó: producer ghi bền → consumer ghi nhận đúng lúc → xử lý lỗi không bỏ rơi message → chống trùng → thiết kế topic.\n\n## Cấu trúc\n\n| Phần | Bài | Bạn làm được gì sau phần này |\n|---|---|---|\n| 1 · Nền tảng | 1, 2, 3 | Kể đường đi của một message; chọn key; dựng cụm và đọc leader, ISR |\n| 2 · Producer | 4, 4b | Cấu hình \"không mất\" phía ghi và biết nó đổi lấy gì; idempotent producer |\n| 3 · Consumer và xử lý lỗi | 5, 5b, 5c, 6, 7 | Commit đúng lúc; rebalance; chọn at-most/at-least/exactly-once; poison pill và DLT; idempotent consumer, outbox, transaction |\n| 4 · Thiết kế và kiểm tra cuối | 8, 8b, 8c, 8d, 9 | Thẻ thiết kế topic; quá tải, thông lượng, độ trễ; đọc lại, audit, giữ dữ liệu; hợp đồng sự kiện (schema); bài thi thiết kế 30 phút |\n| 5 · Tổng kết | 10 | Ba ý cốt lõi (partition, ack, commit), các ngộ nhận phổ biến, sáu câu hỏi thiết kế |\n\nNgoài bài học còn có ba nhóm hỗ trợ ở thanh bên:\n\n- **Mô phỏng**: năm mô phỏng tương tác (key → partition, độ bền, idempotent producer, commit offset, rebalance). Mô phỏng chạy theo mô hình mà tài liệu Kafka mô tả, không phải broker thật.\n- **Tóm tắt ôn nhanh**: mỗi bài một đoạn tóm tắt bằng lời, khoảng một phút, để ôn trước buổi họp.\n- **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống, câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.\n\n## Cách học một bài\n\n1. Đọc mục **Kiến thức tối thiểu**. Mỗi ý có link tới tài liệu gốc (kafka.apache.org, Spring Kafka, KIP).\n2. Chạy **mô phỏng** của bài (nút ở đầu bài) và đoán trước khi bấm.\n3. Làm phần **thực hành** trên cụm: lệnh và kết quả mong đợi có trong bài. Chỗ nào ghi \"chưa chạy thử\" là dự đoán từ tài liệu; kết quả thật của bạn mới là bằng chứng.\n4. **Tự nói thành lời** không nhìn tài liệu, rồi so với bản tóm tắt.\n5. Làm **quiz** và dán dòng kết quả cho giáo viên (agent) để bài sau điều chỉnh.\n\nDùng nút \"Đánh dấu hoàn thành\" để theo dõi tiến độ; tiến độ lưu trong trình duyệt của bạn.\n\n## Ngoài phạm vi\n\nBảo mật (SASL/SSL/ACL), vận hành cụm, Kafka Connect và Kafka Streams, Share Groups. Schema Registry chờ nghiên cứu nguồn chính trước khi viết bài.\n\n## Mã nguồn đi kèm\n\n- `labs/03-cluster`: cụm 3 broker KRaft (Docker Compose), dựng bằng `scripts/wizard-03-docker-kafka.sh`.\n- `labs/03-spring-clients`: producer và consumer Spring Boot tối giản (gửi, nhận, xem rebalance, đo thông lượng, đọc lại theo thời gian) cho các bước thực hành của Bài 3, 5, 5b, 8b, 8c.\n- `labs/08d-schema`: Spring Boot + Avro + Schema Registry (ba phiên bản schema) cho Bài 8d.\n- `labs/04-producer-durability`: Spring Boot, ba cấu hình độ bền và bộ đối chiếu \"mất bao nhiêu\".\n- `labs/05-scenarios`: các tình huống consumer, lỗi, transaction, thiết kế topic, mỗi tình huống một profile.\n"
+   "md": "# Apache Kafka cho kiến trúc microservices\n\nKhoá tự học Kafka cho kỹ sư backend Java/Spring Boot đã có kinh nghiệm, viết bằng tiếng Việt, thuật ngữ Kafka giữ nguyên tiếng Anh. Học trên một cụm Kafka 3 broker tự dựng (Docker trong WSL2) với code Spring Kafka chạy được.\n\n## Mục tiêu\n\nHiểu Kafka đủ chắc để **thảo luận và thiết kế** ngay khi vào dự án: đọc một cấu hình producer/consumer và nói được nó đánh đổi gì (mất message, trùng message, thứ tự, độ trễ), và với một bài toán lạ, trong 30 phút đề xuất được topic, key, số partition, cấu hình độ bền, cách xử lý trùng và lỗi.\n\nYêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất message**. Các bài đi theo chuỗi đó: producer ghi bền → consumer ghi nhận đúng lúc → xử lý lỗi không bỏ rơi message → chống trùng → thiết kế topic.\n\n## Cấu trúc\n\n| Phần | Bài | Bạn làm được gì sau phần này |\n|---|---|---|\n| 1 · Nền tảng | 1, 2, 3 | Kể đường đi của một message; chọn key; dựng cụm và đọc leader, ISR |\n| 2 · Producer | 4, 4b | Cấu hình \"không mất\" phía ghi và biết nó đổi lấy gì; idempotent producer |\n| 3 · Consumer và xử lý lỗi | 5, 5b, 5c, 6, 7 | Commit đúng lúc; rebalance; chọn at-most/at-least/exactly-once; poison pill và DLT; idempotent consumer, outbox, transaction |\n| 4 · Thiết kế và kiểm tra cuối | 8, 8b, 8c, 8d, 9 | Thẻ thiết kế topic; quá tải, thông lượng, độ trễ; đọc lại, audit, giữ dữ liệu; hợp đồng sự kiện (schema); bài thi thiết kế 30 phút |\n| 5 · Tổng kết | 10 | Ba ý cốt lõi (partition, ack, commit), các ngộ nhận phổ biến, sáu câu hỏi thiết kế |\n\nNgoài bài học còn có bốn nhóm hỗ trợ ở thanh bên:\n\n- **Mô phỏng**: mỗi mô phỏng gắn với một bài (key → partition, độ bền, idempotent producer, commit offset, rebalance, DLT, exactly-once, quá tải, đọc lại, schema). Mô phỏng chạy theo mô hình mà tài liệu Kafka mô tả, không phải broker thật.\n- **Mô phỏng tổng hợp**: một sự kiện đi trọn đường từ producer tới DB, gộp Bài 4 tới 7; chọn cấu hình, gây sự cố, xem sự kiện nào mất, trùng hay đúng.\n- **Tóm tắt ôn nhanh**: mỗi bài một đoạn tóm tắt bằng lời, khoảng một phút, để ôn trước buổi họp.\n- **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống, câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.\n\n## Cách học một bài\n\n1. Đọc mục **Kiến thức tối thiểu**. Mỗi ý có link tới tài liệu gốc (kafka.apache.org, Spring Kafka, KIP).\n2. Chạy **mô phỏng** của bài (nút ở đầu bài) và đoán trước khi bấm.\n3. Làm phần **thực hành** trên cụm: lệnh và kết quả mong đợi có trong bài. Chỗ nào ghi \"chưa chạy thử\" là dự đoán từ tài liệu; kết quả thật của bạn mới là bằng chứng.\n4. **Tự nói thành lời** không nhìn tài liệu, rồi so với bản tóm tắt.\n5. Làm **quiz** và dán dòng kết quả cho giáo viên (agent) để bài sau điều chỉnh.\n\nDùng nút \"Đánh dấu hoàn thành\" để theo dõi tiến độ; tiến độ lưu trong trình duyệt của bạn.\n\n## Ngoài phạm vi\n\nBảo mật (SASL/SSL/ACL), vận hành cụm, Kafka Connect và Kafka Streams, Share Groups.\n\n## Mã nguồn đi kèm\n\n- `labs/03-cluster`: cụm 3 broker KRaft (Docker Compose), dựng bằng `scripts/wizard-03-docker-kafka.sh`.\n- `labs/03-spring-clients`: producer và consumer Spring Boot tối giản (gửi, nhận, xem rebalance, đo thông lượng, đọc lại theo thời gian) cho các bước thực hành của Bài 3, 5, 5b, 8b, 8c.\n- `labs/08d-schema`: Spring Boot + Avro + Schema Registry (ba phiên bản schema) cho Bài 8d.\n- `labs/04-producer-durability`: Spring Boot, ba cấu hình độ bền và bộ đối chiếu \"mất bao nhiêu\".\n- `labs/05-scenarios`: các tình huống consumer, lỗi, transaction, thiết kế topic, mỗi tình huống một profile.\n"
   },
   "0001-kafka-big-picture": {
    "id": "0001-kafka-big-picture",
@@ -1261,7 +1268,10 @@ window.COURSE = {
    "src": "lessons/0009-final-design-test.md",
    "html": "lessons/0009-final-design-test.html",
    "summary": "sum-0009-final-design-test",
-   "sims": [],
+   "sims": [
+    "sim-e2e",
+    "sim-e2e-day"
+   ],
    "quizzes": {
     "quiz": [
      {
@@ -1363,7 +1373,10 @@ window.COURSE = {
    "src": "lessons/0013-core-80-20.md",
    "html": "lessons/0013-core-80-20.html",
    "summary": "sum-0013-core-80-20",
-   "sims": [],
+   "sims": [
+    "sim-e2e",
+    "sim-e2e-day"
+   ],
    "quizzes": {
     "quiz": [
      {
@@ -1588,6 +1601,36 @@ window.COURSE = {
     "0016-schema-evolution"
    ],
    "md": "Subject `payments-avro-value` bắt đầu với v1. Registry kiểm compatibility khi đăng ký; consumer đọc message theo schema id. Mô hình theo luật đọc của Avro, rút gọn.\n\n**Thử:**\n1. Mode mặc định **BACKWARD**: thêm `branchCode` không default. Registry nói gì? (Đối chiếu với lab.)\n2. Thêm `channel` có default, đăng ký, cho producer v2 gửi, hai consumer đọc (A vẫn dùng v1).\n3. Bỏ `amount` (bắt buộc): BACKWARD nhận. Producer gửi bằng version mới, consumer A còn v1 đọc: chuyện gì xảy ra? Rút ra thứ tự nâng cấp.\n4. Làm lại, đổi sang **FORWARD** rồi **FULL**, thử lại hai thay đổi trên.\n5. Thêm `channel` có default, rồi \"channel: bỏ default\": BACKWARD nhận, **BACKWARD_TRANSITIVE** thì không. Vì sao?"
+  },
+  "sim-e2e": {
+   "id": "sim-e2e",
+   "kind": "sim",
+   "title": "Từ producer tới DB: sự cố ở đâu thì mất, trùng?",
+   "api": "E2ESim",
+   "script": "e2e-sim.js",
+   "opts": {
+    "mode": "one"
+   },
+   "lessons": [
+    "0009-final-design-test",
+    "0013-core-80-20"
+   ],
+   "md": "Một sự kiện chuyển tiền đi trọn đường: producer → ba broker (B1 leader, B2, B3) → consumer → DB, message lỗi thì sang DLT. Gộp Bài 4 (acks, ISR, `min.insync.replicas`), 4b (idempotent producer), 5 (commit offset), 5b (rebalance), 6 (DLT), 7 (idempotent consumer). Ba cấu hình mẫu:\n\n- **Mặc định (Kafka 4.x + Spring Boot)**: `acks=all`, idempotence bật, `min.insync.replicas=1`, commit sau khi xử lý, không chống trùng, không DLT.\n- **Cấu hình cho tiền**: thêm `min.insync.replicas=2`, `UNIQUE(eventId)` và DLT.\n- **Cấu hình \"cho nhanh\"**: `acks=1` (idempotence tự tắt), commit trước khi xử lý xong.\n\nĐổi một ô bất kỳ thì cấu hình thành \"Tự chọn\". Mô phỏng theo mô hình tài liệu mô tả, không phải broker thật; service phát dùng outbox nên sau crash vẫn gửi lại.\n\nBa sự kiện e1, e2, e3; sự cố bạn chọn xảy ra ở e2. Đoán kết quả của e2 trước khi bấm \"Chạy\".\n\n**Thử:**\n1. Cấu hình **mặc định**, lần lượt từng sự cố. Sự cố nào mặc định đã chịu được, sự cố nào làm mất, sự cố nào làm trùng?\n2. \"Leader B1 chết ngay sau khi ghi\": đổi sang `acks=1`. Vì sao consumer không bao giờ thấy e2?\n3. \"Ack bị mất\": tắt idempotence (hoặc đặt `acks=1`). Log có mấy bản e2? Bật chống trùng: DB còn trùng không?\n4. \"Producer crash\": idempotence bật vẫn có 2 bản trong log. Ô nào cứu được?\n5. \"Consumer crash\" và \"rebalance\": so commit trước và commit sau. Một bên mất, một bên trùng; ô nào biến \"trùng\" thành \"đúng\"?\n6. Cấu hình **cho tiền**: chạy lại mọi sự cố."
+  },
+  "sim-e2e-day": {
+   "id": "sim-e2e-day",
+   "kind": "sim",
+   "title": "Một ngày ở production: bảy sự cố liên tiếp",
+   "api": "E2ESim",
+   "script": "e2e-sim.js",
+   "opts": {
+    "mode": "day"
+   },
+   "lessons": [
+    "0009-final-design-test",
+    "0013-core-80-20"
+   ],
+   "md": "Một sự kiện chuyển tiền đi trọn đường: producer → ba broker (B1 leader, B2, B3) → consumer → DB, message lỗi thì sang DLT. Gộp Bài 4 (acks, ISR, `min.insync.replicas`), 4b (idempotent producer), 5 (commit offset), 5b (rebalance), 6 (DLT), 7 (idempotent consumer). Ba cấu hình mẫu:\n\n- **Mặc định (Kafka 4.x + Spring Boot)**: `acks=all`, idempotence bật, `min.insync.replicas=1`, commit sau khi xử lý, không chống trùng, không DLT.\n- **Cấu hình cho tiền**: thêm `min.insync.replicas=2`, `UNIQUE(eventId)` và DLT.\n- **Cấu hình \"cho nhanh\"**: `acks=1` (idempotence tự tắt), commit trước khi xử lý xong.\n\nĐổi một ô bất kỳ thì cấu hình thành \"Tự chọn\". Mô phỏng theo mô hình tài liệu mô tả, không phải broker thật; service phát dùng outbox nên sau crash vẫn gửi lại.\n\nTám sự kiện: e1 bình thường, e2 tới e8 mỗi sự kiện gặp một sự cố: ack mất, leader chết, producer crash, ISR co rồi đĩa hỏng, consumer crash, message lỗi, deploy gây rebalance. Bảng kết quả ghi sự kiện nào mất, trùng hay đúng, và ô cấu hình nào sửa được.\n\n**Thử:**\n1. Cấu hình **\"cho nhanh\"**: đếm trước xem bao nhiêu sự kiện mất, bao nhiêu trùng, rồi chạy.\n2. **Mặc định**: mặc định của Kafka và Spring đã chịu được những sự cố nào? Còn lại sự cố nào?\n3. Từ mặc định, bật **từng ô một** theo cột \"Sửa\" (`min.insync.replicas=2`, chống trùng, DLT) và chạy lại sau mỗi lần. Ô nào sửa được nhiều sự cố nhất?\n4. **Cho tiền**: không mất, không trùng. Nói thành lời mỗi ô chặn sự cố nào; đó là phần \"độ bền\" và \"chống trùng\" của bài thi Bài 9."
   },
   "sum-0001-kafka-big-picture": {
    "id": "sum-0001-kafka-big-picture",

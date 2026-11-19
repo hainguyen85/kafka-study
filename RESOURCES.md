@@ -13,7 +13,7 @@
 - [KRaft overview (4.4)](https://kafka.apache.org/44/operations/kraft/)
   Controller, `process.roles` (broker/controller/combined), quorum 2N+1, metadata log. Use for: giải thích controller, dựng cụm, khi nào không dùng combined mode.
 - [Producer configs (4.4)](https://kafka.apache.org/44/configuration/producer-configs/)
-  Mặc định và ý nghĩa `acks`, `enable.idempotence`, `retries`, `delivery.timeout.ms`, `linger.ms`, `batch.size`... Use for: bảng tra cấu hình producer.
+  Mặc định và ý nghĩa `acks`, `enable.idempotence`, `retries`, `delivery.timeout.ms`, `linger.ms`, `batch.size`... Idempotence cần `acks=all`; cấu hình xung đột mà không bật idempotence tường minh thì idempotence tự tắt, bật tường minh thì `ConfigException` (đọc 2026-11-19). Use for: bảng tra cấu hình producer, mô phỏng tổng hợp.
 - [Consumer configs (4.4)](https://kafka.apache.org/44/configuration/consumer-configs/)
   `group.id`, `enable.auto.commit`, `auto.offset.reset`, `max.poll.interval.ms`, `isolation.level`, `group.protocol`... Use for: bảng tra cấu hình consumer, rebalance.
 - [Kafka Quickstart](https://kafka.apache.org/quickstart)
