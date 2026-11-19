@@ -44,11 +44,11 @@
       return s;
     }
     function check(text, on) { var l = el('label'), b = el('input'); b.type = 'checkbox'; b.checked = on; l.appendChild(b); l.appendChild(document.createTextNode(' ' + text)); return { lab: l, box: b }; }
-    var mode = select('kiểu retry', [['topic', 'Retry topic (không chặn partition)'], ['block', 'Retry tại chỗ (partition đứng chờ)'], ['none', 'Không retry']]);
-    var ladder = select('thang chờ của làn tx', [['exp', 'Thang chờ tăng dần: 10, 20, 40, 80, tối đa 120 giây'], ['fixed', 'Thang chờ cố định: 10 giây']]);
-    var exhaust = select('hết lượt thì', [['dlt', 'Hết lượt: vào DLT'], ['skip', 'Hết lượt: log rồi bỏ qua']]);
+    var mode = select('kiểu thử lại', [['topic', 'Sang hàng thử lại (hàng chính đi tiếp)'], ['block', 'Thử lại tại chỗ (cả hàng đứng chờ)'], ['none', 'Không thử lại']]);
+    var ladder = select('thang chờ của hàng giao dịch', [['exp', 'Thang chờ tăng dần: 10, 20, 40, 80, tối đa 120 giây'], ['fixed', 'Thang chờ cố định: 10 giây']]);
+    var exhaust = select('hết lượt thì', [['dlt', 'Hết lượt: vào DLQ'], ['skip', 'Hết lượt: chỉ ghi log rồi bỏ']]);
     var policy = check('Policy theo bản tin (số lần theo phân khúc, hạn OTP)', true);
-    var classify = check('Lỗi vĩnh viễn vào DLT ngay', true);
+    var classify = check('Lỗi vĩnh viễn vào DLQ ngay', true);
     var cb = check('Ngắt mạch', false);
     var ev = {
       flaky: check('Lỗi lẻ tẻ 10%', true),
@@ -65,7 +65,7 @@
     [r1, r2, r3, rb, stageHost, cap, table, ledger].forEach(function (x) { box.appendChild(x); });
     root.appendChild(box);
 
-    var st = FlowAnim.stage(stageHost, { width: 640, height: 222, label: 'Router, hai topic notif.sms.otp và notif.sms.tx, ngắt mạch, Sender SMS, nhà mạng SMS, retry, DLT và bộ đếm quá hạn.' });
+    var st = FlowAnim.stage(stageHost, { width: 640, height: 222, label: 'Router, hàng OTP và hàng giao dịch, ngắt mạch, Sender SMS, nhà mạng SMS, thử lại, DLQ và bộ đếm quá hạn.' });
     var pl = FlowAnim.player(box, st, cap);
     st.node('R', { x: 6, y: 80, w: 96, h: 56 });
     st.node('TO', { x: 118, y: 18, w: 132, h: 52 });
@@ -199,7 +199,7 @@
       S.tickStall = {};
       if (budget > 0) { runLane('otp', ctx); runLane('tx', ctx); }
       if (cb.box.checked) {
-        if (c.state === 'closed' && ctx.calls >= 3 && ctx.fails / ctx.calls >= 0.5) { c.state = 'open'; c.until = t + CB_WAIT; note(t, 'Ngắt mạch mở: tạm dừng đọc cả hai làn, bản tin nằm yên trong log.'); }
+        if (c.state === 'closed' && ctx.calls >= 3 && ctx.fails / ctx.calls >= 0.5) { c.state = 'open'; c.until = t + CB_WAIT; note(t, 'Ngắt mạch mở: tạm dừng cả hai hàng, tin nằm yên trong Kafka.'); }
         else if (c.state === 'half') {
           if (ctx.fails > 0) { c.state = 'open'; c.until = t + CB_WAIT; }
           else { c.state = 'closed'; note(t, 'Ngắt mạch đóng: đọc lại và xả hàng chờ.'); }
@@ -232,20 +232,20 @@
       var last = S.t - 1, down = S.t > 0 && on('out') && last >= OUT.from && last < OUT.to;
       var c = S.cb, cbOpen = cb.box.checked && c.state === 'open';
       st.setNode('R', { title: 'Router', sub: policy.box.checked ? 'gắn policy' : 'chung 5 lần', cls: 'client' });
-      st.setNode('TO', { title: 'notif.sms.otp', sub: 'chờ ' + fmt(laneWait('otp')), cls: laneWait('otp') > 200 ? 'hot' : '' });
-      st.setNode('TT', { title: 'notif.sms.tx', sub: 'chờ ' + fmt(laneWait('tx')), cls: laneWait('tx') > 500 ? 'hot' : '' });
+      st.setNode('TO', { title: 'Hàng OTP', sub: 'chờ ' + fmt(laneWait('otp')), cls: laneWait('otp') > 200 ? 'hot' : '' });
+      st.setNode('TT', { title: 'Hàng giao dịch', sub: 'chờ ' + fmt(laneWait('tx')), cls: laneWait('tx') > 500 ? 'hot' : '' });
       st.setNode('CB', { title: 'Ngắt mạch', sub: !cb.box.checked ? 'không dùng' : c.state === 'open' ? 'MỞ: tạm dừng' : c.state === 'half' ? 'thử lại' : 'đóng', cls: !cb.box.checked ? 'out' : c.state === 'open' ? 'bad' : c.state === 'half' ? 'hot' : 'ok' });
       var stalled = S.tickStall.otp || S.tickStall.tx;
-      st.setNode('S', { title: 'Sender SMS', sub: cbOpen ? 'tạm dừng' : stalled ? 'đứng chờ retry' : 'tối đa ' + CAP + '/s', cls: stalled ? 'bad' : 'client' });
+      st.setNode('S', { title: 'Sender SMS', sub: cbOpen ? 'tạm dừng' : stalled ? 'đứng chờ' : '≤ ' + CAP + ' tin/giây', cls: stalled ? 'bad' : 'client' });
       st.setNode('P', { title: 'Nhà mạng SMS', sub: down ? 'SẬP' : on('flaky') ? 'lỗi lẻ 10%' : 'ổn định', cls: down ? 'dead' : '' });
       var rn = rtCount();
       st.setNode('RT', {
-        title: { topic: 'Retry topic', block: 'Retry tại chỗ', none: 'Không retry' }[mode.value],
+        title: { topic: 'Hàng thử lại', block: 'Thử tại chỗ', none: 'Không thử lại' }[mode.value],
         sub: mode.value === 'topic' ? 'chờ ' + fmt(rn) : mode.value === 'block' ? 'giữ đầu hàng' : '',
         cls: mode.value === 'none' ? 'out' : rn > 0 || stalled ? 'hot' : ''
       });
       var dn = sum(S.dltN), ln = sum(S.lost);
-      st.setNode('DLT', exhaust.value === 'dlt' ? { title: 'DLT', sub: fmt(dn), cls: dn ? 'bad' : '' } : { title: 'Bỏ qua (mất)', sub: fmt(ln), cls: ln ? 'bad' : 'out' });
+      st.setNode('DLT', exhaust.value === 'dlt' ? { title: 'DLQ', sub: fmt(dn), cls: dn ? 'bad' : '' } : { title: 'Bỏ qua (mất)', sub: fmt(ln), cls: ln ? 'bad' : 'out' });
       var xn = sum(S.expired) + S.failed.otp;
       st.setNode('X', { title: 'Quá hạn', sub: fmt(xn), cls: xn ? 'hot' : '' });
     }
@@ -254,14 +254,14 @@
       var out = [], dn = sum(S.dltN), ln = sum(S.lost);
       var tr = per(); S.dlt.forEach(function (f) { if (!f.perm) tr[f.type] += f.n; });
       var transDlt = sum(tr);
-      if (S.stall.tx + S.stall.otp > 0) out.push('Retry tại chỗ: làn tx đứng ' + S.stall.tx + ' giây, làn OTP ' + S.stall.otp + ' giây; bản tin phía sau chờ theo dù không lỗi.');
-      if (on('out') && transDlt > 0 && !cb.box.checked) out.push(fmt(transDlt) + ' bản tin hết lượt vì nhà mạng sập: retry không thay được ngắt mạch.');
+      if (S.stall.tx + S.stall.otp > 0) out.push('Thử lại tại chỗ: hàng giao dịch đứng ' + S.stall.tx + ' giây, hàng OTP ' + S.stall.otp + ' giây; tin phía sau chờ theo dù không lỗi.');
+      if (on('out') && transDlt > 0 && !cb.box.checked) out.push(fmt(transDlt) + ' tin hết lượt vì nhà mạng sập: thử lại không thay được ngắt mạch.');
       if (on('out') && policy.box.checked && mode.value === 'topic' && !cb.box.checked && tr.reg > 0 && tr.vip === 0) out.push('Khách ưu tiên (8 lần) chịu được 3 phút sập, khách thường (5 lần) thì không: policy theo phân khúc.');
-      if (S.wasted > 0) out.push(fmt(S.wasted) + ' lời gọi phí cho số sai: lỗi vĩnh viễn bị retry như lỗi tạm thời.');
-      if (ln > 0) out.push(fmt(ln) + ' bản tin mất im lặng: hết lượt mà không có DLT.');
+      if (S.wasted > 0) out.push(fmt(S.wasted) + ' lần gửi phí cho số sai: lỗi vĩnh viễn bị thử lại như lỗi tạm thời.');
+      if (ln > 0) out.push(fmt(ln) + ' tin mất im lặng: hết lượt mà không có DLQ.');
       if (S.late > 0) out.push(fmt(S.late) + ' OTP gửi khi đã quá ' + OTP_TTL + ' giây: thiếu hạn chót trong policy.');
-      if (S.expired.otp > 0) out.push(fmt(S.expired.otp) + ' OTP quá hạn được đánh dấu EXPIRED, không gửi: đúng, nguồn được báo để khách xin mã mới.');
-      if (dn > 0 && exhaust.value === 'dlt') out.push('DLT có ' + fmt(dn) + ' bản tin: cần cảnh báo, sửa nguyên nhân, rồi "Replay DLT".');
+      if (S.expired.otp > 0) out.push(fmt(S.expired.otp) + ' OTP quá hạn được đánh dấu hết hạn, không gửi: đúng, nguồn được báo để khách xin mã mới.');
+      if (dn > 0 && exhaust.value === 'dlt') out.push('DLQ có ' + fmt(dn) + ' tin: cần cảnh báo, sửa nguyên nhân, rồi "Gửi lại từ DLQ".');
       return out;
     }
 
@@ -269,13 +269,13 @@
       paint();
       table.innerHTML = '';
       var t = el('table'), h = el('tr');
-      ['Loại (policy)', 'Đã gửi', 'Đang chờ', 'Quá hạn', exhaust.value === 'dlt' ? 'DLT / FAILED' : 'Mất / FAILED', 'Chờ lâu nhất'].forEach(function (x) { h.appendChild(el('th', null, x)); });
+      ['Loại (policy)', 'Đã gửi', 'Đang chờ', 'Quá hạn', exhaust.value === 'dlt' ? 'DLQ / thất bại' : 'Mất / thất bại', 'Chờ lâu nhất'].forEach(function (x) { h.appendChild(el('th', null, x)); });
       t.appendChild(h);
       TYPES.forEach(function (ty) {
         var tr = el('tr'), w = maxWait(ty);
         var pol = maxAtt(ty) + ' lần' + (deadline(ty) < Infinity ? ', hạn ' + deadline(ty) + ' giây' : '');
         var bad = exhaust.value === 'dlt' ? S.dltN[ty] : S.lost[ty];
-        var last = ty === 'otp' && policy.box.checked ? fmt(S.failed.otp) + ' FAILED' : fmt(bad);
+        var last = ty === 'otp' && policy.box.checked ? fmt(S.failed.otp) + ' thất bại' : fmt(bad);
         [NAME[ty] + ' (' + pol + ')', fmt(S.sent[ty]), fmt(pending(ty)), fmt(S.expired[ty]), last, clock(w)].forEach(function (x, i) {
           var td = el('td', null, x);
           if (i === 4 && (bad > 0 || (ty === 'otp' && S.failed.otp > 0))) td.style.color = 'var(--bad)';
@@ -286,10 +286,10 @@
       });
       table.appendChild(t);
       var v = verdicts(), bad = sum(S.lost) > 0 || S.late > 0 || S.wasted > 0 || S.stall.tx > 0 || S.dlt.some(function (f) { return !f.perm; });
-      var head = 'Phút ' + clock(S.t) + '/' + clock(END) + '. Lời gọi nhà mạng: ' + fmt(S.calls) + (S.calls ? ' (' + Math.round(100 * S.retryCalls / S.calls) + '% là retry)' : '') + '.';
+      var head = 'Phút ' + clock(S.t) + '/' + clock(END) + '. Lần gửi tới nhà mạng: ' + fmt(S.calls) + (S.calls ? ' (' + Math.round(100 * S.retryCalls / S.calls) + '% là gửi lại)' : '') + '.';
       ledger.className = 'note' + (bad ? ' bad' : '');
       ledger.textContent = (bad ? '✗ ' : '✓ ') + head + (v.length ? ' ' + v.join(' ') : '');
-      if (!pl.busy) cap.textContent = S.t ? '› ' + (S.lastNote || '') : 'Chọn kiểu retry, thang chờ, policy và sự cố. Đoán xem ai vào DLT, rồi bấm "+30 giây" hoặc "Chạy hết 10 phút".';
+      if (!pl.busy) cap.textContent = S.t ? '› ' + (S.lastNote || '') : 'Chọn kiểu thử lại, thang chờ, policy và sự cố. Đoán xem ai vào DLQ, rồi bấm "+30 giây" hoặc "Chạy hết 10 phút".';
       btnStep.disabled = btnRun.disabled = S.t >= END;
       btnReplay.disabled = !S.dlt.length;
     }
@@ -297,7 +297,7 @@
     function windowNote(from, to) {
       var w = S.w, evs = S.ev.filter(function (e) { return e[0] >= from && e[0] < to; }).map(function (e) { return clock(e[0]) + ' ' + e[1]; });
       var s = 'Phút ' + clock(from) + ' tới ' + clock(to) + ': gửi được ' + fmt(w.sent) + ', lỗi ' + fmt(w.fail);
-      if (w.toRetry) s += ', sang retry ' + fmt(w.toRetry);
+      if (w.toRetry) s += ', sang hàng thử lại ' + fmt(w.toRetry);
       if (w.dead) s += ', hết lượt ' + fmt(w.dead);
       if (w.exp) s += ', quá hạn ' + fmt(w.exp);
       return s + '.' + (evs.length ? ' ' + evs.join(' ') : '');
@@ -321,7 +321,7 @@
           pl.tok('S', 'P', w.fail > w.sent ? 'lỗi' : 'gửi', w.fail > w.sent ? 'err' : 'msg');
         }
         var after = [];
-        if (w.toRetry) after.push(['S', 'RT', 'retry', 'err']);
+        if (w.toRetry) after.push(['S', 'RT', 'thử lại', 'err']);
         if (w.dead) after.push(['S', 'DLT', 'hết lượt', 'err']);
         if (after.length) pl.par(after);
         if (paused) pl.pulse('CB');
@@ -331,7 +331,7 @@
     });
     var btnRun = el('button', null, 'Chạy hết 10 phút'); btnRun.type = 'button';
     btnRun.addEventListener('click', function () { runWindow(END - S.t); S.lastNote = 'Chạy tới phút ' + clock(S.t) + '. ' + S.ev.map(function (e) { return clock(e[0]) + ' ' + e[1]; }).slice(-4).join(' '); draw(); });
-    var btnReplay = el('button', null, 'Replay DLT'); btnReplay.type = 'button';
+    var btnReplay = el('button', null, 'Gửi lại từ DLQ'); btnReplay.type = 'button';
     btnReplay.addEventListener('click', function () {
       var back = 0, keep = [];
       S.dlt.forEach(function (f) {
@@ -340,7 +340,7 @@
       });
       S.dlt = keep;
       var permLeft = keep.reduce(function (s, f) { return s + f.n; }, 0);
-      S.lastNote = 'Replay ' + fmt(back) + ' bản tin về topic chính, cùng notificationId, thang retry mới.' + (permLeft ? ' ' + fmt(permLeft) + ' tin số sai vẫn ở lại DLT: phải sửa dữ liệu, replay không giúp.' : '');
+      S.lastNote = 'Gửi lại ' + fmt(back) + ' tin về hàng chính, giữ nguyên mã tin, bắt đầu lượt thử mới.' + (permLeft ? ' ' + fmt(permLeft) + ' tin số sai vẫn ở lại DLQ: phải sửa dữ liệu, gửi lại không giúp.' : '');
       draw();
     });
     var btnReset = el('button', null, 'Làm lại'); btnReset.type = 'button';

@@ -408,11 +408,11 @@ Nguồn chọn cách nhận và mức chi tiết: chỉ kết quả cuối hay m
 
 Ba loại tin: OTP 20 tin mỗi giây qua SMS, giao dịch 300 qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định để thấy hình dạng vấn đề; hạn OTP rút còn 30 giây cho vừa 60 giây mô phỏng.
 
-1. Thiết kế A, retry tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
-2. Thiết kế A, đổi sang retry topic. OTP đỡ hơn không, và vì sao vẫn chậm?
-3. Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu tin vào DLT? Bấm "Replay DLT".
-4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng".
-5. Còn trùng hoặc mất ở dòng "timeout mơ hồ": thử ba cách xử lý và nói cái giá của từng cách.
+1. Thiết kế A, thử lại tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
+2. Thiết kế A, đổi sang hàng thử lại. OTP đỡ hơn không, và vì sao vẫn chậm?
+3. Thiết kế B, hàng thử lại, chạy tới giây 60. Bao nhiêu tin vào DLQ? Bấm "Gửi lại từ DLQ".
+4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng theo mã tin".
+5. Còn trùng hoặc mất vì "không rõ đã gửi chưa": thử ba cách xử lý và nói cái giá của từng cách.
 
 ### 12b. Retry và DLQ khi nhà mạng SMS lỗi
 
@@ -421,10 +421,10 @@ Kênh SMS có hai hàng, OTP và giao dịch, dùng chung hạn mức 40 tin m�
 1. Để mặc định, bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLQ, và vì sao?
 2. Đổi thang chờ sang cố định 10 giây. DLQ tăng bao nhiêu? Bao nhiêu phần trăm lần gửi là gửi lại?
 3. Bật ngắt mạch. DLQ còn lại là tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?
-4. Chuyển sang retry tại chỗ: hàng giao dịch đứng bao lâu, còn bao nhiêu tin chờ ở phút 10?
-5. Bỏ tick "Lỗi vĩnh viễn vào DLT ngay", rồi đổi "Hết lượt" sang "log rồi bỏ qua". Mỗi lần mất gì?
+4. Chuyển sang thử lại tại chỗ: hàng giao dịch đứng bao lâu, còn bao nhiêu tin chờ ở phút 10?
+5. Bỏ tick "Lỗi vĩnh viễn vào DLQ ngay", rồi đổi "Hết lượt" sang "chỉ ghi log rồi bỏ". Mỗi lần mất gì?
 6. Bỏ tick policy và bật ngắt mạch: bao nhiêu OTP tới tay khách khi đã hết hạn?
-7. Quay về mặc định, chạy hết, bấm "Replay DLT". Tin nào quay về, tin nào ở lại?
+7. Quay về mặc định, chạy hết, bấm "Gửi lại từ DLQ". Tin nào quay về, tin nào ở lại?
 
 Mô phỏng tổng hợp khác: [từ producer tới DB](../portal/index.md#sim-e2e) và [một ngày bảy sự cố](../portal/index.md#sim-e2e-day), cho phần "không mất, không trùng" bên trong hub.
 

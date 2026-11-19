@@ -402,11 +402,11 @@ Note over N: bỏ qua kết quả đã nhận rồi
 <h3>12a. Một topic chung hay tách theo ưu tiên</h3>
 <p>Ba loại tin: OTP 20 tin mỗi giây qua SMS, giao dịch 300 qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định để thấy hình dạng vấn đề; hạn OTP rút còn 30 giây cho vừa 60 giây mô phỏng.</p>
 <ol class="steps">
-<li>Thiết kế A, retry tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.</li>
-<li>Thiết kế A, đổi sang retry topic. OTP đỡ hơn không, và vì sao vẫn chậm?</li>
-<li>Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu tin vào DLT? Bấm "Replay DLT".</li>
-<li>Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng".</li>
-<li>Còn trùng hoặc mất ở dòng "timeout mơ hồ": thử ba cách xử lý và nói cái giá của từng cách.</li>
+<li>Thiết kế A, thử lại tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.</li>
+<li>Thiết kế A, đổi sang hàng thử lại. OTP đỡ hơn không, và vì sao vẫn chậm?</li>
+<li>Thiết kế B, hàng thử lại, chạy tới giây 60. Bao nhiêu tin vào DLQ? Bấm "Gửi lại từ DLQ".</li>
+<li>Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng theo mã tin".</li>
+<li>Còn trùng hoặc mất vì "không rõ đã gửi chưa": thử ba cách xử lý và nói cái giá của từng cách.</li>
 </ol>
 <div id="hsim"></div>
 <h3>12b. Retry và DLQ khi nhà mạng SMS lỗi</h3>
@@ -415,10 +415,10 @@ Note over N: bỏ qua kết quả đã nhận rồi
 <li>Để mặc định, bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLQ, và vì sao?</li>
 <li>Đổi thang chờ sang cố định 10 giây. DLQ tăng bao nhiêu? Bao nhiêu phần trăm lần gửi là gửi lại?</li>
 <li>Bật ngắt mạch. DLQ còn lại là tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?</li>
-<li>Chuyển sang retry tại chỗ: hàng giao dịch đứng bao lâu, còn bao nhiêu tin chờ ở phút 10?</li>
-<li>Bỏ tick "Lỗi vĩnh viễn vào DLT ngay", rồi đổi "Hết lượt" sang "log rồi bỏ qua". Mỗi lần mất gì?</li>
+<li>Chuyển sang thử lại tại chỗ: hàng giao dịch đứng bao lâu, còn bao nhiêu tin chờ ở phút 10?</li>
+<li>Bỏ tick "Lỗi vĩnh viễn vào DLQ ngay", rồi đổi "Hết lượt" sang "chỉ ghi log rồi bỏ". Mỗi lần mất gì?</li>
 <li>Bỏ tick policy và bật ngắt mạch: bao nhiêu OTP tới tay khách khi đã hết hạn?</li>
-<li>Quay về mặc định, chạy hết, bấm "Replay DLT". Tin nào quay về, tin nào ở lại?</li>
+<li>Quay về mặc định, chạy hết, bấm "Gửi lại từ DLQ". Tin nào quay về, tin nào ở lại?</li>
 </ol>
 <div id="rsim"></div>
 <p>Mô phỏng tổng hợp khác: <a href="../portal/index.html#sim-e2e">từ producer tới DB</a> và <a href="../portal/index.html#sim-e2e-day">một ngày bảy sự cố</a>, cho phần "không mất, không trùng" bên trong hub.</p>

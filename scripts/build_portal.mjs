@@ -180,18 +180,18 @@ const COMBO_SIMS = [
     lessons: ['0017-notification-hub'],
     md: `**Bối cảnh:** nhiều hệ thống nghiệp vụ của ngân hàng tự gửi thông báo, mỗi hệ thống tự nối với từng nhà cung cấp, không có trạng thái tập trung, không có chỗ chung để OTP đi trước khuyến mãi.
 
-**Đề:** một hub gửi thông báo tập trung, nhận từ API Connect (sync) và Kafka (async), gửi ra 5 kênh, hàng chục triệu bản tin mỗi ngày, không mất, không trùng. Ba ràng buộc: OTP không được chờ campaign; nhà cung cấp có thể sập; mất hay trùng đều là sự cố. Thiết kế đầy đủ ở [Bài 11](../lessons/0017-notification-hub.md).
+**Đề:** một hub gửi thông báo tập trung, nhận từ API Connect (gọi trực tiếp) và Kafka (qua hàng đợi), gửi ra 5 kênh, hàng chục triệu tin mỗi ngày, không mất, không trùng. Ba ràng buộc: OTP không được chờ campaign; nhà cung cấp có thể sập; mất hay trùng đều là sự cố. Thiết kế đầy đủ ở [Bài 11](../lessons/0017-notification-hub.md).
 
 \`\`\`mermaid
 flowchart TB
-subgraph A["A: một topic chung"]
+subgraph A["A: một hàng chung"]
 direction LR
-qa["Partition: C C C … C OTP"] --> wa["Worker<br/>đọc theo offset"] --> za["Zalo 1.000/giây"]
+qa["Hàng: C C C … C OTP"] --> wa["Worker<br/>đọc lần lượt"] --> za["Zalo 1.000 tin/giây"]
 end
-subgraph B["B: mỗi mức ưu tiên một topic"]
+subgraph B["B: mỗi mức ưu tiên một hàng"]
 direction LR
-qb1["notif.otp: OTP OTP"] --> wb1["Nhóm OTP"] --> sb["SMS"]
-qb2["notif.marketing: C C C … C"] --> wb2["Nhóm campaign"] --> zb["Zalo"]
+qb1["Hàng OTP: OTP OTP"] --> wb1["Nhóm OTP"] --> sb["SMS"]
+qb2["Hàng campaign: C C C … C"] --> wb2["Nhóm campaign"] --> zb["Zalo"]
 end
 A ~~~ B
 class qa bad
@@ -200,65 +200,65 @@ classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 \`\`\`
 
-Consumer đọc mỗi partition theo thứ tự offset, nên trong topic chung OTP đứng sau campaign; Zalo sập mà retry tại chỗ thì cả hàng đứng. Mô phỏng tính theo giây; OTP 20/giây qua SMS, giao dịch 300/giây qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định; hạn OTP rút còn 30 giây.
+Mỗi hàng được đọc lần lượt, nên trong hàng chung OTP đứng sau campaign; Zalo sập mà thử lại tại chỗ thì cả hàng đứng. Mô phỏng tính theo giây; OTP 20 tin mỗi giây qua SMS, giao dịch 300 qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định; hạn OTP rút còn 30 giây.
 
 \`\`\`mermaid
 sequenceDiagram
 participant S as Sender
 participant P as Nhà cung cấp
 participant U as Điện thoại khách
-S->>P: gửi bản tin
+S->>P: gửi tin
 P->>U: đã gửi tới khách
-P--xS: phản hồi mất, timeout
+P--xS: trả lời bị mất, hết giờ chờ
 Note over S: Đã gửi hay chưa?
 alt Gửi lại
 S->>P: khách nhận 2 tin
 else Không gửi lại
 Note over S: nếu chưa gửi thì mất
-else Tra trạng thái
-S->>P: hỏi theo notificationId
+else Hỏi nhà cung cấp
+S->>P: hỏi theo mã tin
 end
 \`\`\`
 
-Dòng "timeout mơ hồ" là giới hạn mà không cấu hình Kafka nào giải được: cần nhà cung cấp hợp tác.
+Dòng "không rõ đã gửi chưa" là giới hạn mà Kafka không giải được: cần nhà cung cấp hợp tác.
 
 **Thử:**
-1. Thiết kế A, retry tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
-2. Thiết kế A, retry topic: OTP đỡ hơn không, và vì sao vẫn chậm?
-3. Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu bản tin vào DLT? Bấm "Replay DLT".
-4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số bản tin trùng, rồi tick "Chống trùng".
-5. Thử ba cách xử lý timeout mơ hồ và nói cái giá của từng cách.`,
+1. Thiết kế A, thử lại tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
+2. Thiết kế A, đổi sang hàng thử lại: OTP đỡ hơn không, và vì sao vẫn chậm?
+3. Thiết kế B, hàng thử lại, chạy tới giây 60. Bao nhiêu tin vào DLQ? Bấm "Gửi lại từ DLQ".
+4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng theo mã tin".
+5. Thử ba cách xử lý khi không rõ đã gửi chưa, và nói cái giá của từng cách.`,
   },
   {
     id: 'sim-hub-retry', title: 'Notification hub: retry và DLQ khi nhà mạng SMS lỗi', api: 'RetrySim', script: 'retry-sim.js',
     lessons: ['0017-notification-hub'],
-    md: `**Bài toán:** kênh SMS của hub có hai làn: \`notif.sms.otp\` và \`notif.sms.tx\` (biến động số dư). Nhà mạng có lỗi lẻ tẻ, có lúc sập hẳn, và 2% tin số dư gửi tới số sai. Policy retry khác nhau theo loại bản tin và phân khúc khách: OTP 3 lần và hạn 60 giây; khách thường 5 lần; khách ưu tiên 8 lần. Yêu cầu: không mất, không để OTP hết hạn tới tay khách, và DLT phải xử lý được. Thiết kế ở [Bài 11](../lessons/0017-notification-hub.md), mục 8 và 9.
+    md: `**Bài toán:** kênh SMS của hub có hai hàng: OTP và giao dịch (biến động số dư). Nhà mạng có lỗi lẻ tẻ, có lúc sập hẳn, và 2% tin số dư gửi tới số sai. Số lần gửi lại khác nhau theo loại tin và phân khúc khách: OTP 3 lần và hạn 60 giây; khách thường 5 lần; khách ưu tiên 8 lần. Yêu cầu: không mất, không để OTP hết hạn tới tay khách, và DLQ phải xử lý được. Thiết kế ở [Bài 11](../lessons/0017-notification-hub.md), mục 8 và 9.
 
 \`\`\`mermaid
 flowchart TB
-R["Router<br/>gắn số lần tối đa và hạn chót vào bản tin"] --> M[("notif.sms.otp · notif.sms.tx")]
+R["Router<br/>gắn số lần tối đa và hạn chót vào tin"] --> M[("Hàng OTP · Hàng giao dịch")]
 M --> S["Sender SMS"]
-S -.->|"lỗi tạm thời, còn lượt"| L[("Retry topic<br/>chờ 10 → 20 → 40 → … giây")]
-L -.->|"tới hạn"| S
-S -->|"hết lượt, hoặc lỗi vĩnh viễn"| D[("DLT")]
-S -->|"quá hạn chót"| X["EXPIRED"]
-CB["Ngắt mạch"] -.->|"nhà mạng sập: pause"| S
+S -.->|"lỗi tạm thời, còn lượt"| L[("Hàng thử lại<br/>chờ 10 → 20 → 40 → … giây")]
+L -.->|"tới giờ"| S
+S -->|"hết lượt, hoặc lỗi vĩnh viễn"| D[("DLQ")]
+S -->|"quá hạn chót"| X["Hết hạn"]
+CB["Ngắt mạch"] -.->|"nhà mạng sập: tạm dừng"| S
 class M,L ok
 class D warn
 classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 \`\`\`
 
-Ba vấn đề cần thấy: retry tại chỗ làm cả làn đứng; retry không thay được ngắt mạch khi nhà mạng sập hẳn; DLT chỉ có ích khi có người sửa nguyên nhân rồi replay. Mô phỏng tính theo giây trong 10 phút; tải 10 tin mỗi giây, nhà mạng nhận 40 lời gọi mỗi giây; mọi con số là giả định.
+Ba vấn đề cần thấy: thử lại tại chỗ làm cả hàng đứng; thử lại không thay được ngắt mạch khi nhà mạng sập hẳn; DLQ chỉ có ích khi có người sửa nguyên nhân rồi gửi lại. Mô phỏng tính theo giây trong 10 phút; tải 10 tin mỗi giây, nhà mạng nhận 40 tin mỗi giây; mọi con số là giả định.
 
 **Thử:**
-1. Mặc định (retry topic, thang tăng dần, chưa có ngắt mạch), bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLT khi SMS sập 3 phút? Vì sao?
-2. Đổi thang chờ sang cố định 10 giây. DLT tăng bao nhiêu? Bao nhiêu phần trăm lời gọi là retry?
-3. Bật ngắt mạch. DLT còn lại là bản tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?
-4. Chuyển sang retry tại chỗ. Làn tx đứng bao lâu, và bao nhiêu tin còn chờ ở phút 10?
-5. Bỏ tick "Lỗi vĩnh viễn vào DLT ngay": bao nhiêu lời gọi phí? Rồi đổi "Hết lượt" sang "log rồi bỏ qua": mất bao nhiêu?
+1. Mặc định (hàng thử lại, chờ tăng dần, chưa có ngắt mạch), bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLQ khi SMS sập 3 phút? Vì sao?
+2. Đổi thang chờ sang cố định 10 giây. DLQ tăng bao nhiêu? Bao nhiêu phần trăm lần gửi là gửi lại?
+3. Bật ngắt mạch. DLQ còn lại là tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?
+4. Chuyển sang thử lại tại chỗ. Hàng giao dịch đứng bao lâu, và bao nhiêu tin còn chờ ở phút 10?
+5. Bỏ tick "Lỗi vĩnh viễn vào DLQ ngay": bao nhiêu lần gửi phí? Rồi đổi "Hết lượt" sang "chỉ ghi log rồi bỏ": mất bao nhiêu?
 6. Bỏ tick policy, bật ngắt mạch: bao nhiêu OTP tới tay khách khi đã hết hạn?
-7. Quay về mặc định, chạy hết, bấm "Replay DLT". Tin nào quay về, tin nào ở lại DLT?`,
+7. Quay về mặc định, chạy hết, bấm "Gửi lại từ DLQ". Tin nào quay về, tin nào ở lại DLQ?`,
   },
   {
     id: 'sim-e2e', title: 'Từ producer tới DB: sự cố ở đâu thì mất, trùng?', api: 'E2ESim', script: 'e2e-sim.js',

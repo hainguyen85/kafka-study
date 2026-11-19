@@ -44,16 +44,16 @@
       return s;
     }
     function check(text, on) { var l = el('label'), b = el('input'); b.type = 'checkbox'; b.checked = on; l.appendChild(b); l.appendChild(document.createTextNode(' ' + text)); return { lab: l, box: b }; }
-    var design = select('thiết kế topic', [['A', 'Thiết kế A: một topic chung, một nhóm worker'], ['B', 'Thiết kế B: mỗi mức ưu tiên một topic, một nhóm worker']]);
-    var retry = select('cách retry khi kênh lỗi', [['block', 'Kênh lỗi: retry tại chỗ (partition đứng chờ)'], ['topic', 'Kênh lỗi: retry topic rồi DLT (không chặn)']]);
-    var dedup = check('Chống trùng theo notificationId', false);
-    var amb = select('xử lý timeout mơ hồ', [['resend', 'Timeout mơ hồ: gửi lại'], ['drop', 'Timeout mơ hồ: bỏ, không gửi lại'], ['query', 'Timeout mơ hồ: hỏi trạng thái nhà cung cấp']]);
+    var design = select('thiết kế topic', [['A', 'Thiết kế A: một hàng chung, một nhóm worker'], ['B', 'Thiết kế B: mỗi mức ưu tiên một hàng, một nhóm worker']]);
+    var retry = select('cách thử lại khi kênh lỗi', [['block', 'Kênh lỗi: thử lại tại chỗ (cả hàng đứng chờ)'], ['topic', 'Kênh lỗi: sang hàng thử lại rồi DLQ (không chặn)']]);
+    var dedup = check('Chống trùng theo mã tin', false);
+    var amb = select('xử lý khi không rõ đã gửi chưa', [['resend', 'Không rõ đã gửi chưa: gửi lại'], ['drop', 'Không rõ đã gửi chưa: bỏ, không gửi lại'], ['query', 'Không rõ đã gửi chưa: hỏi nhà cung cấp']]);
     var ev = {
       camp: check('Campaign 100.000 bản tin (giây 5)', true),
       out: check('Zalo sập (giây 10 tới 30)', true),
-      restart: check('Worker restart (giây 20)', false),
-      client: check('Client gọi lại khi timeout (2% OTP)', false),
-      amb: check('SMS timeout mơ hồ (2%)', false)
+      restart: check('Worker khởi động lại (giây 20)', false),
+      client: check('Nguồn gửi lại vì không nhận được trả lời (2% OTP)', false),
+      amb: check('SMS hết giờ chờ, không rõ đã gửi chưa (2%)', false)
     };
     r1.appendChild(design); r1.appendChild(retry);
     r2.appendChild(dedup.lab); r2.appendChild(amb);
@@ -65,7 +65,7 @@
     [r1, r2, r3, r4, rb, stageHost, cap, table, ledger].forEach(function (x) { box.appendChild(x); });
     root.appendChild(box);
 
-    var st = FlowAnim.stage(stageHost, { width: 640, height: 216, label: 'Ingest, các topic, nhóm worker, ba nhà cung cấp SMS, Push, Zalo, topic retry và DLT.' });
+    var st = FlowAnim.stage(stageHost, { width: 640, height: 216, label: 'Ingest, các hàng, nhóm worker, ba nhà cung cấp SMS, Push, Zalo, hàng thử lại và DLQ.' });
     var pl = FlowAnim.player(box, st, cap);
     st.node('IN', { x: 6, y: 80, w: 112, h: 60 });
     st.node('TA', { x: 136, y: 80, w: 134, h: 60 });
@@ -159,10 +159,10 @@
       if (on('restart') && t === RESTART) {
         var re = 0;
         groups().forEach(function (g) { re += Math.min(S.sec[g] || 0, 500); });
-        if (dedup.box.checked) { S.blockedDup += re; notes.push('Worker restart: ' + fmt(re) + ' bản tin chưa commit được giao lại; trạng thái "đã gửi" chặn cả.'); }
-        else { S.dup.restart += re; notes.push('Worker restart: ' + fmt(re) + ' bản tin chưa commit được giao lại và gửi lần hai.'); }
+        if (dedup.box.checked) { S.blockedDup += re; notes.push('Worker khởi động lại: ' + fmt(re) + ' tin chưa đánh dấu "đã đọc" được giao lại; trạng thái "đã gửi" chặn cả.'); }
+        else { S.dup.restart += re; notes.push('Worker khởi động lại: ' + fmt(re) + ' tin chưa đánh dấu "đã đọc" được giao lại và gửi lần hai.'); }
       }
-      if (S.blocked.A) notes.push('Topic chung đứng chờ: bản tin đầu hàng ' + S.blocked.A + ', OTP phía sau cũng phải chờ.');
+      if (S.blocked.A) notes.push('Hàng chung đứng chờ: tin đầu hàng ' + S.blocked.A + ', OTP phía sau cũng phải chờ.');
       if (S.blocked.camp === 'Zalo sập') notes.push('Hàng campaign đứng chờ Zalo; OTP và giao dịch vẫn chạy.');
       S.t++;
       S.note = 'Giây ' + t + ': ' + (notes.length ? notes.join(' ') : 'gửi SMS ' + fmt(S.sent.otp) + ', Push ' + fmt(S.sent.tx) + ', Zalo ' + fmt(S.sent.camp) + ' (cộng dồn).');
@@ -196,21 +196,21 @@
       ['1', '2', '3'].forEach(function (i) { st.setNode('T' + i, { cls: A ? 'gone' : '' }); st.setNode('W' + i, { cls: A ? 'gone' : '' }); });
       function qn(g) { return S.q[g].reduce(function (s, co) { return s + co.n; }, 0); }
       if (A) {
-        st.setNode('TA', { title: 'notif (chung)', sub: 'chờ: ' + fmt(qn('A')), cls: S.blocked.A ? 'bad' : qn('A') > 1000 ? 'hot' : '' });
+        st.setNode('TA', { title: 'Hàng chung', sub: 'chờ: ' + fmt(qn('A')), cls: S.blocked.A ? 'bad' : qn('A') > 1000 ? 'hot' : '' });
         st.setNode('WA', { title: 'Worker', sub: S.blocked.A ? 'đứng chờ' : WCAP.A + '/s', cls: S.blocked.A ? 'bad' : 'client' });
       } else {
-        [['1', 'otp', 'notif.otp'], ['2', 'tx', 'notif.giao-dich'], ['3', 'camp', 'notif.campaign']].forEach(function (p) {
+        [['1', 'otp', 'Hàng OTP'], ['2', 'tx', 'Hàng giao dịch'], ['3', 'camp', 'Hàng campaign']].forEach(function (p) {
           var b = S.blocked[p[1]];
           st.setNode('T' + p[0], { title: p[2], sub: 'chờ: ' + fmt(qn(p[1])), cls: b === 'Zalo sập' ? 'bad' : qn(p[1]) > 1000 ? 'hot' : '' });
           st.setNode('W' + p[0], { title: 'Nhóm ' + { otp: 'OTP', tx: 'giao dịch', camp: 'campaign' }[p[1]], sub: b === 'Zalo sập' ? 'đứng chờ' : WCAP[p[1]] + '/s', cls: b === 'Zalo sập' ? 'bad' : 'client' });
         });
       }
-      st.setNode('SMS', { title: 'SMS', sub: 'đã gửi ' + fmt(S.sent.otp), cls: '' });
-      st.setNode('Push', { title: 'Push', sub: 'đã gửi ' + fmt(S.sent.tx), cls: '' });
-      st.setNode('Zalo', { title: 'Zalo', sub: down ? 'SẬP' : 'đã gửi ' + fmt(S.sent.camp), cls: down ? 'dead' : '' });
+      st.setNode('SMS', { title: 'SMS', sub: 'gửi ' + fmt(S.sent.otp), cls: '' });
+      st.setNode('Push', { title: 'Push', sub: 'gửi ' + fmt(S.sent.tx), cls: '' });
+      st.setNode('Zalo', { title: 'Zalo', sub: down ? 'SẬP' : 'gửi ' + fmt(S.sent.camp), cls: down ? 'dead' : '' });
       var rtn = S.rt.reduce(function (s, r) { return s + r.n; }, 0);
-      st.setNode('RT', { title: 'retry', sub: retry.value === 'topic' ? fmt(rtn) : 'không dùng', cls: retry.value === 'topic' ? (rtn ? 'hot' : '') : 'out' });
-      st.setNode('DLT', { title: 'DLT', sub: retry.value === 'topic' ? fmt(S.dlt) : 'không dùng', cls: S.dlt ? 'bad' : 'out' });
+      st.setNode('RT', { title: 'Thử lại', sub: retry.value === 'topic' ? fmt(rtn) : 'không dùng', cls: retry.value === 'topic' ? (rtn ? 'hot' : '') : 'out' });
+      st.setNode('DLT', { title: 'DLQ', sub: retry.value === 'topic' ? fmt(S.dlt) : 'không dùng', cls: S.dlt ? 'bad' : 'out' });
       st.unlinkAll('l');
       if (A) {
         st.linkTo('l0', 'IN', 'TA', 'on'); st.linkTo('l1', 'TA', 'WA', 'on');
@@ -227,11 +227,11 @@
       paint();
       table.innerHTML = '';
       var t = el('table'), h = el('tr');
-      ['Loại', 'Đã gửi', 'Đang chờ', 'Chờ lâu nhất', 'Quá hạn / DLT'].forEach(function (x) { h.appendChild(el('th', null, x)); });
+      ['Loại', 'Đã gửi', 'Đang chờ', 'Chờ lâu nhất', 'Quá hạn / DLQ'].forEach(function (x) { h.appendChild(el('th', null, x)); });
       t.appendChild(h);
       ['otp', 'tx', 'camp'].forEach(function (c) {
         var tr = el('tr'), w = maxWait(c);
-        var last = c === 'otp' ? fmt(expiredAll()) + ' quá hạn' : c === 'camp' ? (retry.value === 'topic' ? fmt(S.dlt) + ' ở DLT' : '0') : '0';
+        var last = c === 'otp' ? fmt(expiredAll()) + ' quá hạn' : c === 'camp' ? (retry.value === 'topic' ? fmt(S.dlt) + ' ở DLQ' : '0') : '0';
         [NAME[c] + ' → ' + CH[c], fmt(S.sent[c]), fmt(pending(c)), w + ' giây', last].forEach(function (x, i) {
           var td = el('td', null, x);
           if (c === 'otp' && i === 3 && w > SLA) td.style.color = 'var(--bad)';
@@ -246,14 +246,14 @@
       var exp = expiredAll(), bad = dupN >= 0.5 || S.lost >= 0.5 || otpW > SLA || exp > 0 || S.dlt > 0;
       var parts = [];
       parts.push('Giây ' + S.t + '/' + END + '. OTP chờ lâu nhất ' + otpW + ' giây (mục tiêu ≤ ' + SLA + ' giây' + (exp ? ', ' + fmt(exp) + ' OTP đã quá hạn ' + TTL + ' giây' : '') + ').');
-      parts.push('Gửi trùng: ' + fmt(dupN) + (dupN >= 0.5 ? ' (client gọi lại ' + fmt(S.dup.client) + ', restart ' + fmt(S.dup.restart) + ', timeout mơ hồ ' + fmt(S.dup.amb) + ')' : '') + '.');
-      parts.push('Mất: ' + fmt(S.lost) + (S.lost >= 0.5 ? ' (timeout mơ hồ, không gửi lại; một nửa thật ra chưa tới tay khách)' : '') + '.');
+      parts.push('Gửi trùng: ' + fmt(dupN) + (dupN >= 0.5 ? ' (nguồn gửi lại ' + fmt(S.dup.client) + ', worker khởi động lại ' + fmt(S.dup.restart) + ', không rõ đã gửi chưa ' + fmt(S.dup.amb) + ')' : '') + '.');
+      parts.push('Mất: ' + fmt(S.lost) + (S.lost >= 0.5 ? ' (không rõ đã gửi chưa, không gửi lại; một nửa thật ra chưa tới tay khách)' : '') + '.');
       if (S.blockedDup >= 0.5) parts.push('Chống trùng đã chặn ' + fmt(S.blockedDup) + ' bản tin lặp.');
-      if (S.resolved >= 0.5) parts.push('Hỏi trạng thái nhà cung cấp gỡ được ' + fmt(S.resolved) + ' timeout mơ hồ (chỉ làm được khi nhà cung cấp có API đó).');
-      if (S.dlt > 0) parts.push(fmt(S.dlt) + ' bản tin campaign nằm ở DLT: cần cảnh báo và replay khi Zalo lên lại.');
+      if (S.resolved >= 0.5) parts.push('Hỏi nhà cung cấp gỡ được ' + fmt(S.resolved) + ' tin không rõ đã gửi chưa (chỉ làm được khi nhà cung cấp cho tra trạng thái).');
+      if (S.dlt > 0) parts.push(fmt(S.dlt) + ' tin campaign nằm ở DLQ: cần cảnh báo và gửi lại khi Zalo lên lại.');
       ledger.className = 'note' + (bad ? ' bad' : '');
       ledger.textContent = (bad ? '✗ ' : '✓ ') + parts.join(' ');
-      if (!pl.busy) cap.textContent = S.t ? '› ' + S.note : 'Chọn thiết kế, cách retry, chống trùng và sự cố; đoán OTP chờ bao lâu, rồi bấm "+5 giây" hoặc "Chạy tới giây 60".';
+      if (!pl.busy) cap.textContent = S.t ? '› ' + S.note : 'Chọn thiết kế, cách thử lại, chống trùng và sự cố; đoán OTP chờ bao lâu, rồi bấm "+5 giây" hoặc "Chạy tới giây 60".';
       btnStep.disabled = btnRun.disabled = S.t >= END;
       btnReplay.disabled = !(S.dlt > 0);
     }
@@ -275,9 +275,9 @@
     btnStep.addEventListener('click', function () { pl.run(stepAnimated, draw); });
     var btnRun = el('button', null, 'Chạy tới giây 60'); btnRun.type = 'button';
     btnRun.addEventListener('click', function () { while (S.t < END) tick(); draw(); });
-    var btnReplay = el('button', null, 'Replay DLT'); btnReplay.type = 'button';
+    var btnReplay = el('button', null, 'Gửi lại từ DLQ'); btnReplay.type = 'button';
     btnReplay.addEventListener('click', function () {
-      S.q[qOf('camp')].push({ c: 'camp', t: S.t, n: S.dlt }); S.note = 'Replay ' + fmt(S.dlt) + ' bản tin từ DLT về hàng campaign.'; S.dlt = 0; draw(); cap.textContent = '› ' + S.note;
+      S.q[qOf('camp')].push({ c: 'camp', t: S.t, n: S.dlt }); S.note = 'Gửi lại ' + fmt(S.dlt) + ' tin từ DLQ về hàng campaign.'; S.dlt = 0; draw(); cap.textContent = '› ' + S.note;
     });
     var btnReset = el('button', null, 'Làm lại'); btnReset.type = 'button';
     btnReset.addEventListener('click', function () { fresh(); draw(); });
