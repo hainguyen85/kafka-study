@@ -22,7 +22,7 @@ Yêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất messa
 Ngoài bài học còn có bốn nhóm hỗ trợ ở thanh bên:
 
 - **Mô phỏng**: mỗi mô phỏng gắn với một bài (key → partition, độ bền, idempotent producer, commit offset, rebalance, DLT, exactly-once, quá tải, đọc lại, schema). Mô phỏng chạy theo mô hình mà tài liệu Kafka mô tả, không phải broker thật.
-- **Mô phỏng tổng hợp**: gộp nhiều bài vào một bài toán: notification hub (OTP, campaign, nhà cung cấp sập), và một sự kiện đi trọn đường từ producer tới DB (Bài 4 tới 7); chọn cấu hình, gây sự cố, xem sự kiện nào mất, trùng hay đúng.
+- **Mô phỏng tổng hợp**: gộp nhiều bài vào một bài toán: notification hub (OTP, campaign, nhà cung cấp sập; retry và DLQ khi nhà mạng SMS lỗi), và một sự kiện đi trọn đường từ producer tới DB (Bài 4 tới 7); chọn cấu hình, gây sự cố, xem sự kiện nào mất, trùng hay đúng.
 - **Tóm tắt ôn nhanh**: mỗi bài một đoạn tóm tắt bằng lời, khoảng một phút, để ôn trước buổi họp.
 - **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống, câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.
 

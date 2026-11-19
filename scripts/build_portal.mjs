@@ -230,6 +230,37 @@ Dòng "timeout mơ hồ" là giới hạn mà không cấu hình Kafka nào gi�
 5. Thử ba cách xử lý timeout mơ hồ và nói cái giá của từng cách.`,
   },
   {
+    id: 'sim-hub-retry', title: 'Notification hub: retry và DLQ khi nhà mạng SMS lỗi', api: 'RetrySim', script: 'retry-sim.js',
+    lessons: ['0017-notification-hub'],
+    md: `**Bài toán:** kênh SMS của hub có hai làn: \`notif.sms.otp\` và \`notif.sms.tx\` (biến động số dư). Nhà mạng có lỗi lẻ tẻ, có lúc sập hẳn, và 2% tin số dư gửi tới số sai. Policy retry khác nhau theo loại bản tin và phân khúc khách: OTP 3 lần và hạn 60 giây; khách thường 5 lần; khách ưu tiên 8 lần. Yêu cầu: không mất, không để OTP hết hạn tới tay khách, và DLT phải xử lý được. Thiết kế ở [Bài 11](../lessons/0017-notification-hub.md), mục 8 và 9.
+
+\`\`\`mermaid
+flowchart TB
+R["Router<br/>gắn số lần tối đa và hạn chót vào bản tin"] --> M[("notif.sms.otp · notif.sms.tx")]
+M --> S["Sender SMS"]
+S -.->|"lỗi tạm thời, còn lượt"| L[("Retry topic<br/>chờ 10 → 20 → 40 → … giây")]
+L -.->|"tới hạn"| S
+S -->|"hết lượt, hoặc lỗi vĩnh viễn"| D[("DLT")]
+S -->|"quá hạn chót"| X["EXPIRED"]
+CB["Ngắt mạch"] -.->|"nhà mạng sập: pause"| S
+class M,L ok
+class D warn
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+\`\`\`
+
+Ba vấn đề cần thấy: retry tại chỗ làm cả làn đứng; retry không thay được ngắt mạch khi nhà mạng sập hẳn; DLT chỉ có ích khi có người sửa nguyên nhân rồi replay. Mô phỏng tính theo giây trong 10 phút; tải 10 tin mỗi giây, nhà mạng nhận 40 lời gọi mỗi giây; mọi con số là giả định.
+
+**Thử:**
+1. Mặc định (retry topic, thang tăng dần, chưa có ngắt mạch), bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLT khi SMS sập 3 phút? Vì sao?
+2. Đổi thang chờ sang cố định 10 giây. DLT tăng bao nhiêu? Bao nhiêu phần trăm lời gọi là retry?
+3. Bật ngắt mạch. DLT còn lại là bản tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?
+4. Chuyển sang retry tại chỗ. Làn tx đứng bao lâu, và bao nhiêu tin còn chờ ở phút 10?
+5. Bỏ tick "Lỗi vĩnh viễn vào DLT ngay": bao nhiêu lời gọi phí? Rồi đổi "Hết lượt" sang "log rồi bỏ qua": mất bao nhiêu?
+6. Bỏ tick policy, bật ngắt mạch: bao nhiêu OTP tới tay khách khi đã hết hạn?
+7. Quay về mặc định, chạy hết, bấm "Replay DLT". Tin nào quay về, tin nào ở lại DLT?`,
+  },
+  {
     id: 'sim-e2e', title: 'Từ producer tới DB: sự cố ở đâu thì mất, trùng?', api: 'E2ESim', script: 'e2e-sim.js',
     opts: { mode: 'one' }, lessons: ['0009-final-design-test', '0013-core-80-20'],
     md: `${E2E_MODEL}

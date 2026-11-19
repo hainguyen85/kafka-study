@@ -4,19 +4,19 @@
 
 # Bài 11: Bài toán notification hub cho ngân hàng
 
-Một đề thiết kế hệ thống từ phỏng vấn, giải ở mức high level. Trọng tâm: Kafka đóng vai trò gì, mỗi vai trò giải quyết ràng buộc nào của đề, và năm chỗ hay bị đào sâu: chọn message queue, retry, DLQ, crash, trả kết quả về nguồn.
+Một đề thiết kế hệ thống từ phỏng vấn, giải ở mức high level. Trọng tâm: Kafka đóng vai trò gì, mỗi vai trò giải quyết vấn đề nào của đề, và năm chỗ hay bị hỏi sâu: message queue dùng ở đâu, retry, DLQ, crash, trả kết quả về nguồn.
 
 > **Liên quan tới mission** Mission yêu cầu: cho một bài toán mới, đề xuất topic, key, số partition, độ bền, cách xử lý trùng và lỗi, rồi nói được đánh đổi. Bài này áp dụng cả khoá vào một đề thật, có thêm hai thứ khoá học chưa gặp: làn ưu tiên và nhà cung cấp bên ngoài không kiểm soát được.
 
-**Thắng lợi của bài này:** bạn trình bày được thiết kế trong 5 phút: kiến trúc, năm vai trò của Kafka, cách giữ không mất và không trùng ở từng chặng, và giới hạn trung thực khi gọi nhà cung cấp bên ngoài. Bị hỏi sâu về queue, retry, DLQ, crash hay kết quả gửi, bạn trả lời được bằng cơ chế cụ thể.
+**Thắng lợi của bài này:** bạn trình bày được thiết kế trong 5 phút: kiến trúc, năm vai trò của Kafka, cách giữ không mất và không trùng ở từng chặng, và giới hạn khi gọi nhà cung cấp bên ngoài. Bị hỏi sâu về queue, retry, DLQ, crash hay kết quả gửi, bạn trả lời được bằng vài câu rõ ràng.
 
 ## 1. Bối cảnh, mục tiêu và ba ràng buộc
 
 **Bối cảnh.** Ngân hàng có nhiều hệ thống nghiệp vụ: core banking, thẻ, CRM, chống gian lận, marketing, mobile banking. Mỗi hệ thống tự gửi thông báo qua từng kênh. Hệ quả:
 
-- Mỗi hệ thống tự tích hợp với từng nhà cung cấp (Zalo, nhà mạng SMS, SMTP...): cùng một việc được làm nhiều lần.
-- Không có chỗ nào thấy tập trung trạng thái gửi, tỉ lệ thành công, chi phí theo kênh.
-- Throttle và ưu tiên không nhất quán: không có chỗ chung để bảo đảm OTP đi nhanh hơn khuyến mãi.
+- Mỗi hệ thống tự nối với từng nhà cung cấp (Zalo, nhà mạng SMS, máy chủ email...): cùng một việc làm nhiều lần.
+- Không có chỗ nào thấy tập trung tin nào đã gửi, tỉ lệ thành công, chi phí theo kênh.
+- Không có chỗ chung để giới hạn tốc độ gửi và bảo đảm OTP đi trước khuyến mãi.
 - Khó mở rộng khi thêm kênh mới, hoặc khi tải tăng đột biến: cuối tháng, sao kê, khuyến mãi, cảnh báo gian lận hàng loạt.
 
 ```mermaid
@@ -32,8 +32,8 @@ m1 --> p1
 end
 subgraph S["Sau: một cổng duy nhất"]
 direction LR
-src["Core · Thẻ · CRM · Chống gian lận<br/>Marketing · Mobile banking"] --> ac["IBM API Connect<br/>sync: giao dịch tức thời"]
-src --> kf["Kafka<br/>async: sự kiện, khối lượng lớn"]
+src["Core · Thẻ · CRM · Chống gian lận<br/>Marketing · Mobile banking"] --> ac["IBM API Connect<br/>gọi trực tiếp: giao dịch tức thời"]
+src --> kf["Kafka<br/>gửi qua hàng đợi: sự kiện, khối lượng lớn"]
 ac --> h["NotiHub"]
 kf --> h
 h --> ch["Zalo · Email · Telegram · Push · SMS"]
@@ -45,51 +45,55 @@ classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 
 *Trước: mỗi hệ thống nối thẳng tới từng nhà cung cấp. Sau: hai đường vào, năm đường ra, và mọi đường ra là hệ thống bên ngoài.*
 
-**Mục tiêu.** Mỗi vấn đề ở trên có một mục tiêu và một thành phần trả lời:
+**Mục tiêu.** Mỗi vấn đề ở trên có một mục tiêu và một phần của thiết kế trả lời:
 
-| Vấn đề hiện tại | Mục tiêu của hub | Thành phần trả lời |
+| Vấn đề hiện tại | Mục tiêu của hub | Phần trả lời |
 |---|---|---|
-| Mỗi hệ thống tự tích hợp từng nhà cung cấp | Một cổng duy nhất, hai đường vào: API Connect (sync) và Kafka (async) | Ingest API, Ingest consumer (mục 2) |
-| Không thấy trạng thái, tỉ lệ thành công, chi phí | Trạng thái gửi tập trung (delivered, failed, read khi kênh có) cho đối soát và báo cáo | `notif.status`, Status service, trả kết quả về nguồn (mục 11) |
-| Ưu tiên và throttle không nhất quán | Đúng kênh, đúng người, đúng ưu tiên; template và cá nhân hoá nội dung | Topic theo ưu tiên (mục 4), Router, hạn mức ở Sender |
-| Khó mở rộng khi thêm kênh hay tải tăng | Hàng chục triệu bản tin mỗi ngày, hàng nghìn TPS ở đỉnh, không mất, chịu được kênh sập | Kafka làm lớp đệm (mục 3); kênh mới là topic và sender mới; retry, DLT (mục 8, 9) |
+| Mỗi hệ thống tự nối từng nhà cung cấp | Một cổng duy nhất, hai đường vào: API Connect và Kafka | Ingest (mục 2) |
+| Không thấy trạng thái, tỉ lệ thành công, chi phí | Trạng thái gửi tập trung (đã giao, thất bại, đã đọc khi kênh có) cho đối soát và báo cáo | Luồng trạng thái, trả kết quả về nguồn (mục 11) |
+| Ưu tiên và tốc độ gửi không nhất quán | Đúng kênh, đúng người, đúng ưu tiên; nội dung theo mẫu và cá nhân hoá | Hàng theo ưu tiên (mục 4), Router, hạn mức ở Sender |
+| Khó mở rộng khi thêm kênh hay tải tăng | Hàng chục triệu bản tin mỗi ngày, hàng nghìn tin mỗi giây lúc đỉnh, không mất, chịu được kênh sập | Kafka làm lớp đệm (mục 3); kênh mới là thêm một hàng và một sender; retry, DLQ (mục 8, 9) |
 
-> **Đề** Thiết kế high level hub gửi thông báo tập trung (NotiHub): nhận từ IBM API Connect (sync) và Kafka (async), gửi ra 5 kênh (Zalo, Email, Telegram, Push, SMS), chịu hàng chục triệu bản tin mỗi ngày và hàng nghìn TPS ở đỉnh, không được mất hay gửi trùng bản tin, có trạng thái gửi tập trung. Bài này tạm chưa xét phần tuân thủ bảo vệ dữ liệu cá nhân.
+> Thiết kế high level hub gửi thông báo tập trung (NotiHub): nhận từ IBM API Connect (gọi trực tiếp) và Kafka (qua hàng đợi), gửi ra 5 kênh (Zalo, Email, Telegram, Push, SMS), chịu hàng chục triệu bản tin mỗi ngày và hàng nghìn tin mỗi giây lúc đỉnh, không được mất hay gửi trùng, có trạng thái gửi tập trung. Bài này tạm chưa xét phần tuân thủ bảo vệ dữ liệu cá nhân.
 
 Ba ràng buộc chi phối mọi quyết định phía sau:
 
-1. **Tải rất cao và rất lệch.** Một campaign hay đợt sao kê cuối tháng có thể đẩy cả triệu bản tin trong vài phút, trong khi OTP ít nhưng phải tới trong vài giây. OTP không được chờ campaign.
+1. **Tải rất cao và rất lệch.** Một campaign hay đợt sao kê có thể đẩy cả triệu tin trong vài phút, trong khi OTP ít nhưng phải tới trong vài giây. OTP không được chờ campaign.
 2. **Nhà cung cấp bên ngoài không kiểm soát được.** Mỗi kênh có hạn mức gửi riêng và có thể chậm hoặc sập bất kỳ lúc nào.
-3. **Đây là ngân hàng.** Mất bản tin (OTP, báo trừ tiền) hay gửi trùng (hai tin báo trừ tiền) đều là sự cố nghiêm trọng.
+3. **Đây là ngân hàng.** Mất tin (OTP, báo trừ tiền) hay gửi trùng (hai tin báo trừ tiền) đều là sự cố nghiêm trọng.
 
-**Hỏi lại trước khi vẽ** (trong phỏng vấn, nêu giả định nếu không được trả lời): tải đỉnh của từng loại bản tin; OTP phải tới trong bao lâu và hết hạn sau bao lâu; nhà cung cấp nào có khoá idempotency, API tra trạng thái, callback báo đã giao; loại bản tin nào cần đúng thứ tự theo khách hàng; policy retry do ai quyết và khác nhau theo những gì; nguồn muốn nhận kết quả gửi theo cách nào; phải lưu vết bao lâu để audit.
+**Làm rõ yêu cầu** (không được trả lời thì nêu giả định):
 
-Sau phần trình bày chính, đề này thường bị đào sâu vào năm chỗ, mỗi chỗ một mục: chọn message queue (mục 7), retry (mục 8), DLQ (mục 9), crash (mục 10), trả kết quả về nguồn (mục 11). Mỗi mục trả lời ở mức system design: vấn đề, thiết kế, Kafka làm gì trong thiết kế đó, và đánh đổi. Chi tiết hiện thực chỉ cần nhắc tên pattern hoặc annotation.
+- Tải đỉnh của từng loại tin.
+- OTP phải tới trong bao lâu, hết hạn sau bao lâu.
+- Nhà cung cấp có chống gửi trùng, có cho tra trạng thái, có báo đã giao không.
+- Loại tin nào cần đúng thứ tự.
+- Số lần gửi lại khác nhau theo gì.
+- Nguồn muốn nhận kết quả gửi theo cách nào.
+- Lưu vết bao lâu để audit.
+
+Sau phần trình bày chính, đề này thường bị hỏi sâu vào năm chỗ, mỗi chỗ một mục: message queue dùng ở đâu (mục 7), retry (mục 8), DLQ (mục 9), crash (mục 10), trả kết quả về nguồn (mục 11). Mỗi mục trả lời ở mức thiết kế: vấn đề, cách làm, Kafka giúp gì, và đánh đổi.
 
 ## 2. Kiến trúc tổng thể
 
 ```mermaid
 flowchart TB
-subgraph IN["Đường vào"]
-direction LR
-API["Ingest API<br/>sync, sau API Connect"]
-ING["Ingest consumer<br/>async, đọc Kafka nguồn"]
-CAMP["Campaign service<br/>chia lô, tự điều tốc"]
-end
-IN --> PRI[("Topic theo ưu tiên<br/>notif.otp · notif.transactional · notif.marketing")]
-PRI --> R["Router<br/>template, sở thích khách, chọn kênh"]
-R --> CHT[("Topic theo kênh và ưu tiên<br/>notif.sms.otp · notif.zalo.bulk · ...")]
-CHT --> SND["Sender mỗi kênh<br/>hạn mức, circuit breaker"]
-SND -.->|"lỗi tạm thời"| RT[("retry-N, rồi DLT")]
+API["Ingest API<br/>nhận qua API Connect"] --> PRI[("Hàng theo ưu tiên<br/>notif.otp · notif.transactional · notif.marketing")]
+ING["Ingest consumer<br/>nhận từ Kafka của nguồn"] --> PRI
+CAMP["Campaign service<br/>chia lô, tự điều tốc"] --> PRI
+PRI --> R["Router<br/>dựng nội dung, chọn kênh"]
+R --> CHT[("Hàng theo kênh<br/>notif.sms.otp · notif.zalo.bulk · ...")]
+CHT --> SND["Sender mỗi kênh<br/>hạn mức, ngắt mạch"]
+SND -.->|"lỗi tạm thời"| RT[("Hàng thử lại, rồi DLQ")]
 RT -.-> SND
-SND --- DB[("DB trạng thái<br/>notificationId + kênh")]
+SND --- DB[("DB trạng thái")]
 SND --> PROV["Zalo · Email · Telegram · Push · SMS"]
 SND --> ST[("notif.status")]
 PROV -.->|"báo đã giao, đã đọc"| CR["Callback receiver"]
 CR --> ST
-ST --> STS["Status service<br/>DB trạng thái, đối soát, fallback"]
+ST --> STS["Status service<br/>tra cứu, đối soát, kênh dự phòng"]
 STS -.->|"Push lỗi thì gửi SMS"| R
-ST --> RD["Result dispatcher<br/>webhook · notif.result.*"]
+ST --> RD["Result dispatcher<br/>trả kết quả"]
 RD -.->|"kết quả gửi"| SRC["Hệ thống nguồn"]
 class PRI,CHT,ST ok
 class RT warn
@@ -97,15 +101,14 @@ classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 ```
 
-*Màu xanh là topic Kafka. Mỗi mũi tên vào hoặc ra một topic là một chỗ hai bên tách rời nhau về thời gian và tốc độ.*
+*Màu xanh là topic Kafka (hàng đợi). Mỗi mũi tên vào hoặc ra một hàng là một chỗ hai bên không phải chờ nhau.*
 
-- **Ingest** nhận từ hai đường, kiểm tra, gán (hoặc nhận) `notificationId` làm khoá idempotency, rồi ghi vào topic theo mức ưu tiên. Đường sync trả `202 Accepted` khi Kafka đã ack: "đã nhận bền", không phải "đã giao tới khách".
-- **Router** đọc từng topic ưu tiên bằng một consumer group riêng, dựng nội dung, chọn kênh theo loại bản tin và sở thích khách, rồi ghi sang topic của kênh.
-- **Sender**: mỗi kênh một service, mỗi topic kênh một consumer group. Sender giữ hạn mức gọi nhà cung cấp, ngắt mạch khi nhà cung cấp sập, ghi trạng thái gửi vào DB và phát sự kiện trạng thái.
-- **Router** cũng là chỗ dựng nội dung từ template và cá nhân hoá, nên các hệ thống nguồn chỉ gửi loại bản tin và dữ liệu, không gửi văn bản đã dựng.
-- **Callback receiver** nhận báo cáo giao từ nhà cung cấp, tra ra `notificationId` từ mã bản tin của nhà cung cấp, và ghi vào `notif.status`.
-- **Status service** gom trạng thái từ sender và callback: phục vụ tra cứu, đối soát, báo cáo tỉ lệ thành công và chi phí theo kênh, và gửi lại qua kênh dự phòng.
-- **Result dispatcher** trả kết quả gửi về hệ thống nguồn bằng webhook hoặc topic kết quả (mục 11).
+- **Ingest** nhận tin từ hai đường, gắn cho mỗi tin một mã riêng (`notificationId`), rồi đưa vào hàng theo mức ưu tiên. Đường gọi trực tiếp được trả lời "đã nhận" ngay khi Kafka lưu xong, không chờ gửi tới khách.
+- **Router** lấy tin từ từng hàng ưu tiên, dựng nội dung từ mẫu, chọn kênh theo loại tin và sở thích khách, rồi đưa sang hàng của kênh. Nhờ vậy hệ thống nguồn chỉ gửi loại tin và dữ liệu, không gửi văn bản đã dựng.
+- **Sender**: mỗi kênh một service. Sender giữ tốc độ gửi trong hạn mức của nhà cung cấp, tạm dừng khi nhà cung cấp sập, và ghi lại tin nào đã gửi.
+- **Callback receiver** nhận báo "đã giao, đã đọc" từ nhà cung cấp và ghi vào luồng trạng thái.
+- **Status service** gom trạng thái để tra cứu, đối soát, báo cáo tỉ lệ thành công và chi phí, và gửi lại qua kênh dự phòng.
+- **Result dispatcher** trả kết quả gửi về hệ thống nguồn (mục 11).
 
 ## 3. Kafka đóng vai trò gì
 
@@ -113,23 +116,23 @@ Năm vai trò, mỗi vai trò trả lời một ràng buộc. Đây là phần n
 
 | Vai trò | Ràng buộc | Cơ chế | Bài |
 |---|---|---|---|
-| **Lớp đệm bền** giữa người gửi và nhà cung cấp | (1), (2) | Bản tin nằm trong log tới hết retention, mỗi consumer group tự giữ vị trí đọc. Đỉnh tải hay nhà cung cấp sập chỉ làm lag tăng, không làm mất. Retention phải dài hơn sự cố dài nhất cần chịu được. | [1](0001-kafka-big-picture.md), [8b](0014-throughput-latency.md), [8c](0015-replay-retention.md) |
-| **Làn ưu tiên** | (1) | Consumer đọc mỗi partition tuần tự theo offset [[KafkaConsumer]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html), nên trong một partition không có chuyện bản tin sau vượt bản tin trước. Muốn OTP không chờ campaign thì tách topic và consumer group, không phải đặt "độ ưu tiên" cho message. | [2](0002-key-partition-offset.md), [8](0008-topic-design.md) |
-| **Cách ly nhà cung cấp** | (2) | Mỗi kênh một topic và một consumer group: Zalo sập không chặn SMS. Khi ngắt mạch, sender `pause()` container: consumer vẫn `poll()` nên không bị đá khỏi group. Lỗi tạm thời đi sang retry topic có mốc thời gian, hết lượt thì DLT [[Spring: retry topic]](https://docs.spring.io/spring-kafka/reference/retrytopic/how-the-pattern-works.html). | [6](0006-error-handling-dlt.md), [8b](0014-throughput-latency.md) |
-| **Không mất** | (3) | RF=3, `min.insync.replicas=2`, `acks=all`; Ingest chỉ trả 202 sau ack; consumer commit sau khi xử lý xong; DLT có cảnh báo và quy trình replay. | [4](0004-producer-durability.md), [5](0005-consumer-offset-commit.md), [6](0006-error-handling-dlt.md) |
-| **Không trùng**, trong giới hạn có thể | (3) | Kafka cho at-least-once, nên trùng là bình thường. Chống trùng bằng `notificationId`: ở Ingest (client gọi lại) và trước khi gọi nhà cung cấp (trạng thái theo bản tin và kênh). Transaction Kafka không bao được lời gọi ra hệ thống ngoài. | [4b](0010-idempotent-producer.md), [5c](0012-delivery-semantics.md), [7](0007-idempotent-consumer-transactions.md) |
+| **Lớp đệm bền** giữa người gửi và nhà cung cấp | (1), (2) | Tin được lưu lại; bên nhận đọc theo tốc độ của mình. Tải dồn hay nhà cung cấp sập chỉ làm hàng chờ dài ra, không mất. | [1](0001-kafka-big-picture.md), [8b](0014-throughput-latency.md), [8c](0015-replay-retention.md) |
+| **Làn ưu tiên** | (1) | Mỗi hàng đọc theo thứ tự, không ai chen ngang. OTP không chờ campaign khi có hàng riêng. | [2](0002-key-partition-offset.md), [8](0008-topic-design.md) |
+| **Cách ly nhà cung cấp** | (2) | Mỗi kênh một hàng riêng. Zalo sập thì tạm dừng hàng Zalo, SMS vẫn chạy. Lỗi tạm thời thì xếp sang hàng thử lại, hết lượt thì vào DLQ. | [6](0006-error-handling-dlt.md), [8b](0014-throughput-latency.md) |
+| **Không mất** | (3) | Lưu nhiều bản sao rồi mới báo "đã nhận"; xử lý xong mới đánh dấu "đã đọc" (commit). | [4](0004-producer-durability.md), [5](0005-consumer-offset-commit.md) |
+| **Không trùng**, trong giới hạn có thể | (3) | Kafka có thể giao lại một tin, nên mỗi tin mang một mã riêng; gặp mã đã gửi thì bỏ qua. | [4b](0010-idempotent-producer.md), [7](0007-idempotent-consumer-transactions.md) |
 
-Thêm một vai trò phụ: `notif.status` là luồng sự kiện trạng thái mà nhiều bên cùng đọc (DB trạng thái, báo cáo, đối soát chi phí, trả kết quả về nguồn); bản tin nằm ở DLT hay cần gửi lại sau sự cố thì đọc lại được từ log ([Bài 8c](0015-replay-retention.md)).
+Thêm hai vai trò phụ: một luồng trạng thái (`notif.status`) cho nhiều bên cùng đọc (tra cứu, báo cáo, trả kết quả về nguồn); và đọc lại tin cũ khi cần gửi lại sau sự cố ([Bài 8c](0015-replay-retention.md)).
 
-## 4. Vì sao phải tách topic: hình dung vấn đề
+## 4. Vì sao phải tách topic
 
 ```mermaid
 flowchart TB
-subgraph A["A: một topic chung"]
+subgraph A["A: một hàng chung"]
 direction LR
-qa["Partition: C C C … C OTP"] --> wa["Worker<br/>đọc theo offset"] --> za["Zalo 1.000/giây"]
+qa["Hàng: C C C … C OTP"] --> wa["Worker<br/>đọc lần lượt"] --> za["Zalo 1.000 tin/giây"]
 end
-subgraph B["B: mỗi mức ưu tiên một topic"]
+subgraph B["B: mỗi mức ưu tiên một hàng"]
 direction LR
 qb1["notif.otp: OTP OTP"] --> wb1["Nhóm OTP"] --> sb["SMS"]
 qb2["notif.marketing: C C C … C"] --> wb2["Nhóm campaign"] --> zb["Zalo"]
@@ -141,24 +144,23 @@ classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 ```
 
-*A: OTP đứng sau 100.000 bản tin campaign, và Zalo chỉ nhận 1.000 bản tin mỗi giây. B: hai hàng độc lập.*
+*A: OTP đứng sau 100.000 tin campaign, và Zalo chỉ nhận 1.000 tin mỗi giây. B: hai hàng độc lập.*
 
-Thêm consumer không cứu được thiết kế A: số consumer chạy song song tối đa bằng số partition, và campaign lấp mọi partition. Muốn OTP có hàng riêng thì phải tách topic. Thứ tự đọc giữa hai topic do consumer quyết định; Kafka cho phép `pause()` một số partition để tập trung đọc partition khác [[KafkaConsumer: Consumption Flow Control]](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html), nhưng hai consumer group riêng đơn giản và dễ vận hành hơn.
+Mỗi hàng được đọc lần lượt, nên trong hàng chung OTP phải chờ hết campaign phía trước; thêm người đọc cũng không giúp. Cách sửa: mỗi mức ưu tiên một hàng (topic) và một nhóm người đọc (consumer group) riêng.
 
 ### Thiết kế topic
 
-| Topic | Key | Lý do |
+| Topic | Chia theo | Lý do |
 |---|---|---|
-| `notif.otp` | `notificationId` | OTP không cần thứ tự giữa các bản tin; key ngẫu nhiên chia đều partition. |
-| `notif.transactional` | mã khách hàng | Hai tin biến động số dư của một khách phải đến đúng thứ tự. |
-| `notif.marketing` | `notificationId` | Khối lượng lớn, không cần thứ tự; nhiều partition, retention dài hơn để gửi dần. |
-| `notif.<kênh>.<ưu tiên>` | giữ key của topic nguồn | Cách ly theo kênh và theo ưu tiên. Retry topic và DLT do team vận hành tạo theo tài liệu thiết kế, không để ứng dụng tự tạo ([Bài 8](0008-topic-design.md)). |
-| `notif.status` | `notificationId` | Mọi trạng thái của một bản tin vào cùng partition, đúng thứ tự. |
-| `notif.result.<nguồn>` | `notificationId` | Kết quả gửi cho nguồn dùng Kafka. Mỗi nguồn một topic: phân quyền theo nguồn, và nguồn đọc chậm không làm chậm nguồn khác (mục 11). |
+| `notif.otp` | mã tin | Không cần thứ tự, chia đều. |
+| `notif.transactional` | mã khách hàng | Tin của một khách đến đúng thứ tự. |
+| `notif.marketing` | mã tin | Khối lượng lớn, gửi dần. |
+| `notif.<kênh>.<ưu tiên>` | như hàng trước | Cách ly theo kênh và ưu tiên. |
+| `notif.status` | mã tin | Trạng thái của một tin đúng thứ tự. |
+| `notif.result.<nguồn>` | mã tin | Kết quả gửi cho từng nguồn (mục 11). |
 
-**Chia làn theo độ khẩn, không theo phòng ban.** Sao kê cuối tháng là khối lượng lớn nhưng không khẩn: đi làn `notif.marketing` (có thể đặt tên là `notif.bulk` cho rõ). Cảnh báo gian lận hàng loạt thì khẩn: đi làn `notif.transactional`, nhưng do hệ thống nguồn gửi dồn, nên Ingest giới hạn tốc độ theo từng nguồn để một nguồn không lấp cả làn.
-
-**Số partition và nút cổ chai.** 30 triệu bản tin mỗi ngày là khoảng 350 bản tin mỗi giây trung bình; đỉnh vài nghìn TPS vẫn nhỏ với một cụm Kafka. Nút cổ chai là phía gửi: hạn mức của nhà cung cấp, và thời gian mỗi lời gọi API. Ví dụ với số giả định: mỗi lời gọi mất 100 ms và gửi tuần tự thì một luồng gửi khoảng 10 bản tin mỗi giây; muốn 1.000 bản tin mỗi giây cho một kênh thì cần khoảng 100 lời gọi song song, bằng nhiều partition hoặc gửi song song bên trong consumer. Số partition tính theo số luồng gửi cần lúc đỉnh tải, không theo dung lượng của Kafka ([Bài 8b](0014-throughput-latency.md)).
+- **Chia làn theo độ khẩn, không theo phòng ban:** sao kê đi làn khối lượng lớn; cảnh báo gian lận đi làn giao dịch, có giới hạn tốc độ theo nguồn.
+- **Nút cổ chai không phải Kafka:** 30 triệu tin mỗi ngày chỉ khoảng 350 tin mỗi giây. Giới hạn là hạn mức và tốc độ của nhà cung cấp, nên số partition tính theo số tin cần gửi song song lúc đỉnh ([Bài 8b](0014-throughput-latency.md)).
 
 ## 5. Luồng OTP, từ API Connect tới điện thoại
 
@@ -167,232 +169,202 @@ sequenceDiagram
 participant C as App qua API Connect
 participant I as Ingest API
 participant K as Kafka
-participant S as SMS sender
+participant S as Sender SMS
 participant D as DB trạng thái
-participant P as Nhà cung cấp SMS
-C->>I: POST bản tin OTP, kèm notificationId
-I->>D: INSERT notificationId (UNIQUE)
-I->>K: produce notif.otp, acks=all
-K-->>I: ack (ít nhất 2 bản sao)
-I-->>C: 202 Accepted: đã nhận bền
-K->>S: poll (qua Router, rút gọn)
+participant P as Nhà mạng SMS
+C->>I: gửi OTP, kèm mã tin
+I->>D: lưu mã tin
+I->>K: đưa vào hàng OTP
+K-->>I: đã lưu đủ bản sao
+I-->>C: "đã nhận"
+K->>S: đọc tin (qua Router, rút gọn)
 S->>S: OTP còn hạn không?
-S->>D: (notificationId, SMS) = SENDING
-S->>P: gửi, kèm khoá idempotency nếu có
-P-->>S: 200 OK
-S->>D: = SENT
-S->>K: commit offset
-P--)S: callback: đã giao (sau đó)
+S->>D: đánh dấu ĐANG GỬI
+S->>P: gửi
+P-->>S: OK
+S->>D: đánh dấu ĐÃ GỬI
+S->>K: đánh dấu "đã đọc" (commit)
+P--)S: báo đã tới máy khách (sau đó)
 ```
 
-*Hai chỗ ghi bền trước khi trả lời: DB (chống client gọi lại) và Kafka (chống mất). Commit offset là việc cuối cùng.*
+*Lưu ở hai chỗ trước khi trả lời: DB (để nhận ra tin gửi lại) và Kafka (để không mất). Đánh dấu "đã đọc" là việc cuối cùng.*
 
-- Client timeout rồi gọi lại cùng `notificationId`: `INSERT` vi phạm UNIQUE. Bản tin đã lên Kafka thì trả lại 202; chưa lên (Ingest chết giữa hai bước) thì gửi lên lần nữa.
+- App không nhận được trả lời nên gửi lại cùng mã tin: hub nhận ra mã đã có, không tạo tin thứ hai.
 - Sender kiểm hạn trước khi gửi: OTP đã hết hạn thì không gửi nữa, đánh dấu EXPIRED. Gửi một OTP hết hạn chỉ làm khách bối rối.
-- Sender crash sau khi gửi, trước khi commit: bản tin được giao lại, thấy trạng thái SENT nên bỏ qua ([Bài 7](0007-idempotent-consumer-transactions.md)).
+- Sender chết sau khi gửi, trước khi đánh dấu "đã đọc": tin được giao lại, sender thấy ĐÃ GỬI nên bỏ qua ([Bài 7](0007-idempotent-consumer-transactions.md)).
 
-## 6. Không mất, không trùng: từng chặng, và giới hạn trung thực
+## 6. Không mất, không trùng: từng chặng, và giới hạn
 
-| Chặng | Nguy cơ | Chặn bằng |
+| Chặng | Nguy cơ | Cách chặn |
 |---|---|---|
-| Client → Ingest | Timeout, client gọi lại | `notificationId` UNIQUE ở Ingest |
-| Ingest → Kafka | Broker chết sau khi ack | RF=3, `min.insync.replicas=2`, `acks=all`; trả 202 sau ack |
-| Kafka → Router → topic kênh | Crash giữa đọc và ghi | Commit sau khi ghi xong; hoặc transaction Kafka cho đoạn đọc-xử lý-ghi ([Bài 5c](0012-delivery-semantics.md)) |
-| Topic kênh → Sender | Crash, rebalance khi deploy | Commit sau khi gửi; trạng thái theo (`notificationId`, kênh) |
-| Sender → nhà cung cấp | Sập, chậm, lỗi tạm thời | Hạn mức, ngắt mạch và `pause()`, retry topic, DLT có cảnh báo, kênh dự phòng |
-| Sender → nhà cung cấp | **Timeout mơ hồ**: không biết đã gửi chưa | Xem dưới đây: không có cấu hình Kafka nào giải được |
+| Nguồn → Ingest | Nguồn không nhận được trả lời, gửi lại | Mã tin: gặp mã đã có thì không tạo tin mới |
+| Ingest → Kafka | Máy chủ Kafka chết ngay sau khi nhận | Lưu nhiều bản sao rồi mới trả lời "đã nhận" |
+| Kafka → Router → hàng kênh | Router chết giữa chừng | Xử lý xong mới đánh dấu "đã đọc"; tin bị đưa sang hai lần thì Sender lọc |
+| Hàng kênh → Sender | Sender chết, hay deploy lại | Đánh dấu "đã đọc" sau khi gửi; ghi lại tin nào đã gửi |
+| Sender → nhà cung cấp | Sập, chậm, lỗi tạm thời | Giữ trong hạn mức, ngắt mạch, hàng thử lại, DLQ, kênh dự phòng |
+| Sender → nhà cung cấp | **Hết giờ chờ mà không rõ kết quả**: không biết đã gửi chưa | Xem dưới đây: Kafka không giải được chỗ này |
 
 ```mermaid
 sequenceDiagram
 participant S as Sender
 participant P as Nhà cung cấp
 participant U as Điện thoại khách
-S->>P: gửi bản tin
+S->>P: gửi tin
 P->>U: đã gửi tới khách
-P--xS: phản hồi mất, timeout
+P--xS: trả lời bị mất, hết giờ chờ
 Note over S: Đã gửi hay chưa?
 alt Gửi lại
 S->>P: gửi lần hai: khách nhận 2 tin
 else Không gửi lại
 Note over S: nếu thật ra chưa gửi thì mất
-else Tra trạng thái hoặc khoá idempotency
-S->>P: hỏi theo notificationId rồi mới quyết
+else Hỏi nhà cung cấp
+S->>P: hỏi theo mã tin rồi mới quyết
 end
 ```
 
-*Kafka chỉ giữ được vị trí đọc của mình. Muốn đúng một lần ra hệ thống ngoài thì hệ thống ngoài phải hợp tác.*
+*Kafka chỉ nhớ được mình đã đọc tới đâu. Muốn gửi đúng một lần ra bên ngoài thì bên ngoài phải hợp tác.*
 
-Tài liệu Kafka nói rõ: khi ghi ra hệ thống ngoài, giới hạn nằm ở việc phối hợp vị trí đọc của consumer với thứ thực sự đã được lưu ở đầu ra [[Design: Message Delivery Semantics]](https://kafka.apache.org/44/design/design/). Vì vậy câu trả lời trung thực cho "không mất, không trùng" là:
+Tài liệu Kafka cũng nói: khi ghi ra hệ thống bên ngoài, khó khăn nằm ở việc khớp "đã đọc tới đâu" với "bên ngoài đã thật sự nhận gì" [[Design: Message Delivery Semantics]](https://kafka.apache.org/44/design/design/). Vì vậy câu trả lời thật cho "không mất, không trùng" là:
 
-- Trong hub (Ingest, Kafka, Router, Sender, DB): không mất và không trùng là làm được bằng các bài đã học.
-- Ở chặng cuối: chỉ làm được khi nhà cung cấp có khoá idempotency hoặc API tra trạng thái. Đó là tiêu chí khi chọn nhà cung cấp.
-- Nhà cung cấp không có thì chọn theo loại bản tin. *Lập luận của giáo viên, kiểm lại với nghiệp vụ:* OTP thì gửi lại (hai mã giống nhau ít hại hơn không đăng nhập được); biến động số dư thì ưu tiên kênh có tra trạng thái, và nội dung có mã giao dịch để khách đối chiếu nếu nhận hai lần; campaign thì không gửi lại.
+- Bên trong hub: làm được bằng các bài đã học.
+- Ở chặng cuối: chỉ làm được khi nhà cung cấp chống gửi trùng hoặc cho tra trạng thái. Đó là tiêu chí khi chọn nhà cung cấp.
+- Nhà cung cấp không có thì chọn theo loại tin. *Lập luận của giáo viên, kiểm lại với nghiệp vụ:* OTP thì gửi lại (hai mã giống nhau ít hại hơn không đăng nhập được); biến động số dư thì ưu tiên kênh cho tra trạng thái, và nội dung có mã giao dịch để khách đối chiếu; campaign thì không gửi lại.
 
-## 7. Message queue: dùng ở bước nào, dùng loại nào
+## 7. Message queue dùng ở đâu: chặng nào qua Kafka
 
-Có dùng, và dùng Kafka làm backbone: mọi chặng giữa hai thành phần đều đi qua một topic. Queue nằm ở mọi chỗ hai bên cần chạy theo tốc độ riêng, hoặc phải chịu được bên kia sập. Chỗ cần trả lời ngay thì không dùng queue. Bốn mục sau đều dựa trên backbone này: retry và DLQ là topic, crash an toàn nhờ offset, kết quả gửi đi qua topic trạng thái.
+Kafka là message queue của hub: chặng nào đi qua topic là chặng đó có queue. Kafka nằm ở mọi chỗ hai bên cần chạy theo tốc độ riêng hoặc phải chịu được bên kia sập; chỗ cần trả lời ngay thì gọi trực tiếp.
 
-| Bước | Topic | Queue giải quyết gì |
+| Chặng | Topic | Kafka giúp gì |
 |---|---|---|
-| Hệ thống nguồn → hub (async) | Topic sự kiện của nguồn, ví dụ giao dịch của core banking | Nguồn không chờ hub. Hub sập thì sự kiện vẫn nằm trong log; hub lên lại đọc tiếp từ offset đã commit. |
-| Ingest → Router | `notif.otp`, `notif.transactional`, `notif.marketing` | Tách "đã nhận" khỏi "đã gửi": đường sync trả 202 sau khi Kafka ack. Mỗi làn ưu tiên một hàng riêng. |
-| Router → Sender | `notif.<kênh>.<ưu tiên>` | Cách ly nhà cung cấp: mỗi kênh tự điều tốc theo hạn mức của mình. |
-| Sender gửi lỗi | `…-retry-<delay>`, `…-dlt` | Retry không chặn partition chính (mục 8); bản tin hết lượt không bị bỏ (mục 9). |
-| Sau khi gửi, và callback của nhà cung cấp | `notif.status` | Một luồng trạng thái, nhiều bên đọc: DB trạng thái, báo cáo, đối soát chi phí, fallback, trả kết quả. |
+| Hệ thống nguồn → hub | Topic sự kiện của nguồn | Nguồn không phải chờ hub. Hub sập thì tin vẫn nằm chờ, hub lên lại đọc tiếp. |
+| Ingest → Router | Hàng theo ưu tiên | Trả lời "đã nhận" mà không chờ gửi xong. Mỗi mức ưu tiên một hàng. |
+| Router → Sender | Hàng theo kênh | Mỗi kênh tự đi theo tốc độ của nhà cung cấp. |
+| Sender gửi lỗi | Hàng thử lại, DLQ | Thử lại mà không chặn hàng chính (mục 8); tin hết lượt không bị bỏ (mục 9). |
+| Sau khi gửi | `notif.status` | Một luồng trạng thái cho nhiều bên cùng đọc. |
 | Hub → nguồn | `notif.result.<nguồn>` | Trả kết quả cho nguồn dùng Kafka (mục 11). |
 
-**Chỗ không dùng queue:** API Connect gọi Ingest bằng HTTP vì nguồn cần câu trả lời ngay (202 hoặc lỗi); tra trạng thái là đọc DB; lịch campaign nằm trong DB của campaign service.
+**Chỗ không qua Kafka:** API Connect gọi Ingest trực tiếp vì nguồn cần câu trả lời ngay; tra trạng thái là đọc DB.
 
-**Vì sao là Kafka.** *Lập luận của giáo viên, đối chiếu với nền tảng thật của ngân hàng:*
+**Kafka thiếu gì, và bù thế nào.**
 
-- Ngân hàng đã dùng Kafka trong kiến trúc microservices: không thêm một nền tảng phải vận hành, và nguồn async gửi bằng thứ họ đã có.
-- Log giữ bản tin tới hết retention, nên đọc lại được: replay DLT, gửi lại sau sự cố, dựng lại báo cáo ([Bài 8c](0015-replay-retention.md)).
-- Nhiều consumer group đọc cùng một topic mà không phải sao chép: `notif.status` phục vụ DB, báo cáo và trả kết quả cùng lúc.
-- Thứ tự theo key: hai tin biến động số dư của một khách đi đúng thứ tự ([Bài 2](0002-key-partition-offset.md)).
-
-**Kafka thiếu gì, và bù thế nào.** Kafka không có độ ưu tiên hay độ trễ cho từng message: bù bằng topic theo ưu tiên (mục 4) và retry topic theo mốc trễ (mục 8). Trong một consumer group, số consumer chạy song song tối đa bằng số partition: bù bằng đủ partition, hoặc Share Groups ("queues for Kafka", production-ready từ Kafka 4.2). Share Groups cho nhiều consumer hơn số partition, ack từng bản ghi và giới hạn số lần giao, nhưng không giữ thứ tự [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka) [[research/0001]](../research/0001-curriculum-coverage.md). Vì vậy Share Groups hợp làn OTP hay campaign, không hợp biến động số dư.
-
-Nếu bị hỏi về một broker kiểu hàng đợi có sẵn độ ưu tiên và độ trễ theo message: nó giải được hai chỗ thiếu trên, nhưng thêm một nền tảng phải vận hành, và hàng đợi kiểu xoá sau khi ack thì không đọc lại được bản tin cũ. *Lập luận của giáo viên.*
+- Không có "ưu tiên" cho từng tin: tách hàng theo độ khẩn (mục 4).
+- Không hẹn giờ gửi lại cho từng tin: dùng hàng thử lại có thời gian chờ (mục 8).
+- Số người đọc song song không vượt số partition: tạo đủ partition. Bản Kafka mới có thêm Share Groups cho phép nhiều người đọc hơn, đổi lại không giữ thứ tự [[KIP-932]](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka).
 
 ## 8. Retry: chờ tăng dần, giới hạn theo khách hàng và kênh
 
-[Bài 6](0006-error-handling-dlt.md) đã có hai loại lỗi và hai kiểu retry. Ở hub, retry có thêm ba yêu cầu: thời gian chờ tăng dần, số lần tối đa khác nhau theo khách hàng và kênh, và hạn chót theo loại bản tin.
+**Từ khoá:** lỗi tạm thời và lỗi vĩnh viễn (poison pill); thử lại tại chỗ (blocking retry: cả hàng đứng chờ) và thử lại qua hàng riêng (non-blocking retry: hàng chính đi tiếp); backoff (thời gian chờ giữa hai lần thử); DLQ ([Bài 6](0006-error-handling-dlt.md)). Ở hub, retry có thêm ba yêu cầu: chờ tăng dần, số lần tối đa theo khách hàng và kênh, và hạn chót theo loại tin.
 
 ### Ba quy tắc
 
-1. **Chỉ retry lỗi tạm thời.** Timeout, nhà cung cấp trả lỗi 5xx hoặc báo vượt hạn mức: retry. Số điện thoại sai, template lỗi, dữ liệu hỏng: thử bao nhiêu lần cũng không qua, nên đi thẳng sang DLT.
-2. **Thời gian chờ tăng dần.** Lần thử lại thứ n chờ `min(delay × multipliern-1, maxDelay)`, ví dụ 10 giây, 20, 40, 80, 160, rồi dừng ở 5 phút. Nhà cung cấp đang quá tải mà bị dội retry đều đặn thì càng lâu hồi phục.
-3. **Dừng ở giới hạn nào tới trước:** số lần tối đa, hoặc hạn chót. OTP còn lượt nhưng đã hết hạn thì dừng, vì gửi OTP hết hạn là vô ích.
+1. **Chỉ thử lại lỗi tạm thời.** Hết giờ chờ, nhà cung cấp báo lỗi hay báo quá tải: thử lại. Số điện thoại sai, mẫu nội dung lỗi, dữ liệu hỏng: thử bao nhiêu lần cũng không qua, nên đưa thẳng vào DLQ.
+2. **Chờ tăng dần, có trần.** Ví dụ 10 giây, 20, 40, 80, rồi giữ ở 5 phút. Nhà cung cấp đang quá tải mà bị dội tin liên tục thì càng lâu hồi phục.
+3. **Dừng ở giới hạn nào tới trước:** số lần tối đa, hoặc hạn chót. OTP còn lượt nhưng đã hết hạn thì dừng.
 
-**Retry không thay được ngắt mạch.** Khi nhà cung cấp sập hẳn, mọi bản tin đều lỗi: retry từng bản tin chỉ đốt hết lượt của chúng rồi dồn vào DLT. Ngắt mạch thì `pause()` container của kênh đó (mục 3): bản tin nằm yên trong log và không mất lượt. Retry dành cho lỗi lẻ tẻ.
+**Retry không thay được ngắt mạch.** Khi nhà cung cấp sập hẳn, tin nào cũng lỗi: thử lại từng tin chỉ đốt hết lượt rồi dồn vào DLQ. Ngắt mạch (circuit breaker) thì tạm dừng cả kênh: tin nằm yên trong Kafka và không mất lượt. Retry dành cho lỗi lẻ tẻ.
 
-### Bảng policy
+**Policy** là cấu hình tra theo nguồn hoặc phân khúc khách, loại tin và kênh; nó cho ra số lần tối đa, hạn chót, và hết lượt thì làm gì. Ví dụ: OTP thử vài lần trong hạn của mã; khách ưu tiên được nhiều lần hơn khách thường. Con số cụ thể thuộc tài liệu thiết kế chi tiết.
 
-"Khách hàng" có thể là hệ thống nguồn (core, thẻ, marketing) hoặc phân khúc người nhận (ví dụ khách ưu tiên). Cách làm giống nhau: policy được tra theo khoá (nguồn hoặc phân khúc, loại bản tin, kênh). Con số dưới đây là giả định.
-
-| Loại bản tin | Kênh | Phân khúc | Số lần tối đa | Chờ | Hạn chót | Hết lượt thì |
-|---|---|---|---|---|---|---|
-| OTP | SMS | mọi khách | 3 | 1 giây, 2 giây | hạn của OTP | FAILED, báo nguồn để khách bấm gửi lại |
-| Biến động số dư | Push | mọi khách | 3 | 5 giây ×2, tối đa 1 phút | 5 phút | Chuyển sang SMS |
-| Biến động số dư | SMS | thường | 5 | 10 giây ×2, tối đa 5 phút | 2 giờ | DLT, cảnh báo |
-| Biến động số dư | SMS | ưu tiên | 8 | 10 giây ×2, tối đa 5 phút | 2 giờ | DLT, cảnh báo |
-| Campaign | Zalo | mọi khách | 2 | 5 phút | hết khung giờ campaign | FAILED, không gửi bù |
-
-### Thiết kế: thang retry topic và policy đi theo bản tin
+### Thiết kế: thang hàng thử lại, policy đi theo tin
 
 ```mermaid
 flowchart TB
-R["Router<br/>tra policy theo nguồn hoặc phân khúc, loại bản tin, kênh<br/>gắn số lần tối đa và hạn chót vào bản tin"] --> M[("notif.sms.transactional")]
+R["Router<br/>tra policy, gắn số lần tối đa và hạn chót vào tin"] --> M[("Hàng SMS giao dịch")]
 M --> S["Sender SMS"]
-S -.->|"lỗi tạm thời, còn lượt"| L[("Thang retry topic của kênh<br/>chờ 10 giây → 20 → 40 → … → 5 phút")]
-L -.->|"tới hạn"| S
-S -->|"hết lượt theo policy, hoặc lỗi vĩnh viễn"| D[("DLT")]
+S -.->|"lỗi tạm thời, còn lượt"| L[("Hàng thử lại<br/>chờ 10 giây → 20 → 40 → … → 5 phút")]
+L -.->|"tới giờ"| S
+S -->|"hết lượt, hoặc lỗi vĩnh viễn"| D[("DLQ")]
 S -->|"quá hạn chót"| X["EXPIRED"]
-CB["Circuit breaker<br/>nhà cung cấp sập hẳn"] -.->|"pause cả kênh"| S
+CB["Ngắt mạch<br/>nhà cung cấp sập hẳn"] -.->|"tạm dừng cả kênh"| S
 class M,L ok
 class D warn
 classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
 classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 ```
 
-*Thang chờ là của kênh; dừng ở bậc nào là do policy của từng bản tin. Retry không chặn partition chính.*
+*Thang chờ là của kênh; dừng ở bậc nào là do policy của từng tin. Hàng chính không phải đứng chờ.*
 
-- **Kafka làm gì:** mỗi bậc chờ là một retry topic. Bản tin lỗi được ghi sang bậc kế tiếp, partition chính đi tiếp; consumer của bậc chờ chỉ đọc khi tới hạn. Bản tin nằm bền trong log suốt thời gian chờ, nên pod chết giữa chừng cũng không mất. Pattern này gọi là **non-blocking retry** [[Spring: How the pattern works]](https://docs.spring.io/spring-kafka/reference/retrytopic/how-the-pattern-works.html).
-- **Giới hạn theo khách hàng và kênh:** thang chờ đặt theo kênh, vì đó là đặc tính của nhà cung cấp. Số lần tối đa và hạn chót đặt theo policy, Router gắn vào bản tin lúc chọn kênh. Sender so số lần đã thử với policy của bản tin: tới giới hạn thì đưa thẳng sang DLT, dù thang của kênh còn bậc.
-- **Nhắc tên khi được hỏi hiện thực:** Spring Kafka có sẵn pattern này: `@RetryableTopic` với `@BackOff` (delay, multiplier, maxDelay) tạo thang retry topic và DLT, `@DltHandler` xử lý DLT [[Spring: Features]](https://docs.spring.io/spring-kafka/reference/retrytopic/features.html).
+- **Kafka giúp gì:** mỗi bậc chờ là một hàng (retry topic). Tin lỗi được chuyển sang bậc kế tiếp, hàng chính đi tiếp; tới giờ thì tin được lấy ra gửi lại. Trong lúc chờ, tin vẫn nằm an toàn trong Kafka, sender chết cũng không mất.
+- **Giới hạn theo khách hàng và kênh:** thang chờ đặt theo kênh, vì đó là đặc tính của nhà cung cấp. Số lần tối đa và hạn chót đi theo từng tin. Tới giới hạn thì tin vào DLQ, dù thang của kênh còn bậc.
+- **Nếu được hỏi cách làm:** Spring Kafka có sẵn mẫu này: `@RetryableTopic` (kèm `@BackOff` cho thời gian chờ) và `@DltHandler` cho DLQ [[Spring: retry topic]](https://docs.spring.io/spring-kafka/reference/retrytopic/how-the-pattern-works.html).
 
-**Hai đánh đổi cần nói.**
+**Đánh đổi.**
 
-- **Mất thứ tự.** Bản tin đi retry topic có thể tới sau bản tin mới hơn. Với biến động số dư, nội dung có thời điểm và số dư sau giao dịch thì chấp nhận được; nếu không, làn đó dùng blocking retry ngắn vài giây, chấp nhận partition đứng trong lúc chờ.
-- **Thang chờ chung cho cả kênh.** Các phân khúc chỉ khác nhau ở số lần và hạn chót. Muốn thang chờ khác nhau thì phải tách topic, đổi lại vận hành nhiều topic hơn.
+- **Mất thứ tự.** Tin đi hàng thử lại có thể tới sau tin mới hơn. Với biến động số dư, nội dung có thời điểm và số dư sau giao dịch thì chấp nhận được; nếu không, làn đó thử lại tại chỗ vài giây và chấp nhận hàng đứng một lúc.
+- **Thang chờ chung cho cả kênh.** Muốn mỗi phân khúc một thang chờ riêng thì phải tách hàng, đổi lại vận hành nhiều hàng hơn.
 
-## 9. DLQ: chứa gì, ai xử lý, đưa về thế nào
+## 9. DLQ: dùng làm gì, khi nào đưa vào
 
-Với consumer thường, DLQ không phải tính năng có sẵn của Kafka mà là pattern ứng dụng; Spring gọi nó là DLT (dead-letter topic). Docs Apache chỉ định nghĩa DLQ cho Kafka Connect và Share Groups ([Bài 6](0006-error-handling-dlt.md)). Ở hub, thiết kế DLT phải trả lời bốn câu: cái gì vào DLT, bản ghi mang theo gì, ai được báo, và đưa bản tin về thế nào.
+DLQ (Spring gọi là DLT, dead-letter topic) giữ lại tin không gửi được, thay vì bỏ đi hoặc thử lại mãi, để người xử lý rồi gửi lại. Kafka không có sẵn DLQ cho trường hợp này; đây là cách làm của ứng dụng ([Bài 6](0006-error-handling-dlt.md)).
 
 ```mermaid
 flowchart TB
-M[("notif.sms.transactional")] --> S["Sender SMS"]
-S -->|"lỗi tạm thời, còn lượt"| R[("-retry-10000 … -retry-300000")]
+M[("Hàng SMS giao dịch")] --> S["Sender SMS"]
+S -->|"lỗi tạm thời, còn lượt"| R[("Hàng thử lại")]
 R --> S
-S -->|"lỗi vĩnh viễn, hoặc hết lượt"| D[("notif.sms.transactional-dlt")]
-S -->|"quá hạn chót"| EX["EXPIRED, không vào DLT"]
-D --> H["DLT handler"]
-H --> F1["FAILED, trả về nguồn"]
-H --> F2["Kênh dự phòng nếu quan trọng"]
-H --> F3["Cảnh báo theo kênh và mã lỗi"]
-D -.->|"sau khi sửa lỗi"| RP["Công cụ replay<br/>lọc, kiểm hạn chót"]
+S -->|"lỗi vĩnh viễn, hoặc hết lượt"| D[("DLQ")]
+S -->|"quá hạn chót"| EX["EXPIRED, không vào DLQ"]
+D --> H["Xử lý DLQ"]
+H --> F1["Báo thất bại về nguồn"]
+H --> F2["Kênh dự phòng"]
+H --> F3["Cảnh báo người trực"]
+D -.->|"sửa xong nguyên nhân"| RP["Gửi lại"]
 RP -.-> M
 class D warn
 classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
 ```
 
-*DLT là điểm dừng có người trông, không phải thùng rác. Replay ghi lại vào topic chính với cùng notificationId.*
+*DLQ là chỗ dừng có người trông, không phải thùng rác.*
 
-### Cái gì vào DLT
-
-| Trường hợp | Vào DLT? | Lý do |
-|---|---|---|
-| Lỗi vĩnh viễn: số sai, template lỗi, dữ liệu hỏng | Có, ngay | Cần người sửa dữ liệu hoặc template rồi mới gửi được. |
-| Lỗi tạm thời, đã hết lượt theo policy | Có | Nhà cung cấp lỗi kéo dài; replay khi đã ổn. |
-| OTP hoặc bản tin đã quá hạn chót | Không: EXPIRED | Gửi lại cũng vô ích; vẫn trả trạng thái về nguồn. |
-| Campaign hết lượt | Không: FAILED | Khuyến mãi gửi bù muộn không còn giá trị; chỉ đếm vào báo cáo. |
-
-*Hai dòng cuối của bảng là lập luận của giáo viên, kiểm lại với nghiệp vụ.*
-
-### Mang theo gì, ai xử lý, đưa về thế nào
-
-- **Mang theo:** bản tin gốc với `notificationId`, lý do lỗi, vị trí gốc (topic, partition, offset), số lần đã thử, mã lỗi của nhà cung cấp. Đủ để người trực quyết định sửa gì và có replay không. Spring tự thêm phần lý do và vị trí gốc vào header [[Spring: Handling exceptions]](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html).
-- **Ai xử lý:** một consumer của DLT ghi FAILED vào trạng thái, để nguồn nhận kết quả (mục 11) và Status service quyết định có gửi qua kênh dự phòng không. Cảnh báo theo số bản ghi vào DLT mỗi phút, tách theo kênh và mã lỗi: một tin OTP hay số dư vào DLT là đủ để báo, campaign thì báo theo tỉ lệ. *Lập luận của giáo viên.*
-- **Đưa về thế nào:** sửa nguyên nhân trước, rồi replay: lọc DLT theo thời gian và mã lỗi, bỏ bản tin đã quá hạn chót, ghi lại vào topic chính với cùng `notificationId` và bắt đầu thang retry mới. Sender thấy SENT thì bỏ qua, nên replay hai lần cũng không gửi trùng.
-- **DLT cũng là dữ liệu không được mất:** cùng độ bền với topic chính (RF=3, `min.insync.replicas=2`), retention dài hơn thời gian xử lý sự cố.
+- **Khi nào vào:** lỗi vĩnh viễn (số sai, mẫu lỗi, dữ liệu hỏng) thì vào ngay; lỗi tạm thời thì vào khi hết lượt thử. Quá hạn chót (OTP) thì không vào: đánh dấu EXPIRED.
+- **Mang theo:** tin gốc, mã tin, lý do lỗi, đã thử mấy lần.
+- **Sau khi vào:** báo thất bại về nguồn, cảnh báo người trực, gửi qua kênh dự phòng nếu là tin quan trọng.
+- **Gửi lại:** sửa nguyên nhân trước, rồi đưa tin về hàng chính với cùng mã tin; tin đã gửi thì sender bỏ qua, nên không trùng. Thử ở [mô phỏng 12b](#rsim).
+- **Độ bền:** DLQ cũng là dữ liệu không được mất, lưu bền như hàng chính.
 
 ## 10. App crash: chết ở đâu thì chuyện gì xảy ra
 
-Một quy tắc phủ mọi chỗ: **ghi bền trước, commit sau, và mọi bước chạy lại được mà không gây trùng**. Kafka lo phần "chạy lại": offset chưa commit thì bản ghi được giao lại ([Bài 5](0005-consumer-offset-commit.md)). Hub lo phần "không gây trùng" bằng `notificationId`.
+Một quy tắc phủ mọi chỗ: **lưu xong rồi mới đánh dấu "đã đọc", và mọi bước làm lại được mà không gây trùng**. Kafka lo phần "làm lại": tin chưa đánh dấu "đã đọc" sẽ được giao lại ([Bài 5](0005-consumer-offset-commit.md)). Hub lo phần "không trùng" bằng mã tin.
 
 | Thành phần | Chết lúc | Sau khi chạy lại |
 |---|---|---|
-| Ingest API | Trước khi Kafka ack | Nguồn nhận lỗi hoặc timeout, gọi lại cùng `notificationId`; bản tin chưa lên Kafka nên được ghi lên lúc này. |
-| Ingest API | Sau ack, trước khi trả 202 | Nguồn gọi lại; dòng chống trùng cho biết đã lên Kafka, nên trả 202 mà không ghi lần hai. |
-| Ingest consumer | Trước khi commit | Đọc lại từ offset đã commit; trùng bị chặn bằng mã sự kiện của nguồn. |
-| Router | Ghi topic kênh xong, chưa commit | Ghi lần hai sang topic kênh; sender chặn bằng trạng thái. Muốn khỏi trùng ngay ở đây: transaction đọc-xử lý-ghi ([Bài 5c](0012-delivery-semantics.md)). |
-| Sender | Trước khi gọi nhà cung cấp | Bản ghi được giao lại, gửi bình thường. |
-| Sender | Đã gọi, chưa ghi SENT | Giao lại, thấy trạng thái kẹt ở SENDING: không biết đã gửi chưa. Đây chính là timeout mơ hồ ở mục 6: tra trạng thái hoặc dùng khoá idempotency, nếu không có thì xử lý theo loại bản tin. |
-| Sender | Đã ghi SENT, chưa commit | Giao lại, thấy SENT, bỏ qua. |
-| Consumer của retry topic | Đang chờ tới hạn | Bản ghi vẫn nằm trong retry topic, chưa commit, nên được giao lại. |
-| Result dispatcher | Đã gọi webhook, chưa commit | Gọi webhook lần hai; nguồn chống trùng theo (`notificationId`, trạng thái). |
-| Broker | Bất kỳ lúc nào | RF=3, `min.insync.replicas=2`: partition có leader mới, bản tin đã ack không mất ([Bài 4](0004-producer-durability.md)). |
-| Cả hub | Sập hẳn | Async: sự kiện nằm trong topic nguồn, lag tăng, hub lên lại đọc tiếp. Sync: API Connect trả lỗi, nguồn retry cùng `notificationId`. Hub chạy nhiều instance trên nhiều zone để hiếm khi tới mức này. |
+| Ingest | Trước khi Kafka lưu xong | Nguồn không nhận được "đã nhận", gửi lại cùng mã; lần này tin được lưu. |
+| Ingest | Sau khi lưu, trước khi trả lời | Nguồn gửi lại; hub nhận ra mã đã có, trả "đã nhận" mà không tạo tin thứ hai. |
+| Router | Đã chuyển tin, chưa đánh dấu "đã đọc" | Tin bị chuyển lần hai; Sender lọc bằng mã tin. |
+| Sender | Trước khi gửi | Tin được giao lại, gửi bình thường. |
+| Sender | Đã gửi, chưa kịp ghi ĐÃ GỬI | Tin được giao lại, thấy ĐANG GỬI: không biết đã gửi chưa. Đây chính là chỗ "hết giờ chờ mà không rõ kết quả" ở mục 6. |
+| Sender | Đã ghi ĐÃ GỬI, chưa đánh dấu "đã đọc" | Tin được giao lại, thấy ĐÃ GỬI, bỏ qua. |
+| Máy chủ Kafka | Bất kỳ lúc nào | Có bản sao ở máy khác; tin đã báo "đã nhận" không mất ([Bài 4](0004-producer-durability.md)). |
+| Cả hub | Sập hẳn | Tin từ Kafka của nguồn nằm chờ, hub lên lại đọc tiếp. Đường gọi trực tiếp báo lỗi, nguồn gửi lại cùng mã. Hub chạy nhiều bản ở nhiều nơi để hiếm khi tới mức này. |
 
 **Ba chỗ dễ sót.**
 
-- **Deploy là crash có báo trước.** Pod dừng nhận bản tin mới, làm xong việc dở, commit rồi mới tắt. Thời gian ân hạn của pod phải dài hơn thời gian xử lý một lô bản tin; bị giết giữa chừng thì không mất (chưa commit), nhưng rơi vào dòng "đã gọi, chưa ghi SENT".
-- **Một bản tin làm chết process mỗi lần đọc**, ví dụ hết bộ nhớ khi dựng nội dung. Offset không commit, pod lên lại đọc đúng bản tin đó và chết tiếp. Không cấu hình Kafka nào tự gỡ được: chặn bằng giới hạn kích thước ở Ingest, cảnh báo khi pod restart liên tục, và gỡ bằng tay bằng cách chuyển bản ghi đó sang DLT rồi dời offset qua nó ([Bài 8c](0015-replay-retention.md)). *Lập luận của giáo viên.*
-- **SENT mãi không có báo đã giao.** Nhà cung cấp có thể không gửi callback. Job đối soát định kỳ tìm bản tin SENT quá lâu chưa có kết quả, tra API của nhà cung cấp nếu có, nếu không thì đánh dấu "đã gửi, không có xác nhận".
+- **Deploy là crash có báo trước.** Service dừng nhận tin mới, làm xong việc dở, đánh dấu "đã đọc" rồi mới tắt. Bị tắt ngang thì không mất, nhưng rơi vào dòng "đã gửi, chưa kịp ghi".
+- **Một tin làm service chết mỗi lần đọc**, ví dụ quá lớn làm hết bộ nhớ. Service lên lại đọc đúng tin đó và chết tiếp, mãi mãi. Chặn bằng giới hạn kích thước tin ở Ingest và cảnh báo khi service khởi động lại liên tục; gỡ bằng tay: chuyển tin đó vào DLQ rồi cho service đọc tiếp từ tin sau. *Lập luận của giáo viên.*
+- **ĐÃ GỬI mãi không có báo đã giao.** Nhà cung cấp có thể không báo lại. Một job đối soát định kỳ tìm những tin này, hỏi nhà cung cấp nếu có thể, nếu không thì ghi "đã gửi, không có xác nhận".
 
 ## 11. Trả kết quả gửi về nguồn
 
-Nguồn cần biết bản tin của mình ra sao: CSKH tra cứu, đối soát, hoặc quyết định gửi lại. Thiết kế có ba phần: mô hình trạng thái, chỗ trạng thái đến từ đâu, và cách trả về nguồn.
+Nguồn cần biết tin của mình ra sao: chăm sóc khách hàng tra cứu, đối soát, hay quyết định gửi lại. Thiết kế có ba phần: các trạng thái, trạng thái đến từ đâu, và cách trả về nguồn.
 
 ```mermaid
 stateDiagram-v2
-[*] --> ACCEPTED: Kafka ack
-ACCEPTED --> SENDING: sender nhận
+[*] --> ACCEPTED: Kafka lưu xong
+ACCEPTED --> SENDING: sender lấy ra gửi
 SENDING --> RETRYING: lỗi tạm thời
-RETRYING --> SENDING: tới hạn chờ
+RETRYING --> SENDING: tới giờ thử lại
 SENDING --> SENT: nhà cung cấp nhận
-SENT --> DELIVERED: callback, nếu kênh có
+SENT --> DELIVERED: báo đã giao, nếu kênh có
 DELIVERED --> READ: nếu kênh có
-SENT --> FAILED: callback báo lỗi
+SENT --> FAILED: báo lỗi
 SENDING --> FAILED: lỗi vĩnh viễn, hết lượt
 RETRYING --> EXPIRED: quá hạn chót
 ACCEPTED --> EXPIRED: quá hạn chót
 ```
 
-*Trạng thái lưu theo (notificationId, kênh). Có fallback thì một bản tin có nhiều dòng, mỗi kênh một dòng.*
+*Trạng thái lưu theo từng tin và từng kênh. Có gửi qua kênh dự phòng thì một tin có nhiều dòng, mỗi kênh một dòng.*
 
-**Trạng thái đến từ hai nơi.** Sender phát SENT hoặc FAILED khi gọi nhà cung cấp, và lưu mã bản tin mà nhà cung cấp trả về. Callback receiver nhận báo đã giao hay đã đọc từ nhà cung cấp, dùng mã đó tra ra `notificationId`. Không phải kênh nào cũng báo đã giao hay đã đọc, nên mỗi kênh ghi rõ trạng thái cuối cùng nó báo được.
+**Trạng thái đến từ hai nơi.** Sender ghi SENT hoặc FAILED khi gửi, và lưu mã mà nhà cung cấp trả về. Sau đó nhà cung cấp báo "đã giao, đã đọc" kèm mã đó, hub tra ra tin gốc. Không phải kênh nào cũng báo được "đã giao" hay "đã đọc".
 
 ```mermaid
 sequenceDiagram
@@ -401,46 +373,58 @@ participant H as Hub
 participant P as Nhà cung cấp
 participant K as notif.status
 participant D as Result dispatcher
-N->>H: bản tin, kèm notificationId
-H-->>N: 202, hoặc sự kiện ACCEPTED
+N->>H: gửi tin, kèm mã tin
+H-->>N: "đã nhận"
 H->>P: Sender gửi
 P-->>H: nhận, trả mã của nhà cung cấp
 H->>K: SENT
-P--)H: callback "đã giao", kèm mã đó
-H->>K: DELIVERED, tra ra notificationId
+P--)H: báo "đã giao", kèm mã đó
+H->>K: DELIVERED
 K->>D: đọc trạng thái
-D-->>N: webhook, hoặc notif.result.nguồn
-Note over N: chống trùng theo (notificationId, trạng thái)
+D-->>N: gọi lại nguồn, hoặc ghi vào topic kết quả
+Note over N: bỏ qua kết quả đã nhận rồi
 ```
 
-*"Hub" gộp Ingest, Sender và Callback receiver. Kết quả đi một chiều qua notif.status; nguồn không phải gọi ngược vào sender hay nhà cung cấp.*
+*Kết quả đi một chiều qua luồng trạng thái; nguồn không phải hỏi sender hay nhà cung cấp.*
 
 | Cách trả về | Hợp với | Cách làm |
 |---|---|---|
-| **API tra cứu** (nguồn hỏi) | Nguồn sync, màn hình CSKH, đối soát | `GET /notifications/{id}` qua API Connect, đọc DB trạng thái. Luôn có, vì là chỗ dựa khi hai cách kia lỗi. |
-| **Webhook** (hub gọi) | Nguồn sync cần biết ngay | Nguồn đăng ký URL. Result dispatcher đọc `notif.status` rồi gọi URL đó; lỗi thì retry có chờ tăng dần và có DLT riêng, như mục 8 và 9. |
-| **Topic kết quả** (hub ghi) | Nguồn đã dùng Kafka | Dispatcher ghi sang `notif.result.<nguồn>`, key `notificationId`. Phân quyền theo tiền tố topic, mỗi nguồn chỉ đọc topic của mình. |
+| **Nguồn hỏi** (API tra cứu) | Chăm sóc khách hàng, đối soát | Nguồn hỏi theo mã tin qua API Connect. Luôn có, vì là chỗ dựa khi hai cách kia lỗi. |
+| **Hub gọi lại** (webhook) | Nguồn cần biết ngay | Nguồn đăng ký một địa chỉ, hub gọi tới khi có kết quả; gọi lỗi thì thử lại như mục 8. |
+| **Hub ghi vào topic** | Nguồn đã dùng Kafka | Mỗi nguồn một topic kết quả, chỉ nguồn đó được đọc. |
 
-Khi đăng ký, nguồn chọn cách nhận và mức chi tiết: chỉ kết quả cuối (DELIVERED, FAILED, EXPIRED) hay mọi bước. OTP thường chỉ cần biết khi thất bại. *Lập luận của giáo viên.*
+Nguồn chọn cách nhận và mức chi tiết: chỉ kết quả cuối hay mọi bước. OTP thường chỉ cần biết khi thất bại. *Lập luận của giáo viên.*
 
 **Bốn bẫy.**
 
-- **Trùng.** Trả kết quả cũng là at-least-once (dispatcher có thể chết sau khi gọi webhook). Nguồn phải chống trùng theo (`notificationId`, trạng thái).
-- **Sai thứ tự.** Callback "đã giao" của nhà cung cấp có thể tới trước sự kiện SENT của sender, vì hai bên ghi độc lập. Key theo `notificationId` chỉ giữ thứ tự theo lúc ghi vào topic. Vì vậy trạng thái chỉ được tiến, không lùi: Status service bỏ qua sự kiện "cũ hơn" trạng thái hiện tại.
-- **Nguồn chậm kéo theo nguồn khác.** Webhook của một nguồn timeout mà mọi nguồn chung một hàng thì cả hàng đứng: cùng bài toán cách ly nhà cung cấp, chỉ đảo chiều. Tách topic kết quả và consumer group theo nguồn, ngắt mạch theo nguồn.
-- **Không có callback.** Xem job đối soát ở mục 10.
+- **Trùng.** Kết quả cũng có thể tới hai lần (hub chết ngay sau khi gọi nguồn). Nguồn bỏ qua kết quả đã nhận rồi.
+- **Sai thứ tự.** Báo "đã giao" có thể tới trước SENT, vì hai bên ghi độc lập. Trạng thái chỉ được tiến, không lùi: báo cũ hơn trạng thái hiện tại thì bỏ qua.
+- **Nguồn chậm kéo theo nguồn khác.** Một nguồn không trả lời mà mọi nguồn chung một hàng thì cả hàng đứng. Giống cách ly nhà cung cấp: mỗi nguồn một hàng.
+- **Không có báo đã giao.** Xem job đối soát ở mục 10.
 
-**Đối soát và báo cáo.** `notif.status` là nguồn duy nhất cho tỉ lệ thành công và chi phí theo kênh: đếm SENT theo kênh và nhà cung cấp, nhân đơn giá, so với hoá đơn của nhà cung cấp.
+## 12. Mô phỏng
 
-## 12. Mô phỏng: một topic chung hay tách theo ưu tiên
+### 12a. Một topic chung hay tách theo ưu tiên
 
-Ba loại bản tin: OTP 20 bản tin mỗi giây qua SMS, giao dịch 300 qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định để thấy hình dạng vấn đề; hạn OTP rút còn 30 giây cho vừa 60 giây mô phỏng.
+Ba loại tin: OTP 20 tin mỗi giây qua SMS, giao dịch 300 qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định để thấy hình dạng vấn đề; hạn OTP rút còn 30 giây cho vừa 60 giây mô phỏng.
 
 1. Thiết kế A, retry tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
 2. Thiết kế A, đổi sang retry topic. OTP đỡ hơn không, và vì sao vẫn chậm?
-3. Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu bản tin vào DLT? Bấm "Replay DLT".
-4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số bản tin trùng, rồi tick "Chống trùng".
+3. Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu tin vào DLT? Bấm "Replay DLT".
+4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số tin trùng, rồi tick "Chống trùng".
 5. Còn trùng hoặc mất ở dòng "timeout mơ hồ": thử ba cách xử lý và nói cái giá của từng cách.
+
+### 12b. Retry và DLQ khi nhà mạng SMS lỗi
+
+Kênh SMS có hai hàng, OTP và giao dịch, dùng chung hạn mức 40 tin mỗi giây. Có ba sự cố: lỗi lẻ tẻ 10%, nhà mạng sập từ phút 1:00 tới 4:00, và 2% tin số dư gửi tới số sai. Policy giả định: OTP 3 lần, hạn 60 giây; khách thường 5 lần; khách ưu tiên 8 lần.
+
+1. Để mặc định, bấm "Chạy hết 10 phút". Khách thường hay khách ưu tiên vào DLQ, và vì sao?
+2. Đổi thang chờ sang cố định 10 giây. DLQ tăng bao nhiêu? Bao nhiêu phần trăm lần gửi là gửi lại?
+3. Bật ngắt mạch. DLQ còn lại là tin gì? OTP lúc này đi đâu, và vì sao đó là kết quả đúng?
+4. Chuyển sang retry tại chỗ: hàng giao dịch đứng bao lâu, còn bao nhiêu tin chờ ở phút 10?
+5. Bỏ tick "Lỗi vĩnh viễn vào DLT ngay", rồi đổi "Hết lượt" sang "log rồi bỏ qua". Mỗi lần mất gì?
+6. Bỏ tick policy và bật ngắt mạch: bao nhiêu OTP tới tay khách khi đã hết hạn?
+7. Quay về mặc định, chạy hết, bấm "Replay DLT". Tin nào quay về, tin nào ở lại?
 
 Mô phỏng tổng hợp khác: [từ producer tới DB](../portal/index.md#sim-e2e) và [một ngày bảy sự cố](../portal/index.md#sim-e2e-day), cho phần "không mất, không trùng" bên trong hub.
 
@@ -450,185 +434,185 @@ Mô phỏng tổng hợp khác: [từ producer tới DB](../portal/index.md#sim-
 
 ### (a) Ngân hàng: campaign 9 giờ sáng, OTP tới chậm hai phút
 
-Marketing gửi khuyến mãi cho một triệu khách lúc 9 giờ, cùng lúc khách đăng nhập để chuyển tiền. Bản tin campaign và OTP nằm chung một topic: OTP đứng sau hàng trăm nghìn bản tin campaign trong cùng partition, nhiều mã hết hạn trước khi tới. **Xử lý:** tách topic và consumer group theo mức ưu tiên, giữ riêng một phần hạn mức SMS cho OTP, và cho campaign service tự điều tốc theo hạn mức của kênh.
+Marketing gửi khuyến mãi cho một triệu khách lúc 9 giờ, cùng lúc khách đăng nhập để chuyển tiền. Tin campaign và OTP chung một hàng: OTP đứng sau hàng trăm nghìn tin campaign, nhiều mã hết hạn trước khi tới. **Xử lý:** tách hàng theo mức ưu tiên, giữ riêng một phần hạn mức SMS cho OTP, và cho campaign tự gửi chậm lại theo hạn mức của kênh.
 
 ### (b) Ngân hàng: nhà cung cấp Zalo sập 20 phút
 
-Sender gọi Zalo liên tục lỗi. Nếu retry tại chỗ thì partition đứng yên; nếu SMS và Zalo chung consumer group thì SMS cũng đứng. **Xử lý:** mỗi kênh một topic và consumer group; ngắt mạch thì `pause()` container Zalo, lag tăng nhưng bản tin vẫn nằm trong log; lỗi tạm thời đi retry topic, hết lượt vào DLT có cảnh báo; bản tin quan trọng chuyển sang kênh dự phòng.
+Sender gọi Zalo liên tục lỗi. Nếu thử lại tại chỗ thì cả hàng đứng; nếu SMS và Zalo chung một hàng thì SMS cũng đứng. **Xử lý:** mỗi kênh một hàng riêng; ngắt mạch tạm dừng kênh Zalo, tin nằm chờ trong Kafka; lỗi lẻ tẻ thì vào hàng thử lại, hết lượt vào DLQ có cảnh báo; tin quan trọng chuyển sang kênh dự phòng.
 
 ### (c) Ngân hàng: khách nhận hai tin báo trừ tiền
 
-Pod sender bị deploy lại ngay sau khi gửi tin, trước khi commit offset; pod mới đọc lại và gửi lần hai. Khách tưởng bị trừ tiền hai lần và gọi tổng đài. **Xử lý:** ghi trạng thái (`notificationId`, kênh) trước và sau khi gọi nhà cung cấp, bỏ qua bản tin đã SENT; gửi kèm khoá idempotency khi nhà cung cấp hỗ trợ.
+Sender bị deploy lại ngay sau khi gửi tin, trước khi đánh dấu "đã đọc"; bản mới đọc lại và gửi lần hai. Khách tưởng bị trừ tiền hai lần và gọi tổng đài. **Xử lý:** ghi lại trạng thái từng tin trước và sau khi gửi, bỏ qua tin đã gửi; dùng chống gửi trùng của nhà cung cấp khi có.
 
 ## 14. Trình bày trong 5 phút
 
-1. **30 giây: làm rõ đề.** Nhắc ba ràng buộc, hỏi tải đỉnh, hạn OTP, nhà cung cấp có idempotency không.
-2. **1 phút: kiến trúc.** Vẽ Ingest, topic ưu tiên, Router, topic kênh, Sender, status. Một câu: "Kafka nằm giữa mọi chặng để mỗi bên chạy theo tốc độ của mình."
-3. **1 phút: tải lệch và nhà cung cấp.** Tách theo ưu tiên vì partition đọc tuần tự; tách theo kênh để một nhà cung cấp sập không kéo theo kênh khác; retry topic, DLT, `pause()`.
-4. **1 phút 30: không mất, không trùng.** Đi từng chặng theo bảng ở mục 6; kết bằng giới hạn trung thực của timeout mơ hồ.
-5. **1 phút: đánh đổi.** Nhiều topic thì vận hành nhiều hơn; retry topic mất thứ tự; trạng thái trong DB thêm một lần ghi cho mỗi bản tin; OTP nằm trong log tới hết retention, nên hỏi team bảo mật về mã hoá nội dung.
+1. **30 giây: làm rõ đề.** Nhắc ba ràng buộc, hỏi tải đỉnh, hạn OTP, nhà cung cấp có chống gửi trùng không.
+2. **1 phút: kiến trúc.** Vẽ Ingest, hàng ưu tiên, Router, hàng theo kênh, Sender, luồng trạng thái. Một câu: "Kafka nằm giữa mọi chặng để mỗi bên chạy theo tốc độ của mình."
+3. **1 phút: tải lệch và nhà cung cấp.** Tách theo ưu tiên vì mỗi hàng đọc lần lượt; tách theo kênh để một nhà cung cấp sập không kéo theo kênh khác; hàng thử lại, DLQ, ngắt mạch.
+4. **1 phút 30: không mất, không trùng.** Đi từng chặng theo bảng ở mục 6; kết bằng giới hạn ở chặng cuối.
+5. **1 phút: đánh đổi.** Nhiều hàng thì vận hành nhiều hơn; hàng thử lại làm mất thứ tự; ghi trạng thái thêm một lần ghi cho mỗi tin; OTP nằm trong Kafka một thời gian, nên hỏi team bảo mật về mã hoá nội dung.
 
-**Khi bị đào sâu**, mỗi chỗ một câu chốt, rồi mới đi vào chi tiết:
+**Khi bị hỏi sâu**, mỗi chỗ một câu chốt, rồi mới đi vào chi tiết:
 
 | Chỗ | Câu chốt |
 |---|---|
-| Message queue | Có, Kafka, ở mọi chỗ hai bên chạy khác tốc độ; HTTP ở chỗ cần trả lời ngay (mục 7). |
-| Retry | Non-blocking retry: thang retry topic chờ tăng dần theo kênh; số lần và hạn chót theo policy gắn vào bản tin; nhà cung cấp sập hẳn thì ngắt mạch, không retry (mục 8). |
-| DLQ | DLT là pattern ứng dụng; vào khi lỗi vĩnh viễn hoặc hết lượt; có cảnh báo, trả FAILED về nguồn, replay cùng notificationId (mục 9). |
-| Crash | Ghi bền trước, commit sau, mọi bước chạy lại được; chỗ khó là kẹt ở SENDING, chính là timeout mơ hồ (mục 10). |
-| Trả kết quả | Một luồng notif.status; nguồn chọn API tra cứu, webhook hoặc topic kết quả; nhận ít nhất một lần, trạng thái chỉ tiến (mục 11). |
+| Message queue | Kafka là queue của hub: mọi chặng giữa hai thành phần đi qua Kafka; chỗ cần trả lời ngay thì gọi trực tiếp (mục 7). |
+| Retry | Hàng thử lại riêng, chờ tăng dần theo kênh; số lần và hạn chót đi theo từng tin; nhà cung cấp sập hẳn thì ngắt mạch, không thử lại (mục 8). |
+| DLQ | Giữ tin không gửi được để người xử lý; vào khi lỗi vĩnh viễn hoặc hết lượt; báo thất bại, cảnh báo, sửa xong thì gửi lại cùng mã tin (mục 9). |
+| Crash | Lưu xong rồi mới đánh dấu "đã đọc", mọi bước làm lại được; chỗ khó là chết ngay sau khi gửi (mục 10). |
+| Trả kết quả | Một luồng trạng thái; nguồn chọn hỏi, được gọi lại, hoặc đọc topic kết quả; kết quả có thể tới hai lần, trạng thái chỉ tiến (mục 11). |
 
 ## 15. Kiểm tra
 
 <!-- quiz:quiz -->
 
-**1. Campaign một triệu bản tin chung topic với OTP, 12 partition, 12 consumer. Vì sao OTP vẫn chậm?**
+**1. Campaign một triệu tin chung hàng với OTP, đã có đủ người đọc. Vì sao OTP vẫn chậm?**
 
-- **A.** Consumer đọc partition theo thứ tự offset
-- **B.** Kafka ưu tiên message có kích thước lớn
-- **C.** Producer gom OTP vào lô của campaign
-- **D.** Broker giới hạn tốc độ ghi của topic OTP
-
-<details><summary>Đáp án</summary>
-
-**A. Consumer đọc partition theo thứ tự offset**
-
-Mỗi partition được đọc tuần tự; campaign lấp mọi partition nên OTP đứng sau. Thêm consumer không giúp vì đã bằng số partition. Cách sửa là tách topic theo ưu tiên.
-
-</details>
-
-**2. Nhà cung cấp Zalo sập 20 phút. Cách nào giữ bản tin mà không chặn kênh khác?**
-
-- **A.** Tăng số partition của topic Zalo lên
-- **B.** Consumer group riêng, pause khi sập
-- **C.** Đặt acks=1 để producer ghi nhanh hơn
-- **D.** Giảm retention để log không bị đầy lên
+- **A.** Mỗi hàng được đọc lần lượt từ đầu
+- **B.** Kafka ưu tiên đọc tin có kích thước lớn
+- **C.** Ingest gom OTP vào chung lô campaign
+- **D.** Kafka giới hạn tốc độ ghi của OTP
 
 <details><summary>Đáp án</summary>
 
-**B. Consumer group riêng, pause khi sập**
+**A. Mỗi hàng được đọc lần lượt từ đầu**
 
-Topic và consumer group riêng cho từng kênh cách ly sự cố; pause() giữ consumer trong group mà không đọc thêm; bản tin nằm trong log chờ Zalo lên lại.
+Hàng được đọc theo thứ tự; campaign đứng trước nên OTP phải chờ. Thêm người đọc không giúp. Cách sửa là tách hàng theo ưu tiên.
 
 </details>
 
-**3. Ingest trả 202 cho API Connect sớm nhất lúc nào mà vẫn không mất bản tin?**
+**2. Nhà cung cấp Zalo sập 20 phút. Cách nào giữ tin mà không chặn kênh khác?**
 
-- **A.** Ngay khi nhận request, chưa ghi gì
-- **B.** Sau khi consumer đã commit offset
-- **C.** Sau khi Kafka trả ack với acks=all
-- **D.** Sau khi nhà cung cấp SMS trả 200
+- **A.** Tăng số partition của hàng Zalo lên
+- **B.** Hàng riêng cho Zalo, tạm dừng khi sập
+- **C.** Bỏ chờ bản sao để Kafka ghi nhanh hơn
+- **D.** Xoá bớt tin cũ để hàng không đầy lên
 
 <details><summary>Đáp án</summary>
 
-**C. Sau khi Kafka trả ack với acks=all**
+**B. Hàng riêng cho Zalo, tạm dừng khi sập**
 
-Ack với acks=all và min.insync.replicas=2 nghĩa là bản tin đã có ít nhất hai bản sao. Chờ tới lúc gửi xong thì đúng nhưng ghép chặt đường sync vào nhà cung cấp.
+Mỗi kênh một hàng riêng thì sự cố không lan; tạm dừng kênh Zalo thì tin nằm chờ trong Kafka tới khi Zalo lên lại.
 
 </details>
 
-**4. Sender gọi nhà cung cấp SMS bị timeout, không biết đã gửi chưa. Nhà cung cấp có API tra trạng thái. Làm gì?**
+**3. Ingest trả lời "đã nhận" sớm nhất lúc nào mà vẫn không mất tin?**
+
+- **A.** Ngay khi nhận yêu cầu, chưa lưu gì
+- **B.** Sau khi sender đã đọc xong tin
+- **C.** Sau khi Kafka lưu đủ bản sao
+- **D.** Sau khi nhà cung cấp báo đã gửi
+
+<details><summary>Đáp án</summary>
+
+**C. Sau khi Kafka lưu đủ bản sao**
+
+Lưu đủ bản sao là đủ an toàn. Chờ tới lúc gửi xong cũng đúng, nhưng làm đường gọi trực tiếp phụ thuộc vào nhà cung cấp.
+
+</details>
+
+**4. Sender gọi nhà mạng SMS, hết giờ chờ mà không rõ kết quả. Nhà mạng cho tra trạng thái. Làm gì?**
 
 - **A.** Gửi lại ngay vì OTP cần đến nhanh
 - **B.** Bỏ qua vì gửi trùng là sự cố nặng
-- **C.** Bật transaction Kafka cho lời gọi
-- **D.** Tra trạng thái theo mã rồi quyết
+- **C.** Nhờ Kafka bảo đảm gửi đúng một lần
+- **D.** Hỏi nhà mạng theo mã tin rồi quyết
 
 <details><summary>Đáp án</summary>
 
-**D. Tra trạng thái theo mã rồi quyết**
+**D. Hỏi nhà mạng theo mã tin rồi quyết**
 
-Gửi lại có thể trùng, bỏ qua có thể mất. Transaction Kafka không bao được hệ thống ngoài. Tra trạng thái là cách duy nhất biết chắc.
+Gửi lại có thể trùng, bỏ qua có thể mất. Kafka không kiểm soát được hệ thống bên ngoài. Hỏi nhà mạng là cách duy nhất biết chắc.
 
 </details>
 
-**5. Sender gửi xong, chưa commit offset thì pod bị deploy lại. Điều gì chặn gửi trùng?**
+**5. Sender gửi xong, chưa đánh dấu "đã đọc" thì bị deploy lại. Điều gì chặn gửi trùng?**
 
-- **A.** enable.idempotence=true ở producer
-- **B.** Trạng thái SENT theo notificationId, kênh
-- **C.** isolation.level=read_committed ở consumer
-- **D.** Tăng session.timeout.ms của consumer
+- **A.** Kafka tự xoá tin đã gửi khỏi hàng
+- **B.** Trạng thái ĐÃ GỬI lưu theo mã tin
+- **C.** Deploy luôn chờ sender đọc hết hàng
+- **D.** Nhà mạng tự nhận ra tin bị gửi lại
 
 <details><summary>Đáp án</summary>
 
-**B. Trạng thái SENT theo notificationId, kênh**
+**B. Trạng thái ĐÃ GỬI lưu theo mã tin**
 
-Bản tin được giao lại sau rebalance là chuyện bình thường của at-least-once. Chỉ trạng thái lưu bền theo notificationId và kênh mới cho sender biết đã gửi rồi.
+Tin được giao lại sau khi deploy là chuyện bình thường. Chỉ trạng thái đã lưu theo mã tin mới cho sender biết tin đã gửi rồi.
 
 </details>
 
-**6. Campaign một triệu bản tin trong một giờ. Nút cổ chai thường ở đâu?**
+**6. Campaign một triệu tin trong một giờ. Nút cổ chai thường ở đâu?**
 
 - **A.** Hạn mức gửi của nhà cung cấp kênh
-- **B.** Thông lượng ghi của Kafka broker
+- **B.** Tốc độ ghi của các máy chủ Kafka
 - **C.** Số partition tối đa của một topic
-- **D.** Dung lượng đĩa còn trống của broker
+- **D.** Dung lượng đĩa còn trống của Kafka
 
 <details><summary>Đáp án</summary>
 
 **A. Hạn mức gửi của nhà cung cấp kênh**
 
-Khoảng 280 bản tin mỗi giây là rất nhỏ với Kafka. Giới hạn nằm ở phía gửi: hạn mức và độ trễ API của nhà cung cấp.
+Khoảng 280 tin mỗi giây là rất nhỏ với Kafka. Giới hạn nằm ở phía gửi: hạn mức và tốc độ của nhà cung cấp.
 
 </details>
 
-**7. Policy cho khách ưu tiên 8 lần gửi SMS, khách thường 5 lần, chung một topic kênh. Làm thế nào?**
+**7. Khách ưu tiên được gửi lại 8 lần, khách thường 5 lần, chung một kênh SMS. Làm thế nào?**
 
-- **A.** Tạo consumer group riêng cho từng khách hàng
-- **B.** Tăng retries của producer lên bằng số lần tối đa
-- **C.** Thang chờ theo kênh, dừng theo policy của bản tin
-- **D.** Đặt max.poll.records bằng số lần thử tối đa
+- **A.** Tạo một hàng riêng cho từng khách hàng
+- **B.** Cho Ingest tự gửi lại tới tám lần
+- **C.** Thang chờ theo kênh, dừng theo policy của tin
+- **D.** Đọc nhiều tin hơn trong mỗi lần lấy
 
 <details><summary>Đáp án</summary>
 
-**C. Thang chờ theo kênh, dừng theo policy của bản tin**
+**C. Thang chờ theo kênh, dừng theo policy của tin**
 
-Thang chờ là đặc tính của nhà cung cấp nên đặt theo kênh. Router gắn số lần tối đa vào từng bản tin; sender tới số lần đó thì đưa thẳng sang DLT, dù thang của kênh còn bậc.
+Thang chờ là đặc tính của nhà cung cấp nên đặt theo kênh. Số lần tối đa đi theo từng tin; tới số lần đó thì tin vào DLQ, dù thang còn bậc.
 
 </details>
 
-**8. Nhà cung cấp SMS sập hẳn 30 phút. Vì sao không để retry topic tự lo?**
+**8. Nhà mạng SMS sập hẳn 30 phút. Vì sao không để hàng thử lại tự lo?**
 
-- **A.** Retry topic không cho thời gian chờ dài tới vậy
-- **B.** Kafka xoá retry topic khi consumer lỗi liên tục
-- **C.** Retry topic làm producer ở Ingest bị chặn lại
-- **D.** Mọi bản tin đốt hết lượt rồi dồn hết vào DLT
+- **A.** Hàng thử lại không chờ lâu được như vậy
+- **B.** Kafka xoá hàng thử lại khi lỗi liên tục
+- **C.** Hàng thử lại làm Ingest bị chặn lại
+- **D.** Mọi tin đốt hết lượt rồi dồn vào DLQ
 
 <details><summary>Đáp án</summary>
 
-**D. Mọi bản tin đốt hết lượt rồi dồn hết vào DLT**
+**D. Mọi tin đốt hết lượt rồi dồn vào DLQ**
 
-Khi cả nhà cung cấp sập thì bản tin nào cũng lỗi. Ngắt mạch và pause() container giữ bản tin trong log mà không tốn lượt; retry dành cho lỗi lẻ tẻ.
+Khi cả nhà mạng sập thì tin nào cũng lỗi. Ngắt mạch tạm dừng cả kênh, tin nằm chờ trong Kafka mà không mất lượt; thử lại dành cho lỗi lẻ tẻ.
 
 </details>
 
-**9. Tin số dư vào DLT lúc nhà cung cấp lỗi. Sửa xong, người trực lỡ replay về topic chính hai lần. Khách nhận mấy tin?**
+**9. Tin số dư vào DLQ lúc nhà mạng lỗi. Sửa xong, người trực lỡ gửi lại từ DLQ hai lần. Khách nhận mấy tin?**
 
-- **A.** Một tin, nhờ trạng thái theo notificationId
-- **B.** Hai tin, vì mỗi lần replay là một bản ghi
-- **C.** Không tin nào, vì DLT đã commit offset rồi
-- **D.** Ba tin, tính cả lần gửi lỗi lúc ban đầu
+- **A.** Một tin, nhờ trạng thái theo mã tin
+- **B.** Hai tin, vì mỗi lần gửi lại là một tin
+- **C.** Không tin nào, vì DLQ đã đọc xong rồi
+- **D.** Ba tin, tính cả lần gửi lỗi ban đầu
 
 <details><summary>Đáp án</summary>
 
-**A. Một tin, nhờ trạng thái theo notificationId**
+**A. Một tin, nhờ trạng thái theo mã tin**
 
-Lần replay đầu gửi và ghi SENT. Lần sau sender thấy SENT nên bỏ qua. Replay giữ nguyên notificationId chính là để làm được việc này.
+Lần đầu gửi và ghi ĐÃ GỬI. Lần sau sender thấy ĐÃ GỬI nên bỏ qua. Giữ nguyên mã tin khi gửi lại chính là để làm được việc này.
 
 </details>
 
-**10. Callback "đã giao" của nhà cung cấp tới trước sự kiện SENT của sender. Status service làm gì?**
+**10. Báo "đã giao" của nhà cung cấp tới trước trạng thái SENT của sender. Hub làm gì?**
 
-- **A.** Ghi đè theo sự kiện nào tới sau cùng
-- **B.** Giữ DELIVERED, bỏ qua SENT vì cũ hơn
-- **C.** Từ chối callback, chờ nhà cung cấp gửi lại
-- **D.** Gửi lại bản tin để có thứ tự cho đúng
+- **A.** Ghi theo báo nào tới sau cùng
+- **B.** Giữ DELIVERED, bỏ SENT vì cũ hơn
+- **C.** Từ chối, chờ nhà cung cấp báo lại
+- **D.** Gửi lại tin để có thứ tự đúng
 
 <details><summary>Đáp án</summary>
 
-**B. Giữ DELIVERED, bỏ qua SENT vì cũ hơn**
+**B. Giữ DELIVERED, bỏ SENT vì cũ hơn**
 
-Hai nguồn trạng thái ghi độc lập nên có thể đảo thứ tự. Trạng thái chỉ được tiến: sự kiện cũ hơn trạng thái hiện tại bị bỏ qua.
+Hai nơi ghi trạng thái độc lập nên có thể đảo thứ tự. Trạng thái chỉ được tiến: báo cũ hơn trạng thái hiện tại bị bỏ qua.
 
 </details>
 
@@ -638,14 +622,14 @@ Hai nguồn trạng thái ghi độc lập nên có thể đảo thứ tự. Tr�
 
 Không nhìn bài: *"Kafka trong hub có năm vai trò: ... OTP không chờ campaign vì ... Zalo sập không ảnh hưởng SMS vì ... Không mất nhờ ... Không trùng nhờ ..., trừ chặng cuối, nơi ..."*
 
-Rồi trả lời từng câu đào sâu trong 30 giây: *"Retry của khách ưu tiên khác khách thường ở chỗ ... và hiện thực bằng ... Một bản tin vào DLT khi ..., mang theo ..., rồi ... Sender chết sau khi gọi nhà cung cấp thì ... Nguồn biết kết quả bằng ..., và phải chống trùng vì ..."*
+Rồi trả lời từng câu hỏi sâu trong 30 giây: *"Retry của khách ưu tiên khác khách thường ở chỗ ... Một tin vào DLQ khi ..., rồi ... Sender chết ngay sau khi gửi thì ... Nguồn biết kết quả bằng ..., và phải bỏ qua kết quả trùng vì ..."*
 
 **Ôn nhanh:** [tóm tắt Bài 11](../summaries/0017-notification-hub.md).
 
 ## Nguồn nên đọc
 
-> **Chính:** [Spring Kafka: How the pattern works (non-blocking retries)](https://docs.spring.io/spring-kafka/reference/retrytopic/how-the-pattern-works.html): retry topic, DLT, và cái giá là mất thứ tự.
+> **Chính:** [Spring Kafka: How the pattern works (non-blocking retries)](https://docs.spring.io/spring-kafka/reference/retrytopic/how-the-pattern-works.html): hàng thử lại, DLT, và cái giá là mất thứ tự.
 >
 > **Thêm:** [KafkaConsumer javadoc](https://kafka.apache.org/44/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html), mục Consumption Flow Control; [Kafka Design](https://kafka.apache.org/44/design/design/), mục Message Delivery Semantics.
 
-> **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "nếu interviewer hỏi sao không dùng RabbitMQ có priority queue thì trả lời thế nào?", "tính số partition cho topic SMS ra sao?". Dán kết quả quiz để biết chỗ cần ôn.
+> **Còn chỗ nào mơ hồ?** Hỏi thẳng giáo viên, ví dụ "nếu bị hỏi sao không dùng một hàng đợi có sẵn độ ưu tiên thì trả lời thế nào?", "tính số partition cho kênh SMS ra sao?". Dán kết quả quiz để biết chỗ cần ôn.
