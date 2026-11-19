@@ -259,28 +259,46 @@
     }
 
     // ---------- nút ----------
-    function stepAnimated() {
-      var n = Math.min(5, END - S.t);
-      for (var i = 0; i < n; i++) {
-        tick();
-        (function (note, A) {
-          pl.call(function () { paint(); });
-          if (A) pl.par([['IN', 'TA', '', 'msg'], ['WA', 'SMS', '', 'msg'], ['WA', 'Push', '', 'msg']].concat(S.blocked.A ? [] : [['WA', 'Zalo', '', 'msg']]));
-          else pl.par([['IN', 'T1', '', 'msg'], ['IN', 'T2', '', 'msg'], ['W1', 'SMS', '', 'msg'], ['W2', 'Push', '', 'msg']].concat(S.blocked.camp ? [] : [['W3', 'Zalo', '', 'msg']]));
-          pl.say(note, 250);
-        })(S.note, design.value === 'A');
-      }
+    // Một đoạn n giây có hình động: logic chạy lúc phát (pl.step), nên hình và chú thích khớp với từng đoạn.
+    function rtTotal() { return S.rt.reduce(function (s, r) { return s + r.n; }, 0); }
+    function playSecs(n, ms) {
+      pl.step(function () {
+        if (S.t >= END) return;
+        var rt0 = rtTotal(), dlt0 = S.dlt, A = design.value === 'A';
+        for (var i = 0; i < n && S.t < END; i++) tick();
+        paint(); cap.textContent = '› ' + S.note;
+        var t = A ? [['IN', 'TA', '', 'msg'], ['WA', 'SMS', '', 'msg'], ['WA', 'Push', '', 'msg']].concat(S.blocked.A ? [] : [['WA', 'Zalo', '', 'msg']])
+                  : [['IN', 'T1', '', 'msg'], ['IN', 'T2', '', 'msg'], ['W1', 'SMS', '', 'msg'], ['W2', 'Push', '', 'msg']].concat(S.blocked.camp ? [] : [['W3', 'Zalo', '', 'msg']]);
+        if (on('camp') && S.t - 1 >= CAMP.from && S.t - n < CAMP.to) t.push(['IN', A ? 'TA' : 'T3', 'campaign', 'msg']);
+        if (rtTotal() > rt0) t.push([A ? 'WA' : 'W3', 'RT', 'thử lại', 'err']);
+        if (S.dlt > dlt0) t.push(['RT', 'DLT', 'hết lượt', 'err']);
+        return Promise.all(t.map(function (x) { return st.tok(x[0], x[1], { label: x[2], kind: x[3] }); }));
+      });
+      pl.wait(ms);
     }
     var btnStep = el('button', null, '+5 giây'); btnStep.type = 'button';
-    btnStep.addEventListener('click', function () { pl.run(stepAnimated, draw); });
+    btnStep.addEventListener('click', function () { pl.run(function () { for (var i = 0; i < 5; i++) playSecs(1, 250); }, draw); });
     var btnRun = el('button', null, 'Chạy tới giây 60'); btnRun.type = 'button';
-    btnRun.addEventListener('click', function () { while (S.t < END) tick(); draw(); });
+    btnRun.addEventListener('click', function () {
+      // Phát từng đoạn 5 giây để thấy diễn biến: campaign đổ vào, Zalo sập, hàng chờ dồn.
+      pl.run(function () { var k = Math.ceil((END - S.t) / 5); for (var i = 0; i < k; i++) playSecs(5, 150); }, draw);
+    });
     var btnReplay = el('button', null, 'Gửi lại từ DLQ'); btnReplay.type = 'button';
     btnReplay.addEventListener('click', function () {
-      S.q[qOf('camp')].push({ c: 'camp', t: S.t, n: S.dlt }); S.note = 'Gửi lại ' + fmt(S.dlt) + ' tin từ DLQ về hàng campaign.'; S.dlt = 0; draw(); cap.textContent = '› ' + S.note;
+      var n = S.dlt;
+      S.q[qOf('camp')].push({ c: 'camp', t: S.t, n: n }); S.note = 'Gửi lại ' + fmt(n) + ' tin từ DLQ về hàng campaign, giữ nguyên mã tin.'; S.dlt = 0;
+      pl.run(function () {
+        pl.pulse('DLT');
+        pl.tok('DLT', design.value === 'A' ? 'TA' : 'T3', 'gửi lại', 'msg');
+        pl.call(paint);
+        pl.say(S.note, 500);
+      }, function () { draw(); cap.textContent = '› ' + S.note; });
     });
     var btnReset = el('button', null, 'Làm lại'); btnReset.type = 'button';
-    btnReset.addEventListener('click', function () { fresh(); draw(); });
+    btnReset.addEventListener('click', function () {
+      fresh(); S.note = 'Làm lại từ giây 0: mọi hàng trống, bộ đếm về 0.';
+      pl.run(function () { pl.call(paint); pl.pulse('IN'); pl.say(S.note, 300); }, draw);
+    });
     [btnStep, btnRun, btnReplay, btnReset].forEach(function (b) { rb.appendChild(b); });
     rb.appendChild(pl.controls());
 

@@ -311,40 +311,66 @@
     }
 
     // ---------- nút ----------
+    // Một đoạn có hình động: logic chạy lúc phát (pl.step), nên hình và chú thích khớp với từng đoạn.
+    function tokensFor(w) {
+      var t = [['R', 'TO', '', 'msg'], ['R', 'TT', '', 'msg']];
+      if (w.calls) {
+        t.push(['TO', 'S', '', 'msg'], ['TT', 'S', '', 'msg']);
+        t.push(['S', 'P', w.fail > w.sent ? 'lỗi' : 'gửi', w.fail > w.sent ? 'err' : 'msg']);
+      }
+      if (w.toRetry) t.push(['S', 'RT', 'thử lại', 'err']);
+      if (w.dead) t.push(['S', 'DLT', 'hết lượt', 'err']);
+      return t;
+    }
+    function playWindow(n, ms) {
+      pl.step(function () {
+        if (S.t >= END) return;
+        var w = runWindow(n);
+        paint(); cap.textContent = '› ' + S.lastNote;
+        var p = tokensFor(w).map(function (x) { return st.tok(x[0], x[1], { label: x[2], kind: x[3] }); });
+        if (cb.box.checked && S.cb.state === 'open') p.push(st.pulse('CB'));
+        return Promise.all(p);
+      });
+      pl.wait(ms);
+    }
     var btnStep = el('button', null, '+30 giây'); btnStep.type = 'button';
-    btnStep.addEventListener('click', function () {
+    btnStep.addEventListener('click', function () { pl.run(function () { playWindow(STEP, 700); }, draw); });
+    var btnRun = el('button', null, 'Chạy hết 10 phút'); btnRun.type = 'button';
+    btnRun.addEventListener('click', function () {
+      // Phát từng phút một cho thấy diễn biến: nhà mạng sập, hàng chờ dồn, DLQ tăng.
       pl.run(function () {
-        var w = runWindow(STEP), paused = cb.box.checked && S.cb.state === 'open';
-        pl.par([['R', 'TO', '', 'msg'], ['R', 'TT', '', 'msg']]);
-        if (w.calls) {
-          pl.par([['TO', 'S', '', 'msg'], ['TT', 'S', '', 'msg']]);
-          pl.tok('S', 'P', w.fail > w.sent ? 'lỗi' : 'gửi', w.fail > w.sent ? 'err' : 'msg');
-        }
-        var after = [];
-        if (w.toRetry) after.push(['S', 'RT', 'thử lại', 'err']);
-        if (w.dead) after.push(['S', 'DLT', 'hết lượt', 'err']);
-        if (after.length) pl.par(after);
-        if (paused) pl.pulse('CB');
-        pl.call(paint);
-        pl.say(S.lastNote, 300);
+        var from = S.t, k = Math.ceil((END - S.t) / 60);
+        for (var i = 0; i < k; i++) playWindow(60, 250);
+        pl.call(function () { S.lastNote = 'Chạy từ phút ' + clock(from) + ' tới ' + clock(S.t) + '. ' + S.ev.map(function (e) { return clock(e[0]) + ' ' + e[1]; }).slice(-4).join(' '); });
       }, draw);
     });
-    var btnRun = el('button', null, 'Chạy hết 10 phút'); btnRun.type = 'button';
-    btnRun.addEventListener('click', function () { runWindow(END - S.t); S.lastNote = 'Chạy tới phút ' + clock(S.t) + '. ' + S.ev.map(function (e) { return clock(e[0]) + ' ' + e[1]; }).slice(-4).join(' '); draw(); });
     var btnReplay = el('button', null, 'Gửi lại từ DLQ'); btnReplay.type = 'button';
     btnReplay.addEventListener('click', function () {
-      var back = 0, keep = [];
+      var back = { otp: 0, tx: 0 }, keep = [];
       S.dlt.forEach(function (f) {
         if (f.perm) { keep.push(f); return; }
-        S.lane[f.lane].q.push({ type: f.type, lane: f.lane, t0: f.t0, n: f.n, perm: false }); back += f.n; S.dltN[f.type] -= f.n;
+        S.lane[f.lane].q.push({ type: f.type, lane: f.lane, t0: f.t0, n: f.n, perm: false }); back[f.lane] += f.n; S.dltN[f.type] -= f.n;
       });
       S.dlt = keep;
       var permLeft = keep.reduce(function (s, f) { return s + f.n; }, 0);
-      S.lastNote = 'Gửi lại ' + fmt(back) + ' tin về hàng chính, giữ nguyên mã tin, bắt đầu lượt thử mới.' + (permLeft ? ' ' + fmt(permLeft) + ' tin số sai vẫn ở lại DLQ: phải sửa dữ liệu, gửi lại không giúp.' : '');
-      draw();
+      S.lastNote = 'Gửi lại ' + fmt(back.otp + back.tx) + ' tin về hàng chính, giữ nguyên mã tin, bắt đầu lượt thử mới.' + (permLeft ? ' ' + fmt(permLeft) + ' tin số sai vẫn ở lại DLQ: phải sửa dữ liệu, gửi lại không giúp.' : '');
+      pl.run(function () {
+        pl.pulse('DLT');
+        var t = [];
+        if (back.tx) t.push(['DLT', 'TT', 'gửi lại', 'msg']);
+        if (back.otp) t.push(['DLT', 'TO', 'gửi lại', 'msg']);
+        if (t.length) pl.par(t);
+        pl.call(paint);
+        if (permLeft) pl.pulse('DLT');
+        pl.say(S.lastNote, 500);
+      }, draw);
     });
     var btnReset = el('button', null, 'Làm lại'); btnReset.type = 'button';
-    btnReset.addEventListener('click', function () { fresh(); draw(); });
+    btnReset.addEventListener('click', function () {
+      fresh();
+      S.lastNote = 'Làm lại từ phút 0:00: mọi hàng trống, bộ đếm về 0.';
+      pl.run(function () { pl.call(paint); pl.pulse('R'); pl.say(S.lastNote, 300); }, draw);
+    });
     [btnStep, btnRun, btnReplay, btnReset].forEach(function (b) { rb.appendChild(b); });
     rb.appendChild(pl.controls());
 

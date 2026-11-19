@@ -38,12 +38,27 @@
     return osReduced();
   }
   // Ô chọn "Hiệu ứng chuyển động" đặt vào thanh điều khiển của mô phỏng
+  // Hệ điều hành tắt hiệu ứng (ví dụ Windows: Animation effects = Off) mà người xem chưa chọn tay:
+  // hiện lời nhắc ngay cạnh ô, vì nếu không thì bấm nút chỉ thấy số đổi, không thấy gì chạy.
+  // Mọi ô trên trang đồng bộ với nhau; lựa chọn nhớ theo trang web (localStorage).
   function motionToggle() {
-    var lab = document.createElement('label');
-    var box = document.createElement('input'); box.type = 'checkbox'; box.checked = !reducedMotion();
-    lab.appendChild(box); lab.appendChild(document.createTextNode(' Hiệu ứng chuyển động'));
-    lab.title = osReduced() ? 'Hệ điều hành đang bật "giảm chuyển động"; tick để vẫn xem hiệu ứng' : 'Bỏ tick để tắt hiệu ứng';
-    box.addEventListener('change', function () { try { localStorage.setItem(KEY, box.checked ? 'on' : 'off'); } catch (e) {} });
+    var lab = document.createElement('label'); lab.className = 'fa-motion';
+    var box = document.createElement('input'); box.type = 'checkbox';
+    var txt = document.createElement('span');
+    lab.appendChild(box); lab.appendChild(txt);
+    function render() {
+      box.checked = !reducedMotion();
+      var hint = osReduced() && override() === null;
+      txt.textContent = hint ? ' Hiệu ứng chuyển động (đang tắt theo cài đặt hệ điều hành, tick để bật)' : ' Hiệu ứng chuyển động';
+      txt.style.color = hint ? 'var(--bad)' : '';
+      lab.title = osReduced() ? 'Hệ điều hành đang bật "giảm chuyển động"; tick để vẫn xem hiệu ứng' : 'Bỏ tick để tắt hiệu ứng';
+    }
+    lab._render = render;
+    box.addEventListener('change', function () {
+      try { localStorage.setItem(KEY, box.checked ? 'on' : 'off'); } catch (e) {}
+      document.querySelectorAll('label.fa-motion').forEach(function (l) { if (l._render) l._render(); });
+    });
+    render();
     return lab;
   }
 
@@ -196,6 +211,7 @@
     var p = {
       busy: false,
       call: function (f) { q.push(function () { f(); }); },                       // đổi trạng thái hình tại thời điểm này
+      step: function (f) { q.push(function () { return f(); }); },               // như call, nhưng chờ Promise mà f trả về (logic chạy lúc phát)
       say: function (t, ms) { q.push(function () { if (cap) cap.textContent = '› ' + t; return st && st.wait(ms || 450); }); },
       tok: function (a, b, label, kind, o) {
         q.push(function () { if (!st) return; var x = o || {}; x.label = label; x.kind = kind; return st.tok(a, b, x); });
