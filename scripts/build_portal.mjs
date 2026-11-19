@@ -178,7 +178,9 @@ const COMBO_SIMS = [
   {
     id: 'sim-hub', title: 'Bài toán notification hub: OTP, campaign và nhà cung cấp sập', api: 'HubSim', script: 'hub-sim.js',
     lessons: ['0017-notification-hub'],
-    md: `**Đề:** một hub gửi thông báo cho ngân hàng, nhận từ API Connect (sync) và Kafka (async), gửi ra 5 kênh, tải hàng triệu người dùng, không mất, không trùng. Ba ràng buộc: OTP không được chờ campaign; nhà cung cấp có thể sập; mất hay trùng đều là sự cố. Thiết kế đầy đủ ở [Bài 11](../lessons/0017-notification-hub.md).
+    md: `**Bối cảnh:** nhiều hệ thống nghiệp vụ của ngân hàng tự gửi thông báo, mỗi hệ thống tự nối với từng nhà cung cấp, không có trạng thái tập trung, không có chỗ chung để OTP đi trước khuyến mãi.
+
+**Đề:** một hub gửi thông báo tập trung, nhận từ API Connect (sync) và Kafka (async), gửi ra 5 kênh, hàng chục triệu bản tin mỗi ngày, không mất, không trùng. Ba ràng buộc: OTP không được chờ campaign; nhà cung cấp có thể sập; mất hay trùng đều là sự cố. Thiết kế đầy đủ ở [Bài 11](../lessons/0017-notification-hub.md).
 
 \`\`\`mermaid
 flowchart TB
