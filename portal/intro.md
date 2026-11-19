@@ -17,11 +17,12 @@ Yêu cầu nghiệp vụ dẫn đường cho cả khoá là **không mất messa
 | 3 · Consumer và xử lý lỗi | 5, 5b, 5c, 6, 7 | Commit đúng lúc; rebalance; chọn at-most/at-least/exactly-once; poison pill và DLT; idempotent consumer, outbox, transaction |
 | 4 · Thiết kế và kiểm tra cuối | 8, 8b, 8c, 8d, 9 | Thẻ thiết kế topic; quá tải, thông lượng, độ trễ; đọc lại, audit, giữ dữ liệu; hợp đồng sự kiện (schema); bài thi thiết kế 30 phút |
 | 5 · Tổng kết | 10 | Ba ý cốt lõi (partition, ack, commit), các ngộ nhận phổ biến, sáu câu hỏi thiết kế |
+| 6 · Bài toán thiết kế | 11 | Notification hub cho ngân hàng: làn ưu tiên, cách ly nhà cung cấp, không mất và không trùng từng chặng |
 
 Ngoài bài học còn có bốn nhóm hỗ trợ ở thanh bên:
 
 - **Mô phỏng**: mỗi mô phỏng gắn với một bài (key → partition, độ bền, idempotent producer, commit offset, rebalance, DLT, exactly-once, quá tải, đọc lại, schema). Mô phỏng chạy theo mô hình mà tài liệu Kafka mô tả, không phải broker thật.
-- **Mô phỏng tổng hợp**: một sự kiện đi trọn đường từ producer tới DB, gộp Bài 4 tới 7; chọn cấu hình, gây sự cố, xem sự kiện nào mất, trùng hay đúng.
+- **Mô phỏng tổng hợp**: gộp nhiều bài vào một bài toán: notification hub (OTP, campaign, nhà cung cấp sập), và một sự kiện đi trọn đường từ producer tới DB (Bài 4 tới 7); chọn cấu hình, gây sự cố, xem sự kiện nào mất, trùng hay đúng.
 - **Tóm tắt ôn nhanh**: mỗi bài một đoạn tóm tắt bằng lời, khoảng một phút, để ôn trước buổi họp.
 - **Tra cứu**: khái niệm cốt lõi, sổ tay tình huống, câu hỏi cho ngày đầu, so sánh dịch vụ Kafka managed trên AWS.
 

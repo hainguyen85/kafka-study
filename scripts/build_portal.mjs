@@ -22,6 +22,7 @@ const PARTS = [
   { title: 'Phần 3 · Consumer và xử lý lỗi', lessons: ['0005-consumer-offset-commit', '0011-rebalance', '0012-delivery-semantics', '0006-error-handling-dlt', '0007-idempotent-consumer-transactions'] },
   { title: 'Phần 4 · Thiết kế và kiểm tra cuối', lessons: ['0008-topic-design', '0014-throughput-latency', '0015-replay-retention', '0016-schema-evolution', '0009-final-design-test'] },
   { title: 'Phần 5 · Tổng kết', lessons: ['0013-core-80-20'] },
+  { title: 'Phần 6 · Bài toán thiết kế', lessons: ['0017-notification-hub'] },
 ];
 
 // Mô phỏng: tập trung một nhóm. `lessons` = bài dùng mô phỏng này (để bài hiện lối tắt).
@@ -148,9 +149,84 @@ const E2E_MODEL = `Một sự kiện chuyển tiền đi trọn đường: produ
 - **Cấu hình cho tiền**: thêm \`min.insync.replicas=2\`, \`UNIQUE(eventId)\` và DLT.
 - **Cấu hình "cho nhanh"**: \`acks=1\` (idempotence tự tắt), commit trước khi xử lý xong.
 
+\`\`\`mermaid
+flowchart LR
+P["Producer<br/>service chuyển tiền"] -->|"① leader chết<br/>② ISR co, đĩa hỏng<br/>③ ack mất<br/>④ producer crash"| K[("Topic payments<br/>B1 leader · B2 · B3")]
+K -->|"⑤ consumer crash<br/>⑥ rebalance<br/>⑦ message lỗi"| C["Consumer"]
+C --> DB[("DB")]
+C -.->|"lỗi dữ liệu"| DLT[("payments-dlt")]
+class K ok
+class DLT warn
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+classDef warn fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+\`\`\`
+
+Bảy sự cố nằm ở ba chặng. Mỗi sự cố có một ô cấu hình chặn được:
+
+| Sự cố | Nguy cơ | Ô chặn |
+|---|---|---|
+| ① Leader chết trước khi follower fetch | Mất (đã ack) | \`acks=all\` |
+| ② ISR co còn leader, rồi đĩa leader hỏng | Mất (đã ack) | \`min.insync.replicas=2\` |
+| ③ Ack mất, producer retry | Trùng trong log | idempotence, hoặc chống trùng ở consumer |
+| ④ Producer crash, restart, gửi lại | Trùng trong log | chống trùng ở consumer |
+| ⑤ ⑥ Consumer crash hoặc rebalance giữa lúc xử lý | Mất (commit trước) hoặc trùng (commit sau) | commit sau + chống trùng |
+| ⑦ Message sai dữ liệu | Mất im lặng | DLT có cảnh báo |
+
 Đổi một ô bất kỳ thì cấu hình thành "Tự chọn". Mô phỏng theo mô hình tài liệu mô tả, không phải broker thật; service phát dùng outbox nên sau crash vẫn gửi lại.`;
 
 const COMBO_SIMS = [
+  {
+    id: 'sim-hub', title: 'Bài toán notification hub: OTP, campaign và nhà cung cấp sập', api: 'HubSim', script: 'hub-sim.js',
+    lessons: ['0017-notification-hub'],
+    md: `**Đề:** một hub gửi thông báo cho ngân hàng, nhận từ API Connect (sync) và Kafka (async), gửi ra 5 kênh, tải hàng triệu người dùng, không mất, không trùng. Ba ràng buộc: OTP không được chờ campaign; nhà cung cấp có thể sập; mất hay trùng đều là sự cố. Thiết kế đầy đủ ở [Bài 11](../lessons/0017-notification-hub.md).
+
+\`\`\`mermaid
+flowchart TB
+subgraph A["A: một topic chung"]
+direction LR
+qa["Partition: C C C … C OTP"] --> wa["Worker<br/>đọc theo offset"] --> za["Zalo 1.000/giây"]
+end
+subgraph B["B: mỗi mức ưu tiên một topic"]
+direction LR
+qb1["notif.otp: OTP OTP"] --> wb1["Nhóm OTP"] --> sb["SMS"]
+qb2["notif.marketing: C C C … C"] --> wb2["Nhóm campaign"] --> zb["Zalo"]
+end
+A ~~~ B
+class qa bad
+class qb1 ok
+classDef bad fill:#fbe9e7,stroke:#b3261e,color:#1c1b19
+classDef ok fill:#e6f4ea,stroke:#1b7a3d,color:#1c1b19
+\`\`\`
+
+Consumer đọc mỗi partition theo thứ tự offset, nên trong topic chung OTP đứng sau campaign; Zalo sập mà retry tại chỗ thì cả hàng đứng. Mô phỏng tính theo giây; OTP 20/giây qua SMS, giao dịch 300/giây qua Push, campaign 100.000 qua Zalo. Mọi con số là giả định; hạn OTP rút còn 30 giây.
+
+\`\`\`mermaid
+sequenceDiagram
+participant S as Sender
+participant P as Nhà cung cấp
+participant U as Điện thoại khách
+S->>P: gửi bản tin
+P->>U: đã gửi tới khách
+P--xS: phản hồi mất, timeout
+Note over S: Đã gửi hay chưa?
+alt Gửi lại
+S->>P: khách nhận 2 tin
+else Không gửi lại
+Note over S: nếu chưa gửi thì mất
+else Tra trạng thái
+S->>P: hỏi theo notificationId
+end
+\`\`\`
+
+Dòng "timeout mơ hồ" là giới hạn mà không cấu hình Kafka nào giải được: cần nhà cung cấp hợp tác.
+
+**Thử:**
+1. Thiết kế A, retry tại chỗ, bấm "+5 giây" bốn lần. OTP chờ bao lâu? Đổi sang B và làm lại.
+2. Thiết kế A, retry topic: OTP đỡ hơn không, và vì sao vẫn chậm?
+3. Thiết kế B, retry topic, chạy tới giây 60. Bao nhiêu bản tin vào DLT? Bấm "Replay DLT".
+4. Bỏ hai sự cố đầu, tick ba sự cố còn lại. Đếm số bản tin trùng, rồi tick "Chống trùng".
+5. Thử ba cách xử lý timeout mơ hồ và nói cái giá của từng cách.`,
+  },
   {
     id: 'sim-e2e', title: 'Từ producer tới DB: sự cố ở đâu thì mất, trùng?', api: 'E2ESim', script: 'e2e-sim.js',
     opts: { mode: 'one' }, lessons: ['0009-final-design-test', '0013-core-80-20'],

@@ -23,7 +23,7 @@ ORDER = ['0001-kafka-big-picture', '0002-key-partition-offset', '0003-build-clus
          '0005-consumer-offset-commit', '0011-rebalance', '0012-delivery-semantics',
          '0006-error-handling-dlt', '0007-idempotent-consumer-transactions',
          '0008-topic-design', '0014-throughput-latency', '0015-replay-retention',
-         '0016-schema-evolution', '0009-final-design-test']
+         '0016-schema-evolution', '0009-final-design-test', '0017-notification-hub']
 OUT = ROOT / 'reference' / '0005-usecase-index.html'
 INDEX_LINK = '<p class="uc-index-link"><a href="../reference/0005-usecase-index.html">Xem mọi usecase của khoá học</a></p>'
 

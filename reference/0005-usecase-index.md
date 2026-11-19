@@ -4,7 +4,7 @@
 
 # Tổng hợp usecase
 
-51 usecase từ 13 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.
+54 usecase từ 14 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.
 
 Trang này do `scripts/build_usecases.py` sinh từ các bài học; cột "Cách xử lý" lấy câu bắt đầu bằng "Xử lý" hoặc "Sửa" trong usecase.
 
@@ -123,3 +123,11 @@ Trang này do `scripts/build_usecases.py` sinh từ các bài học; cột "Các
 | [(c) Ngân hàng: nhiều loại sự kiện tài khoản trong một topic](../lessons/0016-schema-evolution.md#uc-c) | AccountOpened, Deposited, Withdrawn, AccountClosed phải cùng một topic, cùng key là số tài khoản để giữ thứ tự (Bài 2). Với TopicNameStrategy mặc định, subject accounts-value chỉ chứa một chuỗi version; đăng ký loại record thứ hai sẽ bị coi là "thay đổi" của … | dùng TopicRecordNameStrategy (mỗi loại record một subject trong phạm vi topic), hoặc schema references; tránh RecordNameStrategy nếu tên record có thể trùng giữa các topic, vì nó kiểm tra trên mọi topic. |
 | [(d) Chứng khoán: đổi kiểu giá từ số nguyên sang số thập phân](../lessons/0016-schema-evolution.md#uc-d) | Topic lệnh chứng khoán đang có price kiểu long (đơn vị đồng). Sàn chuyển sang giá có phần lẻ, team muốn đổi sang kiểu khác. | thêm field mới tuỳ chọn có default cho giá kiểu mới và giữ field cũ trong giai đoạn chuyển; nếu bắt buộc đổi hẳn thì làm theo docs: "create a brand-new topic" và chuyển consumer sang topic mới. |
 | [(e) Consumer đọc topic Avro bằng deserializer chuỗi](../lessons/0016-schema-evolution.md#uc-e) | Một team viết consumer nhanh bằng StringDeserializer để "xem thử" topic thanh toán. Mỗi message có 5 byte đầu là magic và schema id, rồi tới dữ liệu Avro nhị phân: chuỗi đọc ra là rác. | mọi consumer của topic dùng deserializer cùng hệ registry, bọc bằng ErrorHandlingDeserializer để lỗi giải mã đi thẳng vào DLT (Bài 6) thay vì chặn vòng poll(). |
+
+## Bài 11: Bài toán notification hub
+
+| Usecase | Chuyện gì xảy ra | Cách xử lý |
+|---|---|---|
+| [(a) Ngân hàng: campaign 9 giờ sáng, OTP tới chậm hai phút](../lessons/0017-notification-hub.md#uc-a) | Marketing gửi khuyến mãi cho một triệu khách lúc 9 giờ, cùng lúc khách đăng nhập để chuyển tiền. Bản tin campaign và OTP nằm chung một topic: OTP đứng sau hàng trăm nghìn bản tin campaign trong cùng partition, nhiều mã hết hạn trước khi tới. | tách topic và consumer group theo mức ưu tiên, giữ riêng một phần hạn mức SMS cho OTP, và cho campaign service tự điều tốc theo hạn mức của kênh. |
+| [(b) Ngân hàng: nhà cung cấp Zalo sập 20 phút](../lessons/0017-notification-hub.md#uc-b) | Sender gọi Zalo liên tục lỗi. Nếu retry tại chỗ thì partition đứng yên; nếu SMS và Zalo chung consumer group thì SMS cũng đứng. | mỗi kênh một topic và consumer group; ngắt mạch thì pause() container Zalo, lag tăng nhưng bản tin vẫn nằm trong log; lỗi tạm thời đi retry topic, hết lượt vào DLT có cảnh báo; bản tin quan trọng chuyển sang kênh dự … |
+| [(c) Ngân hàng: khách nhận hai tin báo trừ tiền](../lessons/0017-notification-hub.md#uc-c) | Pod sender bị deploy lại ngay sau khi gửi tin, trước khi commit offset; pod mới đọc lại và gửi lần hai. Khách tưởng bị trừ tiền hai lần và gọi tổng đài. | ghi trạng thái (notificationId, kênh) trước và sau khi gọi nhà cung cấp, bỏ qua bản tin đã SENT; gửi kèm khoá idempotency khi nhà cung cấp hỗ trợ. |

@@ -17,7 +17,7 @@ table.uc td:last-child { width: 30%; }
 <main>
 <nav class="crumbs"><a href="../README.md">Kafka</a> / Bảng tra · <a href="0003-tricky-scenarios.html">Sổ tay usecase (triệu chứng, nguyên nhân, code)</a></nav>
 <h1>Tổng hợp usecase</h1>
-<p class="lede">51 usecase từ 13 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.</p>
+<p class="lede">54 usecase từ 14 bài, theo thứ tự học. Bấm tên usecase để mở đúng chỗ trong bài, nơi có sơ đồ và giải thích đầy đủ.</p>
 <p><input id="ucFilter" type="search" placeholder="Lọc theo từ khoá: thanh toán, rebalance, acks, DLT..." aria-label="Lọc usecase"></p>
 <p>Trang này do <code>scripts/build_usecases.py</code> sinh từ các bài học; cột "Cách xử lý" lấy câu bắt đầu bằng "Xử lý" hoặc "Sửa" trong usecase.</p>
 
@@ -123,6 +123,13 @@ table.uc td:last-child { width: 30%; }
 <tr><td><a href="../lessons/0016-schema-evolution.html#uc-c">(c) Ngân hàng: nhiều loại sự kiện tài khoản trong một topic</a></td><td>AccountOpened, Deposited, Withdrawn, AccountClosed phải cùng một topic, cùng key là số tài khoản để giữ thứ tự (Bài 2). Với TopicNameStrategy mặc định, subject accounts-value chỉ chứa một chuỗi version; đăng ký loại record thứ hai sẽ bị coi là "thay đổi" của …</td><td>dùng TopicRecordNameStrategy (mỗi loại record một subject trong phạm vi topic), hoặc schema references; tránh RecordNameStrategy nếu tên record có thể trùng giữa các topic, vì nó kiểm tra trên mọi topic.</td></tr>
 <tr><td><a href="../lessons/0016-schema-evolution.html#uc-d">(d) Chứng khoán: đổi kiểu giá từ số nguyên sang số thập phân</a></td><td>Topic lệnh chứng khoán đang có price kiểu long (đơn vị đồng). Sàn chuyển sang giá có phần lẻ, team muốn đổi sang kiểu khác.</td><td>thêm field mới tuỳ chọn có default cho giá kiểu mới và giữ field cũ trong giai đoạn chuyển; nếu bắt buộc đổi hẳn thì làm theo docs: "create a brand-new topic" và chuyển consumer sang topic mới.</td></tr>
 <tr><td><a href="../lessons/0016-schema-evolution.html#uc-e">(e) Consumer đọc topic Avro bằng deserializer chuỗi</a></td><td>Một team viết consumer nhanh bằng StringDeserializer để "xem thử" topic thanh toán. Mỗi message có 5 byte đầu là magic và schema id, rồi tới dữ liệu Avro nhị phân: chuỗi đọc ra là rác.</td><td>mọi consumer của topic dùng deserializer cùng hệ registry, bọc bằng ErrorHandlingDeserializer để lỗi giải mã đi thẳng vào DLT (Bài 6) thay vì chặn vòng poll().</td></tr>
+</table>
+<h2>Bài 11: Bài toán notification hub</h2>
+<table class="uc">
+<tr><th>Usecase</th><th>Chuyện gì xảy ra</th><th>Cách xử lý</th></tr>
+<tr><td><a href="../lessons/0017-notification-hub.html#uc-a">(a) Ngân hàng: campaign 9 giờ sáng, OTP tới chậm hai phút</a></td><td>Marketing gửi khuyến mãi cho một triệu khách lúc 9 giờ, cùng lúc khách đăng nhập để chuyển tiền. Bản tin campaign và OTP nằm chung một topic: OTP đứng sau hàng trăm nghìn bản tin campaign trong cùng partition, nhiều mã hết hạn trước khi tới.</td><td>tách topic và consumer group theo mức ưu tiên, giữ riêng một phần hạn mức SMS cho OTP, và cho campaign service tự điều tốc theo hạn mức của kênh.</td></tr>
+<tr><td><a href="../lessons/0017-notification-hub.html#uc-b">(b) Ngân hàng: nhà cung cấp Zalo sập 20 phút</a></td><td>Sender gọi Zalo liên tục lỗi. Nếu retry tại chỗ thì partition đứng yên; nếu SMS và Zalo chung consumer group thì SMS cũng đứng.</td><td>mỗi kênh một topic và consumer group; ngắt mạch thì pause() container Zalo, lag tăng nhưng bản tin vẫn nằm trong log; lỗi tạm thời đi retry topic, hết lượt vào DLT có cảnh báo; bản tin quan trọng chuyển sang kênh dự …</td></tr>
+<tr><td><a href="../lessons/0017-notification-hub.html#uc-c">(c) Ngân hàng: khách nhận hai tin báo trừ tiền</a></td><td>Pod sender bị deploy lại ngay sau khi gửi tin, trước khi commit offset; pod mới đọc lại và gửi lần hai. Khách tưởng bị trừ tiền hai lần và gọi tổng đài.</td><td>ghi trạng thái (notificationId, kênh) trước và sau khi gọi nhà cung cấp, bỏ qua bản tin đã SENT; gửi kèm khoá idempotency khi nhà cung cấp hỗ trợ.</td></tr>
 </table>
 </main>
 <script>

@@ -20,6 +20,7 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Bài 8b: Quá tải, thông lượng, độ trễ](lessons/0014-throughput-latency.md) · [html](lessons/0014-throughput-latency.html)
 - [Bài 8c: Đọc lại, audit, giữ dữ liệu](lessons/0015-replay-retention.md) · [html](lessons/0015-replay-retention.html)
 - [Bài 8d: Hợp đồng sự kiện (schema)](lessons/0016-schema-evolution.md) · [html](lessons/0016-schema-evolution.html)
+- [Bài 11: Bài toán notification hub](lessons/0017-notification-hub.md) · [html](lessons/0017-notification-hub.html)
 
 ## Tóm tắt từng bài (ôn nhanh)
 
@@ -39,6 +40,7 @@ Bản `.md` được sinh tự động từ `.html` (xem `scripts/html2md.py`). 
 - [Tóm tắt Bài 8b: Quá tải, thông lượng, độ trễ](summaries/0014-throughput-latency.md)
 - [Tóm tắt Bài 8c: Đọc lại, audit, giữ dữ liệu](summaries/0015-replay-retention.md)
 - [Tóm tắt Bài 8d: Hợp đồng sự kiện (schema)](summaries/0016-schema-evolution.md)
+- [Tóm tắt Bài 11: Bài toán notification hub](summaries/0017-notification-hub.md)
 
 ## Bảng tra
 
