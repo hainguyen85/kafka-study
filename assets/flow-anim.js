@@ -2,7 +2,7 @@
  * FlowAnim: sân khấu SVG nhỏ cho các mô phỏng. Vẽ các "nút" (producer, broker, consumer...)
  * và cho "token" (message, ack, lỗi, fetch) chạy giữa chúng bằng Web Animations API.
  * Không thư viện ngoài. Màu lấy từ biến CSS trong style.css (sáng/tối).
- * Người dùng bật "giảm chuyển động" trong hệ điều hành thì token không chạy; trạng thái vẫn đổi.
+ * Hiệu ứng mặc định bật; người xem bỏ tick "Hiệu ứng chuyển động" thì token không chạy, trạng thái vẫn đổi.
  *
  * Dùng:
  *   var st = FlowAnim.stage(hostEl, { width: 640, height: 250, label: 'Mô tả cho trình đọc màn hình' });
@@ -24,22 +24,12 @@
     return e;
   }
 
-  // Mặc định theo hệ điều hành (prefers-reduced-motion); người xem có thể bật/tắt tay bằng motionToggle(),
-  // lựa chọn được nhớ trong localStorage của trình duyệt (hỏng thì bỏ qua).
+  // Hiệu ứng mặc định BẬT, không theo cài đặt "giảm chuyển động" của hệ điều hành (người học chọn, 2026-11-20).
+  // Người xem tắt bằng ô "Hiệu ứng chuyển động"; lựa chọn nhớ trong localStorage (hỏng thì bỏ qua).
   var KEY = 'flowanim-motion';
   function override() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
-  function osReduced() {
-    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
-  }
-  function reducedMotion() {
-    var o = override();
-    if (o === 'on') return false;
-    if (o === 'off') return true;
-    return osReduced();
-  }
-  // Ô chọn "Hiệu ứng chuyển động" đặt vào thanh điều khiển của mô phỏng
-  // Hệ điều hành tắt hiệu ứng (ví dụ Windows: Animation effects = Off) mà người xem chưa chọn tay:
-  // hiện lời nhắc ngay cạnh ô, vì nếu không thì bấm nút chỉ thấy số đổi, không thấy gì chạy.
+  function reducedMotion() { return override() === 'off'; }
+  // Ô chọn "Hiệu ứng chuyển động" đặt vào thanh điều khiển của mô phỏng.
   // Mọi ô trên trang đồng bộ với nhau; lựa chọn nhớ theo trang web (localStorage).
   function motionToggle() {
     var lab = document.createElement('label'); lab.className = 'fa-motion';
@@ -48,10 +38,8 @@
     lab.appendChild(box); lab.appendChild(txt);
     function render() {
       box.checked = !reducedMotion();
-      var hint = osReduced() && override() === null;
-      txt.textContent = hint ? ' Hiệu ứng chuyển động (đang tắt theo cài đặt hệ điều hành, tick để bật)' : ' Hiệu ứng chuyển động';
-      txt.style.color = hint ? 'var(--bad)' : '';
-      lab.title = osReduced() ? 'Hệ điều hành đang bật "giảm chuyển động"; tick để vẫn xem hiệu ứng' : 'Bỏ tick để tắt hiệu ứng';
+      txt.textContent = ' Hiệu ứng chuyển động';
+      lab.title = 'Bỏ tick để tắt hiệu ứng';
     }
     lab._render = render;
     box.addEventListener('change', function () {
